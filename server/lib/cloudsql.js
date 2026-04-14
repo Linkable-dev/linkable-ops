@@ -1,0 +1,66 @@
+import { Connector } from "@google-cloud/cloud-sql-connector";
+import pg from "pg";
+
+let pool = null;
+let connector = null;
+
+/**
+ * Returns a pg Pool connected to Cloud SQL via the IAM-based connector.
+ * Bypasses IP whitelisting — works from Vercel serverless functions.
+ *
+ * Required env vars:
+ *   CLOUDSQL_CONNECTION_NAME  – e.g. "my-project:us-central1:my-instance"
+ *   CLOUDSQL_DB               – database name
+ *   CLOUDSQL_USER             – database user
+ *   CLOUDSQL_PASSWORD          – database password (omit if using IAM auth)
+ *   GOOGLE_APPLICATION_CREDENTIALS_JSON – service account key JSON (for Vercel)
+ */
+export async function getCloudSqlPool() {
+  if (pool) return pool;
+
+  // On Vercel, we pass the service account key as a JSON string env var
+  // because we can't write a file to the filesystem reliably.
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const fs = await import("fs");
+    const os = await import("os");
+    const path = await import("path");
+    const tmpPath = path.join(os.default.tmpdir(), "gcp-sa-key.json");
+    fs.default.writeFileSync(tmpPath, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
+  }
+
+  connector = new Connector();
+  const clientOpts = await connector.getOptions({
+    instanceConnectionName: process.env.CLOUDSQL_CONNECTION_NAME,
+    ipType: "PUBLIC",
+  });
+
+  pool = new pg.Pool({
+    ...clientOpts,
+    user: process.env.CLOUDSQL_USER,
+    password: process.env.CLOUDSQL_PASSWORD,
+    database: process.env.CLOUDSQL_DB,
+    max: 5,
+  });
+
+  return pool;
+}
+
+/**
+ * Helper to run a single query against Cloud SQL.
+ * Usage: const { rows } = await cloudSqlQuery("SELECT * FROM foo WHERE id = $1", [123]);
+ */
+export async function cloudSqlQuery(text, params) {
+  const p = await getCloudSqlPool();
+  return p.query(text, params);
+}
+
+/**
+ * Graceful shutdown — call on process exit.
+ */
+export async function closeCloudSql() {
+  if (pool) await pool.end();
+  if (connector) connector.close();
+  pool = null;
+  connector = null;
+}

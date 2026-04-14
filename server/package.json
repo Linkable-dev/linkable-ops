@@ -1,0 +1,19 @@
+{
+  "name": "outboundos-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "outreach": "node automation/run.js",
+    "outreach:dry": "node automation/run.js --dry-run"
+  },
+  "dependencies": {
+    "@google-cloud/cloud-sql-connector": "^1.9.2",
+    "@supabase/supabase-js": "^2.101.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "p-queue": "^8.1.0",
+    "pg": "^8.20.0"
+  }
+}
