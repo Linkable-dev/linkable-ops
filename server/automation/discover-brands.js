@@ -210,10 +210,10 @@ export async function discoverBrands(alreadyProcessed, target = 800) {
   }
   console.log(`    ${discovered.size} new from curated list`);
 
-  // Phase 2: Bing search (if we need more)
-  if (discovered.size < target) {
+  // Phase 2: Bing search (only if curated gives very few results)
+  if (discovered.size < 20) {
     console.log("  Searching Bing for more brands...");
-    const shuffled = [...SEARCH_QUERIES].sort(() => Math.random() - 0.5);
+    const shuffled = [...SEARCH_QUERIES].sort(() => Math.random() - 0.5).slice(0, 5);
 
     for (const query of shuffled) {
       if (discovered.size >= target) break;

@@ -11,10 +11,10 @@ import { discoverBrands } from "./discover-brands.js";
 
 const TEAM_ID = "a0000000-0000-0000-0000-000000000001";
 const MAX_EMAILS = 1000;
-const DEADLINE = new Date(Date.now() + 12 * 3600000); // 12 hours from now
+const DEADLINE = new Date(Date.now() + 2 * 3600000); // 2 hours from now
 const FROM = "Federico from Linkable <brand@linkable.link>";
 const REPLY_TO = "federico@linkable.link";
-const MIN_DELAY = 15000; // minimum 15s between sends
+const MIN_DELAY = 10000; // minimum 10s between sends
 
 const processedDomains = new Set();
 const processedEmails = new Set();
@@ -41,18 +41,36 @@ async function init() {
     .eq("team_id", TEAM_ID).eq("status", "sent");
 
   totalAlreadySent = (existingSends || []).length;
-  for (const s of (existingSends || [])) {
-    if (s.to_email) processedEmails.add(s.to_email.toLowerCase());
-  }
 
-  const sentContactIds = [...new Set((existingSends || []).map(s => s.contact_id).filter(Boolean))];
-  if (sentContactIds.length > 0) {
-    const { data: sentContactDomains } = await supabase
-      .from("contacts").select("domain").in("id", sentContactIds);
-    for (const c of (sentContactDomains || [])) {
-      if (c.domain) processedDomains.add(c.domain.replace(/^www\./, ""));
+  // Extract domains from BOTH the email address AND the contact's domain field
+  for (const s of (existingSends || [])) {
+    if (s.to_email) {
+      processedEmails.add(s.to_email.toLowerCase());
+      // Extract domain from email (most reliable)
+      const emailDomain = s.to_email.split("@")[1]?.toLowerCase();
+      if (emailDomain) {
+        // Strip common subdomain prefixes to get the root brand domain
+        const rootDomain = emailDomain.replace(/^(mail\.|smtp\.|email\.)/, "");
+        processedDomains.add(rootDomain);
+      }
     }
   }
+
+  // Also add domains from linked contacts
+  const sentContactIds = [...new Set((existingSends || []).map(s => s.contact_id).filter(Boolean))];
+  if (sentContactIds.length > 0) {
+    // Batch in chunks of 100 to avoid URL length issues
+    for (let i = 0; i < sentContactIds.length; i += 100) {
+      const chunk = sentContactIds.slice(i, i + 100);
+      const { data: sentContactDomains } = await supabase
+        .from("contacts").select("domain").in("id", chunk);
+      for (const c of (sentContactDomains || [])) {
+        if (c.domain) processedDomains.add(c.domain.replace(/^www\./, "").toLowerCase());
+      }
+    }
+  }
+
+  console.log(`Loaded ${processedEmails.size} emails and ${processedDomains.size} domains already sent.`);
 
   const { data: campaign } = await supabase
     .from("email_campaigns")
@@ -65,7 +83,16 @@ async function init() {
 async function processBrand(domain, index) {
   const cleanDomain = domain.replace(/^www\./, "").replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase();
 
+  // Check multiple domain variations
   if (processedDomains.has(cleanDomain)) return "skip_duplicate";
+  // Also check if any already-sent domain matches the brand root
+  const brandRoot = cleanDomain.split(".")[0];
+  for (const sentDomain of processedDomains) {
+    if (sentDomain.startsWith(brandRoot + ".") || sentDomain === cleanDomain) {
+      processedDomains.add(cleanDomain);
+      return "skip_duplicate";
+    }
+  }
   processedDomains.add(cleanDomain);
 
   if (pastDeadline()) return "deadline";
@@ -90,7 +117,17 @@ async function processBrand(domain, index) {
 
   if (!email) { skipped++; console.log(`  SKIP: no email`); return "skip"; }
   if (processedEmails.has(email.toLowerCase())) { skipped++; console.log(`  SKIP: ${email} already sent`); return "skip"; }
+
+  // Also check if email's domain was already contacted with a different address
+  const emailDomain = email.split("@")[1]?.toLowerCase();
+  if (emailDomain && processedDomains.has(emailDomain)) {
+    skipped++;
+    console.log(`  SKIP: ${emailDomain} already contacted`);
+    return "skip";
+  }
+
   processedEmails.add(email.toLowerCase());
+  if (emailDomain) processedDomains.add(emailDomain);
 
   // CRM
   let contactId = null;
