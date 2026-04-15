@@ -53,10 +53,20 @@ export default function SettingsPage() {
     if (!inviteEmail.trim()) { setInviteError("Email is required"); return; }
     setInviteLoading(true); setInviteError(""); setInviteSuccess("");
     const token = crypto.randomUUID();
-    const { error } = await supabase.from("team_invitations").insert({
-      team_id: teamId, email: inviteEmail.trim().toLowerCase(), role: inviteRole,
-      token, invited_by: user.id,
-    });
+    // Upsert on the (team_id, email) unique constraint so re-inviting an
+    // email whose prior invite was already accepted or revoked just
+    // regenerates a fresh token instead of failing on the duplicate key.
+    const { error } = await supabase.from("team_invitations").upsert(
+      {
+        team_id: teamId,
+        email: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+        token,
+        invited_by: user.id,
+        accepted_at: null,
+      },
+      { onConflict: "team_id,email" }
+    );
     if (error) { setInviteError(error.message); }
     else {
       setInviteSuccess(`${window.location.origin}/invite/${token}`);

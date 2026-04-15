@@ -158,6 +158,146 @@ const CURATED_BRANDS = [
   "bfranklinlondon.co.uk", "spacenk.com", "cultbeauty.co.uk",
   "lookfantastic.com", "beautybay.com", "feelunique.com",
   "beautypie.com", "theordinary.com", "deciem.com",
+
+  // Expansion batch — more DTC Shopify brands
+  // Beauty & Skincare
+  "bybeeofficial.com", "threeshipsbeauty.com", "truly.com", "beautystat.com",
+  "peachslices.com", "glowrecipe.com", "topicals.com", "bubble.com",
+  "skincare.com", "soskinfood.com", "bliss.com", "mariobadescu.com",
+  "formulated-derm.com", "paulapolishark.com", "pharmacal.com",
+  "good-molecules.com", "thebalm.com", "stilacosmetics.com",
+  "becca.com", "physiciansformula.com", "e-l-f.com", "wetnwildbeauty.com",
+  "milaniforless.com", "pfranklinbeauty.com", "beautyblender.com",
+  "realtechniques.com", "tweezerman.com", "bfranklincosmetics.com",
+  "persona.com", "kayali.com", "prada.com", "gucci.com",
+  "ysl.com", "dior.com", "chanel.com", "tomford.com",
+  "esteelauder.com", "lancome.com", "prada-beauty.com",
+  "armanibeauty.com", "valentinobeauty.com", "burberrybeauty.com",
+  "makeupforever.com", "bestsellers.com", "smashbox.com",
+  "colorescience.com", "eauthermale.com", "hydropeptide.com",
+  "isclinical.com", "skinmedica.com", "obagi.com", "revision-skincare.com",
+  "alastin.com", "neocutis.com", "skinbetter.com", "skinceuticals.com",
+  "sente.com", "zo-skin-health.com", "environskincare.com",
+
+  // Haircare
+  "verbproducts.com", "flowerknowsbeauty.com", "iglohair.com",
+  "mariellas.com", "ouai.com", "kitsch.co", "drybar.com",
+  "sunbum.com", "suntegrity.com", "pfranklinhair.com",
+  "kerastasehair.com", "redkencare.com", "joicohair.com",
+  "pureology.com", "kevinmurphy.com.au", "hairitage.com",
+  "hair-gain.com", "hairmax.com", "nutrafol.com",
+  "harklinikken.com", "virtuelabs.com", "color-wow.com",
+
+  // Makeup more
+  "fentyskin.com", "patmcgrathlabs.com", "beautyphysique.com",
+  "dibsbeauty.com", "aboutfacebeauty.com", "scoopbeauty.com",
+  "rabannedparfums.com", "shoushou.co", "freckbeauty.com",
+  "ctzncosmetics.com", "vedistinct.com", "fwee.co.kr",
+
+  // Wellness Supplements
+  "earthecho.com", "cymbiotika.com", "arreosupplements.com",
+  "nuzest.com", "rootine.co", "persona.com", "noomii.com",
+  "drinklmnt.com", "biote.com", "oneskin.co", "thorne.com",
+  "pure-encapsulations.com", "douglaslabs.com", "metagenics.com",
+  "designsforhealth.com", "trushealthy.com", "equilife.com",
+  "truenutrition.com", "drinkwinters.com", "roar-drinks.com",
+  "cleanfuelusa.com", "kyo-dophilus.com", "lovelydelights.com",
+
+  // Fashion DTC
+  "entireworld.com", "cuyana.com", "bylt.com", "lunya.co",
+  "soma.com", "alala.com", "talentcraft.com", "girlfriend-collective.com",
+  "spanx.com", "honeylove.com", "thirdlove.com", "cuup.com",
+  "livelybyfranklin.com", "parade.com", "aerie.com", "american-eagle.com",
+  "revolve.com", "farfetch.com", "net-a-porter.com", "ssense.com",
+  "matchesfashion.com", "mytheresa.com", "nordstromrack.com",
+  "carbon38.com", "yogaindirect.com", "beyondyoga.com",
+  "vitalproteins.com", "popflex-active.com", "outdoorresearch.com",
+  "marmot.com", "mountain-hardware.com", "arcteryx.com",
+  "colehaan.com", "mrmoral.com", "tommyjohn.com", "onepiece.com",
+  "koio.co", "sezane.com", "rouje.com", "freepeople.com",
+  "anthropologie.com", "urbanoutfitters.com",
+
+  // Men's fashion/grooming
+  "bonobos.com", "indochino.com", "suitsupply.com", "johnvarvatos.com",
+  "theblacktux.com", "generationtux.com", "suitshop.com",
+  "mens-society.com", "dfranklincamden.co.uk", "oakandtower.com",
+  "lumin-skin.com", "tiegeshaven.com", "hucknberry.com",
+  "fillnexus.com", "thetiebar.com", "pfranklinshirts.com",
+
+  // Jewelry more
+  "kataoka-japan.com", "pragmatic-jewelry.com", "sfranklinjewels.com",
+  "mikimoto.com", "tiffany.com", "bvlgari.com", "cartier.com",
+  "harrywinston.com", "vancleefarpels.com", "buccellati.com",
+  "chaumet.com", "davidyurman.com", "roberto-coin.com",
+  "verragio.com", "zales.com", "kay.com", "jared.com",
+
+  // Food & Beverage
+  "factory.com", "misfitsmarket.com", "imperfectfoods.com", "blueapron.com",
+  "hellofresh.com", "home-chef.com", "sunbasket.com", "freshly.com",
+  "dailyharvest.com", "theranchonline.com", "crowdcow.com",
+  "thrivemarket.com", "vitalchoice.com", "butcherbox.com",
+  "rasterize.com", "primalkitchen.com", "paleovalley.com",
+  "nonutsmoose.com", "madegoodfoods.com", "simplemills.com",
+  "nakedjuice.com", "hydrant.com", "jonesco.com", "drinkwildwonder.com",
+  "bubly.com", "olipop.com", "cultsofcultivation.com",
+
+  // Home
+  "crate-and-barrel.com", "westelm.com", "cb2.com", "potterybarn.com",
+  "rejuvenation.com", "serenaandlily.com", "onekings-lane.com",
+  "anthropologie.com", "ritualpantry.com", "material-kitchen.com",
+  "fulton.com", "rothy.com", "yeti.com", "rtic.com",
+  "stanley1913.com", "sfranklinware.com",
+
+  // Pets
+  "bocce-bakery.com", "diggs.com", "fable.co", "pfranklinpawsome.com",
+  "rovercom.com", "maxbone.com", "wildforcats.com", "welovetashi.com",
+  "spotandco.com", "beesandyou.com", "bunkers.com",
+  "nutrition4dogs.com", "pooddogfood.com", "kiwicolab.com",
+
+  // Fitness
+  "bala.co", "onnit.com", "flexoffers.com", "athleticbrewing.com",
+  "gaiam.com", "alo-moves.com", "peloton.com", "echelonfit.com",
+  "bowflex.com", "nordictrack.com", "horizonfitness.com",
+  "concept2.com", "sofrankenfitness.com", "liftinghub.com",
+
+  // Baby & Kids
+  "frida.com", "mushiemushie.com", "keekaroo.com", "copperpearl.com",
+  "nestbedding.com", "babyletto.com", "nunababy.com", "upppa.com",
+  "bugaboo.com", "stokkebrand.com", "uppababy.com", "cybex-online.com",
+  "bjornbrand.com", "ergobaby.com",
+
+  // Outdoor
+  "cotopaxi.com", "prana.com", "kuhl.com", "fjallravenusa.com",
+  "northface.com", "columbia.com", "thenorthface.com", "salomon.com",
+  "merrell.com", "keenfootwear.com", "chacousa.com", "tevaworld.com",
+  "oofosrecovery.com", "hokaoneone.com", "ondaymoving.com",
+  "brooksrunning.com", "newbalance.com", "asics.com", "sauconybrand.com",
+
+  // Travel/Luggage
+  "tumi.com", "samsonite.com", "awaytravel.com", "briggs-riley.com",
+  "paravel-franklin.com", "sfranklinluggage.com", "topotravel.com",
+
+  // Sleep
+  "purple.com", "dreamcloudsleep.com", "nectarsleep.com", "layla.com",
+  "leesa.com", "casper.com", "avocadogreenmattress.com",
+  "sunsetbedding.com", "quincemattress.com",
+
+  // Eyewear
+  "eyebuydirect.com", "zennioptical.com", "lenscrafters.com", "ray-ban.com",
+  "oakley.com", "persol.com", "maui-jim.com", "quayaustralia.com",
+  "diffeyewear.com", "privereuves.com", "moscotonline.com",
+
+  // Tech accessories
+  "casetify.com", "peakdesign.com", "nomadgoods.com", "otterbox.com",
+  "anker.com", "native-union.com", "paperstories.com", "leatherology.com",
+  "bellroy.com", "mahiaesthetics.com",
+
+  // Sustainable/Eco
+  "grove.co", "ecology.com", "who-gives-a-crap.com", "tushy.com",
+  "boxednatural.com", "druide.com", "primallypure.com", "beautycounter.com",
+  "pursoma.com", "pangaia.com", "ahnu.com",
+
+  // Marketplaces and retailers (removed: shopify.com, ulta.com, sephora.com, nordstrom.com, etsy.com, etc.)
 ];
 
 // Search Bing for more brands
