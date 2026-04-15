@@ -1,214 +1,98 @@
-// Deep brand scraping: extract brand info + emails from the actual website
-// Used to personalize outreach emails with real brand context
+// Fast brand scraping: homepage + contact page only
+// Finds emails and basic brand context in ~2-3 seconds per brand
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Pages to scrape for brand info
-const INFO_PATHS = ["/", "/pages/about", "/about", "/about-us", "/pages/about-us", "/pages/our-story", "/our-story"];
+const JUNK_DOMAINS = ["shopify.com", "klaviyo.com", "mailchimp.com", "sentry.io", "gorgias.com", "zendesk.com", "freshdesk.com"];
 
-// Pages to scrape for emails
-const EMAIL_PATHS = [
-  "/pages/contact", "/contact", "/contact-us", "/pages/contact-us",
-  "/pages/about", "/about", "/about-us", "/pages/about-us",
-  "/pages/our-story", "/our-story",
-  "/pages/partnerships", "/partnerships", "/pages/collaborate", "/collaborate",
-  "/pages/press", "/press",
-  "/", "/pages/faq",
-];
-
-// Extract emails from text
 function extractEmails(text) {
-  const re = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const matches = text.match(re) || [];
-  return matches.filter(e => {
-    const l = e.toLowerCase();
-    return !l.includes("noreply") && !l.includes("no-reply") &&
-      !l.includes("unsubscribe") && !l.includes("mailer-daemon") &&
-      !l.includes("postmaster") && !l.includes("example.com") &&
-      !l.includes("sentry.io") && !l.includes("shopify.com") &&
-      !l.includes("klaviyo") && !l.includes("mailchimp") &&
-      !l.includes("wix.com") && !l.includes("squarespace") &&
-      !l.endsWith(".png") && !l.endsWith(".jpg") && !l.endsWith(".svg");
-  });
+  return (text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [])
+    .filter(e => {
+      const l = e.toLowerCase();
+      return !l.includes("noreply") && !l.includes("unsubscribe") && !l.includes("mailer-daemon") &&
+        !l.includes("postmaster") && !l.includes("example.com") &&
+        !JUNK_DOMAINS.some(d => l.includes(d)) &&
+        !l.endsWith(".png") && !l.endsWith(".jpg") && !l.endsWith(".svg");
+    });
 }
 
-// Score emails — higher = more useful for outreach
 function scoreEmail(email, domain) {
   const local = email.split("@")[0].toLowerCase();
   const emailDomain = email.split("@")[1].toLowerCase();
   const brandDomain = domain.replace(/^www\./, "").split(".")[0];
   let score = 0;
-
-  // Must be from brand's own domain
-  if (emailDomain.includes(brandDomain)) score += 10;
-  else return -10; // third-party domain = not useful
-
-  // Founder/owner/personal patterns (best for cold outreach)
+  if (emailDomain.includes(brandDomain)) score += 10; else return -10;
   if (["founder", "ceo", "owner"].some(k => local.includes(k))) score += 8;
-  // Named emails (e.g. "sarah@", "james@") — likely a person
-  if (/^[a-z]{2,12}$/.test(local) && !["info", "hello", "hi", "contact", "help", "support", "team", "admin", "press", "sales", "order", "orders", "return", "returns", "jobs", "careers", "legal", "billing", "wholesale", "privacy", "noreply"].includes(local)) score += 7;
-  // First.last patterns
   if (/^[a-z]+\.[a-z]+$/.test(local)) score += 7;
-  // Marketing/partnerships (relevant for our pitch)
-  if (["marketing", "partnerships", "collab", "brand", "press", "pr", "growth"].some(k => local.includes(k))) score += 6;
-  // Generic but OK
+  if (/^[a-z]{2,12}$/.test(local) && !["info", "hello", "hi", "contact", "help", "support", "team", "admin", "press", "sales", "order", "orders", "return", "returns", "jobs", "careers", "legal", "billing", "wholesale", "privacy", "noreply"].includes(local)) score += 7;
+  if (["marketing", "partnerships", "collab", "brand", "press", "pr", "growth", "creators"].some(k => local.includes(k))) score += 6;
   if (["hello", "hi", "info", "contact"].includes(local)) score += 3;
-  // Bad for outreach
   if (["support", "help", "orders", "returns", "billing", "legal", "jobs", "careers", "wholesale", "privacy"].some(k => local.includes(k))) score -= 5;
-
   return score;
 }
 
-// Fetch a page and return text content (stripped of HTML)
-async function fetchPage(url) {
+async function fetchFast(url) {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA },
-      signal: AbortSignal.timeout(10000),
-      redirect: "follow",
-    });
+    const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(5000), redirect: "follow" });
     if (!res.ok) return null;
-    const html = await res.text();
-    return html;
-  } catch {
-    return null;
-  }
+    return await res.text();
+  } catch { return null; }
 }
 
-// Strip HTML tags and extract readable text
 function htmlToText(html) {
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
-    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#\d+;/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 }
 
-// Extract brand context from page text
-function extractBrandInfo(text, domain) {
-  const lower = text.toLowerCase();
-  const info = {
-    hasCreators: false,
-    hasAffiliates: false,
-    hasInfluencers: false,
-    hasSocialCommerce: false,
-    founderName: null,
-    brandStory: null,
-    usp: null,
-  };
-
-  // Check for creator/affiliate/influencer mentions
-  info.hasCreators = /\bcreator[s]?\b/i.test(text);
-  info.hasAffiliates = /\baffiliate[s]?\b/i.test(text);
-  info.hasInfluencers = /\binfluencer[s]?\b/i.test(text);
-  info.hasSocialCommerce = info.hasCreators || info.hasAffiliates || info.hasInfluencers ||
-    /\bambassador[s]?\b/i.test(text) || /\bcollaboration[s]?\b/i.test(text);
-
-  // Try to extract founder name
-  const founderMatch = text.match(/(?:founded by|founder[,:]?\s+|created by|started by|co-founded by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
-  if (founderMatch) info.founderName = founderMatch[1].trim();
-
-  // Extract brand story snippet (first ~200 chars from about page)
-  const storyPatterns = [
-    /(?:our story|about us|who we are|our mission)[:\s]*([^.!?]{20,200}[.!?])/i,
-    /(?:we believe|we started|we created|we're on a mission|born from)[^.!?]{10,200}[.!?]/i,
-  ];
-  for (const pattern of storyPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      info.brandStory = (match[1] || match[0]).trim().slice(0, 250);
-      break;
-    }
-  }
-
-  // Extract USP
-  const uspPatterns = [
-    /(?:what makes us different|why choose|our promise|we're different)[:\s]*([^.!?]{10,200}[.!?])/i,
-    /(?:clean|vegan|cruelty-free|organic|sustainable|natural|science-backed|clinically proven|dermatologist)[^.!?]{5,100}[.!?]/i,
-  ];
-  for (const pattern of uspPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      info.usp = (match[1] || match[0]).trim().slice(0, 200);
-      break;
-    }
-  }
-
-  return info;
-}
-
-/**
- * Deep scrape a brand's website for emails and brand context
- * Returns { emails, brandInfo }
- */
 export async function scrapeBrand(domain) {
   const cleanDomain = domain.replace(/^www\./, "");
   const allEmails = new Set();
-  const allText = [];
 
-  // Dedupe paths
-  const uniquePaths = [...new Set([...EMAIL_PATHS, ...INFO_PATHS])];
-  const aboutText = []; // prioritize about pages for brand context
+  // Fetch homepage + contact page in parallel
+  const [homepageHtml, contactHtml] = await Promise.all([
+    fetchFast(`https://${cleanDomain}`),
+    fetchFast(`https://${cleanDomain}/pages/contact`),
+  ]);
 
-  // Scrape all pages
-  for (const path of uniquePaths) {
-    const html = await fetchPage(`https://${cleanDomain}${path}`);
+  // Extract emails from both
+  for (const html of [homepageHtml, contactHtml]) {
     if (!html) continue;
-
-    // Extract emails from raw HTML (catches mailto: links too)
     extractEmails(html).forEach(e => allEmails.add(e.toLowerCase()));
-
-    // Extract mailto: links
-    const mailtoMatches = html.match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || [];
-    mailtoMatches.forEach(m => {
-      const email = m.replace("mailto:", "").split("?")[0].toLowerCase();
-      allEmails.add(email);
-    });
-
-    // Extract text — prioritize about/story pages for brand context
-    const text = htmlToText(html);
-    if (text.length > 50) {
-      const isAboutPage = /about|story|mission/i.test(path);
-      if (isAboutPage) {
-        aboutText.push(text);
-      } else {
-        allText.push(text);
-      }
-    }
+    const mailtos = html.match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || [];
+    mailtos.forEach(m => allEmails.add(m.replace("mailto:", "").split("?")[0].toLowerCase()));
   }
 
-  // Score and rank emails
+  // Score real emails
   const scored = [...allEmails]
     .map(e => ({ email: e, score: scoreEmail(e, cleanDomain) }))
     .filter(e => e.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  // Add common guesses if we found nothing
+  const realCount = scored.length;
+
+  // Fallback: common patterns
   if (scored.length === 0) {
-    const guesses = [`hello@${cleanDomain}`, `info@${cleanDomain}`, `contact@${cleanDomain}`, `hi@${cleanDomain}`];
-    for (const g of guesses) {
-      scored.push({ email: g, score: 1, guessed: true });
-    }
+    scored.push({ email: `hello@${cleanDomain}`, score: 1 });
+    scored.push({ email: `info@${cleanDomain}`, score: 1 });
   }
 
-  // Extract brand info — about pages first, then other pages as fallback
-  const combinedText = [...aboutText, ...allText].join(" ").slice(0, 10000);
-  const brandInfo = extractBrandInfo(combinedText, cleanDomain);
+  // Brand info from homepage text
+  const text = homepageHtml ? htmlToText(homepageHtml).slice(0, 5000) : "";
+  const brandInfo = {
+    hasCreators: /\bcreator[s]?\b/i.test(text),
+    hasAffiliates: /\baffiliate[s]?\b/i.test(text),
+    hasInfluencers: /\binfluencer[s]?\b/i.test(text),
+    hasSocialCommerce: /creator|affiliate|influencer|ambassador/i.test(text),
+    founderName: (text.match(/(?:founded by|founder[,:]?\s+|created by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/)?.[1] || null),
+    brandStory: (text.match(/(?:our story|about us|who we are|our mission|we believe|we started)[:\s]*([^.!?]{20,200}[.!?])/i)?.[1] || null),
+    usp: null,
+  };
 
   return {
     domain: cleanDomain,
     emails: scored.map(e => e.email),
-    bestEmail: scored[0]?.email || `hello@${cleanDomain}`,
-    emailCount: scored.filter(e => !e.guessed).length,
+    bestEmail: scored[0]?.email || null,
+    emailCount: realCount,
+    foundOnSite: realCount > 0,
     brandInfo,
   };
 }

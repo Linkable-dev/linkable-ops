@@ -1,23 +1,23 @@
 import { useState, useCallback } from "react";
-import { useLocation } from "react-router-dom";
-import { useKB } from "../../contexts/KBContext";
+import { useLocation, useParams } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
-import { OPS_PHASES, CRM_SECTIONS, PHASE_SUBTITLES } from "../../lib/constants";
 
 function getPageInfo(pathname) {
-  for (const phase of OPS_PHASES) {
-    if (pathname.startsWith(phase.path)) return { title: phase.label, subtitle: PHASE_SUBTITLES[phase.id] || "" };
+  if (pathname === "/") return { title: "Dashboard", subtitle: "Database overview and analytics" };
+  const match = pathname.match(/^\/tables\/([^/]+)/);
+  if (match) {
+    const table = match[1].replace(/_/g, " ");
+    if (pathname.endsWith("/analytics")) return { title: `${table}`, subtitle: "Analytics" };
+    if (pathname.endsWith("/new")) return { title: `${table}`, subtitle: "New record" };
+    const idMatch = pathname.match(/^\/tables\/[^/]+\/(.+)$/);
+    if (idMatch && idMatch[1] !== "analytics" && idMatch[1] !== "new") return { title: `${table}`, subtitle: `Record #${idMatch[1]}` };
+    return { title: table, subtitle: "Browse and manage records" };
   }
-  for (const section of CRM_SECTIONS) {
-    if (pathname.startsWith(section.path)) return { title: `CRM / ${section.label}`, subtitle: "" };
-  }
-  if (pathname.startsWith("/settings")) return { title: "Settings", subtitle: "Manage your account and team" };
-  return { title: "Dashboard", subtitle: "" };
+  return { title: "Admin", subtitle: "" };
 }
 
 export default function Header() {
   const location = useLocation();
-  const { kb } = useKB();
   const { theme, mode, toggleTheme } = useTheme();
   const { title, subtitle } = getPageInfo(location.pathname);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
@@ -46,22 +46,20 @@ export default function Header() {
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "0 24px", zIndex: 90, transition: "background 0.2s, border-color 0.2s",
     }}>
-      {/* Left: page title */}
       <div>
-        <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: theme.text, letterSpacing: -0.2 }}>{title}</h1>
+        <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: theme.text, letterSpacing: -0.2, textTransform: "capitalize" }}>{title}</h1>
         {subtitle && <p style={{ margin: 0, fontSize: 12, color: theme.textMuted, marginTop: 1 }}>{subtitle}</p>}
       </div>
 
-      {/* Right: KB status + controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{
           display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500,
           padding: "4px 10px", borderRadius: 20,
-          background: kb.onboardingComplete ? (mode === "dark" ? "#052e16" : "#F0FDF4") : theme.accentLight,
-          color: kb.onboardingComplete ? "#22C55E" : theme.textMuted,
+          background: mode === "dark" ? "#052e16" : "#F0FDF4",
+          color: "#22C55E",
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: kb.onboardingComplete ? "#22C55E" : theme.textMuted }} />
-          {kb.onboardingComplete ? "KB Active" : "KB Incomplete"}
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E" }} />
+          Cloud SQL
         </div>
 
         {iconBtn(toggleFullscreen, isFullscreen ? "Exit fullscreen" : "Fullscreen",

@@ -1,5 +1,21 @@
 import { Connector } from "@google-cloud/cloud-sql-connector";
 import pg from "pg";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+// Load .env for local dev
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envPath = join(__dirname, "..", ".env");
+try {
+  const envContent = readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const [key, ...rest] = line.split("=");
+    if (key && rest.length && !process.env[key.trim()]) {
+      process.env[key.trim()] = rest.join("=").trim();
+    }
+  }
+} catch {}
 
 let pool = null;
 let connector = null;

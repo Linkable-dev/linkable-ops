@@ -10,7 +10,11 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* Consistent select styling — matches Input component height */
+@keyframes skeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 select {
   appearance: none;
   -webkit-appearance: none;
@@ -25,3 +29,8 @@ select {
   background-position: right 12px center;
   cursor: pointer;
 }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #ccc; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #aaa; }

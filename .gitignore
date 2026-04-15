@@ -15,6 +15,11 @@ server/.env
 dist-ssr
 *.local
 
+# Google Cloud service account keys — never commit
+linkable-*.json
+*-service-account*.json
+gcp-*.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

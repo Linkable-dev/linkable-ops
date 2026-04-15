@@ -4,117 +4,91 @@ import { supabase } from "../lib/supabase";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [team, setTeam] = useState(null);
+  const [session, setSession] = useState(null);
+  const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
 
-  async function fetchProfileAndTeam(userId) {
-    const { data: profileData, error: profileErr } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (profileErr || !profileData) {
-      setProfile(null);
-      setTeam(null);
-      return;
-    }
-
-    setProfile(profileData);
-
-    if (profileData.team_id) {
-      const { data: teamData } = await supabase
-        .from("teams")
-        .select("*")
-        .eq("id", profileData.team_id)
-        .single();
-      setTeam(teamData ?? null);
-    } else {
-      setTeam(null);
+  // Check if Supabase user is a whitelisted admin
+  async function checkAdmin(accessToken) {
+    try {
+      const res = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        setAdmin(await res.json());
+        setAccessDenied(false);
+      } else if (res.status === 403) {
+        setAdmin(null);
+        setAccessDenied(true);
+      } else {
+        setAdmin(null);
+      }
+    } catch {
+      setAdmin(null);
     }
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      if (currentUser) {
-        fetchProfileAndTeam(currentUser.id).finally(() => setLoading(false));
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      if (s?.access_token) {
+        checkAdmin(s.access_token).finally(() => setLoading(false));
       } else {
         setLoading(false);
       }
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      if (currentUser) {
-        fetchProfileAndTeam(currentUser.id).finally(() => setLoading(false));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      if (s?.access_token) {
+        checkAdmin(s.access_token);
       } else {
-        setProfile(null);
-        setTeam(null);
-        setLoading(false);
+        setAdmin(null);
+        setAccessDenied(false);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  async function signIn(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  const login = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
-  }
-
-  async function signInWithGoogle() {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-    });
-    if (error) throw error;
-    return data;
-  }
-
-  async function signUp(email, password, fullName) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    if (error) throw error;
-    return data;
-  }
-
-  async function signOut() {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setUser(null);
-    setProfile(null);
-    setTeam(null);
-  }
-
-  const value = {
-    user,
-    profile,
-    team,
-    loading,
-    signIn,
-    signInWithGoogle,
-    signUp,
-    signOut,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  const signUp = async (email, password, name) => {
+    const { data, error } = await supabase.auth.signUp({
+      email, password,
+      options: { data: { full_name: name } },
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setAdmin(null);
+    setAccessDenied(false);
+  };
+
+  // Get the current access token for API calls (always fresh)
+  const getToken = async () => {
+    const { data: { session: s } } = await supabase.auth.getSession();
+    return s?.access_token || null;
+  };
+
+  return (
+    <AuthContext.Provider value={{ session, admin, loading, accessDenied, login, signUp, logout, getToken }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }

@@ -256,8 +256,8 @@ export async function runOutreach(teamId, config = {}) {
             }
           }
 
-          // Fill missing email from scrape
-          if (!contact.email && brandData.bestEmail) {
+          // Fill missing email from scrape — only if actually found on website
+          if (!contact.email && brandData.bestEmail && brandData.emailCount > 0) {
             contact.email = brandData.bestEmail;
             await supabase.from("contacts").update({ email: brandData.bestEmail }).eq("id", contact.id);
             console.log(`    Email found: ${brandData.bestEmail}`);
@@ -275,10 +275,12 @@ export async function runOutreach(teamId, config = {}) {
         continue;
       }
 
-      // Step 2: Determine product type
+      // Step 2: Determine product type using all available data
       const matchedKeywords = contact._scraperData?.matched_keywords || contact.category?.split(", ") || [];
       const sampleTypes = contact._scraperData?.sample_types || [];
-      const productType = getPrimaryProductType(matchedKeywords, sampleTypes);
+      const bi = brandData?.brandInfo || {};
+      const brandText = [bi.brandStory || "", bi.usp || "", contact.domain || ""].join(" ");
+      const productType = getPrimaryProductType(matchedKeywords, sampleTypes, brandText);
 
       // Step 3: Generate AI observation (Template D) using scraped brand context
       let observation = "";

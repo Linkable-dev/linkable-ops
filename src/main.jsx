@@ -1,54 +1,39 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./contexts/AuthContext";
-import { KBProvider } from "./contexts/KBContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import ProtectedRoute from "./components/layout/ProtectedRoute";
+import { AuthProvider } from "./contexts/AuthContext";
+import AuthGate from "./components/layout/AuthGate";
 import App from "./App";
-import LoginPage from "./pages/auth/LoginPage";
-import AcceptInvitePage from "./pages/auth/AcceptInvitePage";
-import OnboardingPage from "./pages/ops/OnboardingPage";
-import BuildListPage from "./pages/ops/BuildListPage";
-import BuildOfferPage from "./pages/ops/BuildOfferPage";
-import CampaignPage from "./pages/ops/CampaignPage";
-import ContentPage from "./pages/ops/ContentPage";
-import LeadsPage from "./pages/ops/LeadsPage";
-import PerformancePage from "./pages/ops/PerformancePage";
-import ContactsPage from "./pages/crm/ContactsPage";
-import PipelinePage from "./pages/crm/PipelinePage";
-import ScraperPage from "./pages/crm/ScraperPage";
-import OutreachPage from "./pages/crm/OutreachPage";
-import SettingsPage from "./pages/settings/SettingsPage";
+import DashboardPage from "./pages/DashboardPage";
+import CampaignsOpsPage from "./pages/CampaignsOpsPage";
+import TablePage from "./pages/TablePage";
+import TableAnalyticsPage from "./pages/TableAnalyticsPage";
+import TeamPage from "./pages/TeamPage";
+import SetupPasswordPage from "./pages/SetupPasswordPage";
+import AcceptInvitePage from "./pages/AcceptInvitePage";
 import "./index.css";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <ThemeProvider>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/invite/:token" element={<AcceptInvitePage />} />
-          <Route element={<ProtectedRoute />}>
-            <Route element={<KBProvider><App /></KBProvider>}>
-              <Route path="/" element={<Navigate to="/ops/onboarding" replace />} />
-              <Route path="/ops/onboarding" element={<OnboardingPage />} />
-              <Route path="/ops/build-list" element={<BuildListPage />} />
-              <Route path="/ops/build-offer" element={<BuildOfferPage />} />
-              <Route path="/ops/campaign" element={<CampaignPage />} />
-              <Route path="/ops/content" element={<ContentPage />} />
-              <Route path="/ops/leads" element={<LeadsPage />} />
-              <Route path="/ops/performance" element={<PerformancePage />} />
-              <Route path="/crm/contacts" element={<ContactsPage />} />
-              <Route path="/crm/pipeline" element={<PipelinePage />} />
-              <Route path="/crm/scraper" element={<ScraperPage />} />
-              <Route path="/crm/outreach" element={<OutreachPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+        <AuthProvider>
+          <Routes>
+            <Route path="/setup-password" element={<SetupPasswordPage />} />
+            <Route path="/accept-invite" element={<AcceptInvitePage />} />
+            <Route element={<AuthGate />}>
+              <Route element={<App />}>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
+                <Route path="/tables/:table" element={<TablePage />} />
+                <Route path="/tables/:table/analytics" element={<TableAnalyticsPage />} />
+                <Route path="/team" element={<TeamPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
             </Route>
-          </Route>
-        </Routes>
-      </AuthProvider>
+          </Routes>
+        </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>
   </StrictMode>
