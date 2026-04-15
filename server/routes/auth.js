@@ -106,13 +106,20 @@ export function authRoutes() {
         const teamId = teams?.[0]?.id;
         if (!teamId) return res.status(500).json({ error: "No team found in Supabase. Create one first." });
 
-        // Insert a team_invitations row (the trigger will consume it)
-        const { error: inviteErr } = await supabase.from("team_invitations").insert({
-          email: email.toLowerCase(),
-          team_id: teamId,
-          role: "admin",
-          expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 min window
-        });
+        // Upsert a team_invitations row so the handle_new_user trigger can consume it.
+        // Using upsert avoids colliding with a leftover row from a previous flow
+        // (the unique constraint is on team_id+email and the trigger doesn't always
+        // clean up reliably).
+        const { error: inviteErr } = await supabase.from("team_invitations").upsert(
+          {
+            email: email.toLowerCase(),
+            team_id: teamId,
+            role: "admin",
+            expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 min window
+            accepted_at: null,
+          },
+          { onConflict: "team_id,email" }
+        );
         if (inviteErr) return res.status(500).json({ error: `Could not create team invitation: ${inviteErr.message}` });
 
         // Now create the Supabase user — the trigger will fire and consume the invitation

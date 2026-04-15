@@ -118,11 +118,11 @@ async function processBrand(domain, index) {
   if (!email) { skipped++; console.log(`  SKIP: no email`); return "skip"; }
   if (processedEmails.has(email.toLowerCase())) { skipped++; console.log(`  SKIP: ${email} already sent`); return "skip"; }
 
-  // Also check if email's domain was already contacted with a different address
+  // Check if email's domain was already contacted (different from current domain)
   const emailDomain = email.split("@")[1]?.toLowerCase();
-  if (emailDomain && processedDomains.has(emailDomain)) {
+  if (emailDomain && emailDomain !== cleanDomain && processedDomains.has(emailDomain)) {
     skipped++;
-    console.log(`  SKIP: ${emailDomain} already contacted`);
+    console.log(`  SKIP: ${emailDomain} already contacted via different domain`);
     return "skip";
   }
 
