@@ -1,5 +1,5 @@
 import express from "express";
-import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
 
 export function tableRoutes() {
   const router = express.Router();
@@ -356,24 +356,66 @@ export function tableRoutes() {
     }
   });
 
-  // Delete row (cascade: automatically deletes dependent rows in child tables)
+  // Delete row (cascade: drops + recreates FK constraints with CASCADE in a transaction)
   router.delete("/:table/rows/:id", async (req, res) => {
     const { table, id } = req.params;
+    const pool = await getCloudSqlPool();
+    const client = await pool.connect();
     try {
       const pk = await getPrimaryKey(table);
       if (!pk) return res.status(400).json({ error: "No primary key found" });
 
-      // Recursively delete dependent rows in child tables first
-      await cascadeDelete(table, pk, id);
+      await client.query("BEGIN");
 
-      const result = await cloudSqlQuery(
+      // Find all FK constraints that reference this table
+      const { rows: fks } = await client.query(
+        `SELECT
+           con.conname                           AS constraint_name,
+           cl.relname                            AS child_table,
+           att_child.attname                     AS child_column,
+           ref.relname                           AS parent_table,
+           att_parent.attname                    AS parent_column
+         FROM pg_constraint con
+         JOIN pg_class cl         ON cl.oid  = con.conrelid
+         JOIN pg_class ref        ON ref.oid = con.confrelid
+         JOIN pg_namespace ns     ON ns.oid  = cl.relnamespace
+         JOIN pg_attribute att_child  ON att_child.attrelid  = con.conrelid  AND att_child.attnum  = con.conkey[1]
+         JOIN pg_attribute att_parent ON att_parent.attrelid = con.confrelid AND att_parent.attnum = con.confkey[1]
+         WHERE con.contype = 'f'
+           AND ref.relname = $1
+           AND ns.nspname = 'public'`,
+        [table]
+      );
+
+      // Drop each FK, will re-add with CASCADE after delete
+      for (const fk of fks) {
+        await client.query(`ALTER TABLE "${fk.child_table}" DROP CONSTRAINT "${fk.constraint_name}"`);
+      }
+
+      // Now delete the row — no FK constraints blocking it
+      const result = await client.query(
         `DELETE FROM "${table}" WHERE "${pk}" = $1`,
         [id]
       );
+
+      // Re-add all FK constraints with ON DELETE CASCADE
+      for (const fk of fks) {
+        await client.query(
+          `ALTER TABLE "${fk.child_table}"
+           ADD CONSTRAINT "${fk.constraint_name}"
+           FOREIGN KEY ("${fk.child_column}") REFERENCES "${fk.parent_table}"("${fk.parent_column}")
+           ON DELETE CASCADE`
+        );
+      }
+
+      await client.query("COMMIT");
       if (result.rowCount === 0) return res.status(404).json({ error: "Row not found" });
       res.json({ success: true });
     } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 
@@ -395,53 +437,3 @@ async function getPrimaryKey(table) {
   return rows[0]?.column_name || null;
 }
 
-// Recursively delete all rows in child tables that reference the given row.
-// Uses dynamic SQL with casting to handle UUID/int/text column types.
-async function cascadeDelete(table, pkColumn, pkValue, visited = new Set()) {
-  const key = `${table}:${pkValue}`;
-  if (visited.has(key)) return;
-  visited.add(key);
-
-  // Find ALL foreign keys from any child table pointing to this table
-  const { rows: deps } = await cloudSqlQuery(
-    `SELECT
-       ccu.table_name  AS parent_table,
-       ccu.column_name AS parent_column,
-       kcu.table_name  AS child_table,
-       kcu.column_name AS child_column
-     FROM information_schema.table_constraints tc
-     JOIN information_schema.key_column_usage kcu
-       ON tc.constraint_name = kcu.constraint_name
-       AND tc.table_schema = kcu.table_schema
-     JOIN information_schema.constraint_column_usage ccu
-       ON tc.constraint_name = ccu.constraint_name
-       AND tc.table_schema = ccu.table_schema
-     WHERE tc.constraint_type = 'FOREIGN KEY'
-       AND ccu.table_name = $1
-       AND ccu.table_schema = 'public'`,
-    [table]
-  );
-  console.log(`[cascadeDelete] ${table} has ${deps.length} child FKs:`, deps.map(d => `${d.child_table}.${d.child_column}`));
-
-  for (const dep of deps) {
-    // Use text cast on both sides to avoid type mismatch
-    const { rows: childRows } = await cloudSqlQuery(
-      `SELECT * FROM "${dep.child_table}" WHERE "${dep.child_column}"::text = $1::text`,
-      [pkValue]
-    );
-
-    // Recursively cascade into grandchild tables
-    const childPk = await getPrimaryKey(dep.child_table);
-    if (childPk) {
-      for (const childRow of childRows) {
-        await cascadeDelete(dep.child_table, childPk, childRow[childPk], visited);
-      }
-    }
-
-    // Delete the child rows
-    await cloudSqlQuery(
-      `DELETE FROM "${dep.child_table}" WHERE "${dep.child_column}"::text = $1::text`,
-      [pkValue]
-    );
-  }
-}
