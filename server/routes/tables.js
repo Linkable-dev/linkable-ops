@@ -401,22 +401,20 @@ async function cascadeDelete(table, pkColumn, pkValue, visited = new Set()) {
   if (visited.has(key)) return;
   visited.add(key);
 
-  // Find all foreign keys that reference this table's primary key
+  // Find ALL foreign keys from any child table pointing to this table's PK
   const { rows: deps } = await cloudSqlQuery(
     `SELECT
-       kcu.table_name  AS child_table,
-       kcu.column_name AS child_column
-     FROM information_schema.referential_constraints rc
-     JOIN information_schema.key_column_usage kcu
-       ON kcu.constraint_name = rc.constraint_name
-       AND kcu.constraint_schema = rc.constraint_schema
-     JOIN information_schema.key_column_usage rcu
-       ON rcu.constraint_name = rc.unique_constraint_name
-       AND rcu.constraint_schema = rc.unique_constraint_schema
-     WHERE rcu.table_name = $1
-       AND rcu.column_name = $2
-       AND rcu.table_schema = 'public'`,
-    [table, pkColumn]
+       cl.relname       AS child_table,
+       att2.attname      AS child_column
+     FROM pg_constraint con
+     JOIN pg_class cl       ON cl.oid = con.conrelid
+     JOIN pg_class ref      ON ref.oid = con.confrelid
+     JOIN pg_namespace ns   ON ns.oid = ref.relnamespace
+     JOIN pg_attribute att2 ON att2.attrelid = con.conrelid AND att2.attnum = ANY(con.conkey)
+     WHERE con.contype = 'f'
+       AND ref.relname = $1
+       AND ns.nspname = 'public'`,
+    [table]
   );
 
   for (const dep of deps) {
