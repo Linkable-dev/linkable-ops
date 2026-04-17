@@ -356,12 +356,16 @@ export function tableRoutes() {
     }
   });
 
-  // Delete row
+  // Delete row (cascade: automatically deletes dependent rows in child tables)
   router.delete("/:table/rows/:id", async (req, res) => {
     const { table, id } = req.params;
     try {
       const pk = await getPrimaryKey(table);
       if (!pk) return res.status(400).json({ error: "No primary key found" });
+
+      // Recursively delete dependent rows in child tables first
+      await cascadeDelete(table, pk, id);
+
       const result = await cloudSqlQuery(
         `DELETE FROM "${table}" WHERE "${pk}" = $1`,
         [id]
@@ -389,4 +393,51 @@ async function getPrimaryKey(table) {
     [table]
   );
   return rows[0]?.column_name || null;
+}
+
+// Recursively delete all rows in child tables that reference the given row
+async function cascadeDelete(table, pkColumn, pkValue, visited = new Set()) {
+  const key = `${table}:${pkValue}`;
+  if (visited.has(key)) return;
+  visited.add(key);
+
+  // Find all foreign keys that reference this table's primary key
+  const { rows: deps } = await cloudSqlQuery(
+    `SELECT
+       kcu.table_name  AS child_table,
+       kcu.column_name AS child_column
+     FROM information_schema.referential_constraints rc
+     JOIN information_schema.key_column_usage kcu
+       ON kcu.constraint_name = rc.constraint_name
+       AND kcu.constraint_schema = rc.constraint_schema
+     JOIN information_schema.key_column_usage rcu
+       ON rcu.constraint_name = rc.unique_constraint_name
+       AND rcu.constraint_schema = rc.unique_constraint_schema
+     WHERE rcu.table_name = $1
+       AND rcu.column_name = $2
+       AND rcu.table_schema = 'public'`,
+    [table, pkColumn]
+  );
+
+  for (const dep of deps) {
+    // Find all child rows that reference this parent
+    const { rows: childRows } = await cloudSqlQuery(
+      `SELECT * FROM "${dep.child_table}" WHERE "${dep.child_column}" = $1`,
+      [pkValue]
+    );
+
+    // Recursively cascade into grandchild tables
+    const childPk = await getPrimaryKey(dep.child_table);
+    if (childPk) {
+      for (const childRow of childRows) {
+        await cascadeDelete(dep.child_table, childPk, childRow[childPk], visited);
+      }
+    }
+
+    // Delete the child rows
+    await cloudSqlQuery(
+      `DELETE FROM "${dep.child_table}" WHERE "${dep.child_column}" = $1`,
+      [pkValue]
+    );
+  }
 }
