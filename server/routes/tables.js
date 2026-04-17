@@ -395,32 +395,38 @@ async function getPrimaryKey(table) {
   return rows[0]?.column_name || null;
 }
 
-// Recursively delete all rows in child tables that reference the given row
+// Recursively delete all rows in child tables that reference the given row.
+// Uses dynamic SQL with casting to handle UUID/int/text column types.
 async function cascadeDelete(table, pkColumn, pkValue, visited = new Set()) {
   const key = `${table}:${pkValue}`;
   if (visited.has(key)) return;
   visited.add(key);
 
-  // Find ALL foreign keys from any child table pointing to this table's PK
+  // Find ALL foreign keys from any child table pointing to this table
   const { rows: deps } = await cloudSqlQuery(
     `SELECT
-       cl.relname       AS child_table,
-       att2.attname      AS child_column
-     FROM pg_constraint con
-     JOIN pg_class cl       ON cl.oid = con.conrelid
-     JOIN pg_class ref      ON ref.oid = con.confrelid
-     JOIN pg_namespace ns   ON ns.oid = ref.relnamespace
-     JOIN pg_attribute att2 ON att2.attrelid = con.conrelid AND att2.attnum = ANY(con.conkey)
-     WHERE con.contype = 'f'
-       AND ref.relname = $1
-       AND ns.nspname = 'public'`,
+       ccu.table_name  AS parent_table,
+       ccu.column_name AS parent_column,
+       kcu.table_name  AS child_table,
+       kcu.column_name AS child_column
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.key_column_usage kcu
+       ON tc.constraint_name = kcu.constraint_name
+       AND tc.table_schema = kcu.table_schema
+     JOIN information_schema.constraint_column_usage ccu
+       ON tc.constraint_name = ccu.constraint_name
+       AND tc.table_schema = ccu.table_schema
+     WHERE tc.constraint_type = 'FOREIGN KEY'
+       AND ccu.table_name = $1
+       AND ccu.table_schema = 'public'`,
     [table]
   );
+  console.log(`[cascadeDelete] ${table} has ${deps.length} child FKs:`, deps.map(d => `${d.child_table}.${d.child_column}`));
 
   for (const dep of deps) {
-    // Find all child rows that reference this parent
+    // Use text cast on both sides to avoid type mismatch
     const { rows: childRows } = await cloudSqlQuery(
-      `SELECT * FROM "${dep.child_table}" WHERE "${dep.child_column}" = $1`,
+      `SELECT * FROM "${dep.child_table}" WHERE "${dep.child_column}"::text = $1::text`,
       [pkValue]
     );
 
@@ -434,7 +440,7 @@ async function cascadeDelete(table, pkColumn, pkValue, visited = new Set()) {
 
     // Delete the child rows
     await cloudSqlQuery(
-      `DELETE FROM "${dep.child_table}" WHERE "${dep.child_column}" = $1`,
+      `DELETE FROM "${dep.child_table}" WHERE "${dep.child_column}"::text = $1::text`,
       [pkValue]
     );
   }
