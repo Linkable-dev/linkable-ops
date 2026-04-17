@@ -1,8 +1,49 @@
 import express from "express";
-import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
+import { cloudSqlQuery } from "../lib/cloudsql.js";
 
 export function tableRoutes() {
   const router = express.Router();
+
+  // One-time: rewrite all FK constraints to ON DELETE CASCADE
+  router.post("/migrate-cascade", async (req, res) => {
+    try {
+      await cloudSqlQuery(`
+        DO $$
+        DECLARE
+          r RECORD;
+          col_names TEXT;
+          ref_col_names TEXT;
+        BEGIN
+          FOR r IN
+            SELECT con.conname AS constraint_name, cl.relname AS child_table,
+                   ref.relname AS parent_table, con.conrelid, con.confrelid,
+                   con.conkey, con.confkey
+            FROM pg_constraint con
+            JOIN pg_class cl ON cl.oid = con.conrelid
+            JOIN pg_class ref ON ref.oid = con.confrelid
+            JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+            WHERE con.contype = 'f' AND ns.nspname = 'public'
+              AND con.confdeltype <> 'c'
+          LOOP
+            SELECT string_agg(quote_ident(att.attname), ', ' ORDER BY ord.n)
+              INTO col_names
+              FROM unnest(r.conkey) WITH ORDINALITY AS ord(col, n)
+              JOIN pg_attribute att ON att.attrelid = r.conrelid AND att.attnum = ord.col;
+            SELECT string_agg(quote_ident(att.attname), ', ' ORDER BY ord.n)
+              INTO ref_col_names
+              FROM unnest(r.confkey) WITH ORDINALITY AS ord(col, n)
+              JOIN pg_attribute att ON att.attrelid = r.confrelid AND att.attnum = ord.col;
+            EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', r.child_table, r.constraint_name);
+            EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%s) REFERENCES %I(%s) ON DELETE CASCADE',
+              r.child_table, r.constraint_name, col_names, r.parent_table, ref_col_names);
+          END LOOP;
+        END $$;
+      `);
+      res.json({ success: true, message: "All FK constraints now use ON DELETE CASCADE" });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // List all tables
   router.get("/", async (req, res) => {
@@ -356,66 +397,20 @@ export function tableRoutes() {
     }
   });
 
-  // Delete row (cascade: drops + recreates FK constraints with CASCADE in a transaction)
+  // Delete row
   router.delete("/:table/rows/:id", async (req, res) => {
     const { table, id } = req.params;
-    const pool = await getCloudSqlPool();
-    const client = await pool.connect();
     try {
       const pk = await getPrimaryKey(table);
       if (!pk) return res.status(400).json({ error: "No primary key found" });
-
-      await client.query("BEGIN");
-
-      // Find all FK constraints that reference this table
-      const { rows: fks } = await client.query(
-        `SELECT
-           con.conname                           AS constraint_name,
-           cl.relname                            AS child_table,
-           att_child.attname                     AS child_column,
-           ref.relname                           AS parent_table,
-           att_parent.attname                    AS parent_column
-         FROM pg_constraint con
-         JOIN pg_class cl         ON cl.oid  = con.conrelid
-         JOIN pg_class ref        ON ref.oid = con.confrelid
-         JOIN pg_namespace ns     ON ns.oid  = cl.relnamespace
-         JOIN pg_attribute att_child  ON att_child.attrelid  = con.conrelid  AND att_child.attnum  = con.conkey[1]
-         JOIN pg_attribute att_parent ON att_parent.attrelid = con.confrelid AND att_parent.attnum = con.confkey[1]
-         WHERE con.contype = 'f'
-           AND ref.relname = $1
-           AND ns.nspname = 'public'`,
-        [table]
-      );
-
-      // Drop each FK, will re-add with CASCADE after delete
-      for (const fk of fks) {
-        await client.query(`ALTER TABLE "${fk.child_table}" DROP CONSTRAINT "${fk.constraint_name}"`);
-      }
-
-      // Now delete the row — no FK constraints blocking it
-      const result = await client.query(
+      const result = await cloudSqlQuery(
         `DELETE FROM "${table}" WHERE "${pk}" = $1`,
         [id]
       );
-
-      // Re-add all FK constraints with ON DELETE CASCADE
-      for (const fk of fks) {
-        await client.query(
-          `ALTER TABLE "${fk.child_table}"
-           ADD CONSTRAINT "${fk.constraint_name}"
-           FOREIGN KEY ("${fk.child_column}") REFERENCES "${fk.parent_table}"("${fk.parent_column}")
-           ON DELETE CASCADE`
-        );
-      }
-
-      await client.query("COMMIT");
       if (result.rowCount === 0) return res.status(404).json({ error: "Row not found" });
       res.json({ success: true });
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
       res.status(500).json({ error: err.message });
-    } finally {
-      client.release();
     }
   });
 
