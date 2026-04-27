@@ -56,6 +56,32 @@ export const api = {
   getOpsCampaigns: ({ limit = 25, offset = 0, search = "" } = {}) =>
     request(`/ops/campaigns?${buildQs({ limit, offset, search })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
+
+  // AI conversation manager
+  getAiCampaigns: () => request("/conversations/campaigns"),
+  getAiCampaign: (id) => request(`/conversations/campaigns/${id}`),
+  createAiCampaign: (data) =>
+    request("/conversations/campaigns", { method: "POST", body: JSON.stringify(data) }),
+  updateAiCampaign: (id, data) =>
+    request(`/conversations/campaigns/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  getAiDefaults: () => request("/conversations/defaults"),
+  testLabTurn: (data) =>
+    request("/conversations/test-lab/turn", { method: "POST", body: JSON.stringify(data) }),
+  startAiConversation: (data) =>
+    request("/conversations/start", { method: "POST", body: JSON.stringify(data) }),
+  listAiThreads: ({ campaign, status, limit } = {}) =>
+    request(`/conversations/threads?${buildQs({ campaign, status, limit })}`),
+  getAiThread: (id) => request(`/conversations/threads/${id}`),
+  startAiBulk: (data) =>
+    request("/conversations/bulk-start", { method: "POST", body: JSON.stringify(data) }),
+  stopAiBulkRun: (id) =>
+    request(`/conversations/bulk-runs/${id}/stop`, { method: "POST" }),
+  listAiBulkRuns: ({ limit } = {}) =>
+    request(`/conversations/bulk-runs?${buildQs({ limit })}`),
+  listAiSuppressions: ({ limit } = {}) =>
+    request(`/conversations/suppressions?${buildQs({ limit })}`),
+  listAiEvents: ({ limit } = {}) =>
+    request(`/conversations/events?${buildQs({ limit })}`),
 };
 
 // Helpers for formatting
