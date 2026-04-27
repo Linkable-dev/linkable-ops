@@ -132,6 +132,7 @@ export default function AiInboxPage() {
       )}
 
       {tab === "metrics" && <MetricsPanel theme={theme} />}
+      {tab === "leads" && <LeadsPanel campaigns={campaigns} theme={theme} />}
       {tab === "bulk" && <BulkPanel campaigns={campaigns} theme={theme} />}
       {tab === "suppressions" && <SuppressionsPanel theme={theme} />}
       {tab === "events" && <EventsPanel theme={theme} />}
@@ -143,6 +144,7 @@ function Tabs({ tab, setTab, theme }) {
   const tabs = [
     { id: "threads", label: "Threads" },
     { id: "metrics", label: "Metrics" },
+    { id: "leads", label: "Find leads" },
     { id: "bulk", label: "Bulk start" },
     { id: "suppressions", label: "Suppressions" },
     { id: "events", label: "Webhook events" },
@@ -323,6 +325,7 @@ function BulkPanel({ campaigns, theme }) {
         </Field>
         <Field label="Source" theme={theme}>
           <select value={source} onChange={(e) => setSource(e.target.value)} style={selectStyle(theme)}>
+            <option value="storeleads">storeleads (recommended)</option>
             <option value="scraper_results">scraper_results</option>
             <option value="contacts">contacts</option>
           </select>
@@ -479,6 +482,183 @@ function SingleSendCard({ campaigns, campaignId, setCampaignId, theme }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// Lead discovery: kicks off StoreLeads → Apollo → Hunter pipeline,
+// then shows the resulting prospect pool.
+function LeadsPanel({ campaigns, theme }) {
+  const [campaignId, setCampaignId] = useState("");
+  const [country, setCountry] = useState("GB");
+  const [minRevenue, setMinRevenue] = useState(50000);
+  const [maxRevenue, setMaxRevenue] = useState(5000000);
+  const [limit, setLimit] = useState(50);
+  const [busy, setBusy] = useState(false);
+  const [runs, setRuns] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [error, setError] = useState(null);
+  const [showUnused, setShowUnused] = useState(true);
+
+  useEffect(() => {
+    if (!campaignId && campaigns.length) setCampaignId(campaigns[0].id);
+  }, [campaigns, campaignId]);
+
+  const refresh = async () => {
+    try {
+      const [r, l] = await Promise.all([
+        api.listAiBulkRuns({ limit: 10 }),
+        api.listAiLeads({ country: country || undefined, unused: showUnused, limit: 100 }),
+      ]);
+      setRuns((r || []).filter((row) => row.source === "discover_storeleads"));
+      setLeads(l || []);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [country, showUnused]);
+
+  async function discover() {
+    if (!campaignId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.discoverLeads({
+        campaignId,
+        filters: {
+          country: country || undefined,
+          minRevenue: parseInt(minRevenue) || 50000,
+          maxRevenue: parseInt(maxRevenue) || 5000000,
+        },
+        limit: parseInt(limit) || 50,
+      });
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div>
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
+            Find new leads (StoreLeads)
+          </div>
+          <p style={{ fontSize: 11, color: theme.textMuted, margin: "0 0 12px", lineHeight: 1.5 }}>
+            Pulls Shopify brands matching your filters, finds the founder/marketing
+            contact via Apollo + Hunter, verifies the email, and adds them to your
+            prospect pool. Each lead costs roughly 1 StoreLeads + 1 Apollo + 1 Hunter call.
+          </p>
+          <Field label="Campaign (for tracking)" theme={theme}>
+            <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} style={selectStyle(theme)}>
+              <option value="">— pick a campaign —</option>
+              {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Country" theme={theme}>
+            <select value={country} onChange={(e) => setCountry(e.target.value)} style={selectStyle(theme)}>
+              <option value="GB">United Kingdom</option>
+              <option value="US">United States</option>
+              <option value="">All</option>
+            </select>
+          </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <Field label="Min revenue (USD/yr)" theme={theme}>
+              <Input value={minRevenue} onChange={(e) => setMinRevenue(e.target.value)} placeholder="50000" />
+            </Field>
+            <Field label="Max revenue (USD/yr)" theme={theme}>
+              <Input value={maxRevenue} onChange={(e) => setMaxRevenue(e.target.value)} placeholder="5000000" />
+            </Field>
+          </div>
+          <Field label="Max prospects to find" theme={theme}>
+            <Input value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="50" />
+          </Field>
+          <Btn onClick={discover} disabled={!campaignId || busy}>
+            {busy ? "Running…" : "Find leads"}
+          </Btn>
+          {error && <div style={{ marginTop: 12, color: "#DC2626", fontSize: 12 }}>{error}</div>}
+        </Card>
+
+        {runs.length > 0 && (
+          <Card>
+            <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMid, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>
+              Recent discovery runs
+            </div>
+            {runs.map((r) => (
+              <div key={r.id} style={{ fontSize: 11, color: theme.textMid, padding: "6px 0", borderTop: `1px solid ${theme.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <RunStatus status={r.status} theme={theme} />
+                  <span style={{ color: theme.textMuted }}>{friendlyDate(r.started_at)}</span>
+                </div>
+                <div style={{ marginTop: 3 }}>
+                  found <strong>{r.sent}</strong>, processed {r.processed}, skipped {r.skipped}, failed {r.failed} / target {r.total}
+                </div>
+                {r.error && <div style={{ color: "#DC2626", fontSize: 10, marginTop: 3 }}>{r.error}</div>}
+              </div>
+            ))}
+          </Card>
+        )}
+      </div>
+
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>
+            Available leads ({leads.length})
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: theme.textMid, cursor: "pointer" }}>
+            <input type="checkbox" checked={showUnused} onChange={(e) => setShowUnused(e.target.checked)} />
+            Only unused
+          </label>
+        </div>
+        {leads.length === 0 ? (
+          <Card><div style={{ color: theme.textMuted, fontSize: 13 }}>No leads found yet. Click Find leads to populate.</div></Card>
+        ) : (
+          <Card style={{ padding: 0 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: theme.surfaceAlt, color: theme.textMid }}>
+                  <Th>Brand</Th>
+                  <Th>Contact</Th>
+                  <Th>Email</Th>
+                  <Th>Position</Th>
+                  <Th>Country</Th>
+                  <Th>Source</Th>
+                  <Th>Used</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {leads.slice(0, 50).map((l) => (
+                  <tr key={l.domain} style={{ borderTop: `1px solid ${theme.border}`, color: theme.text }}>
+                    <Td>{l.merchant_name || l.title || l.domain}</Td>
+                    <Td>{[l.contact_first_name, l.contact_last_name].filter(Boolean).join(" ") || "—"}</Td>
+                    <Td><code style={{ fontSize: 11 }}>{l.email}</code></Td>
+                    <Td style={{ color: theme.textMuted, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {l.contact_position || "—"}
+                    </Td>
+                    <Td>{l.country_code || "—"}</Td>
+                    <Td style={{ color: theme.textMuted }}>{l.contact_source || "storeleads"}</Td>
+                    <Td>{l.contact_used ? "✓" : ""}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {leads.length > 50 && (
+              <div style={{ padding: 8, fontSize: 11, color: theme.textMuted, textAlign: "center", borderTop: `1px solid ${theme.border}` }}>
+                Showing 50 of {leads.length}. Use Bulk Start tab to outreach with source = storeleads.
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
+    </div>
   );
 }
 

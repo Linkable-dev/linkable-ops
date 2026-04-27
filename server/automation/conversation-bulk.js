@@ -279,11 +279,50 @@ async function fetchCandidates({ teamId, source, filters, limit }) {
       return fetchFromScraperResults({ teamId, filters, limit });
     case "contacts":
       return fetchFromContacts({ teamId, filters, limit });
+    case "storeleads":
+      return fetchFromStoreLeads({ teamId, filters, limit });
     case "manual":
       return Array.isArray(filters?.prospects) ? filters.prospects.slice(0, limit) : [];
     default:
       throw new Error(`unknown source: ${source}`);
   }
+}
+
+async function fetchFromStoreLeads({ teamId, filters, limit }) {
+  let q = supabase
+    .from("storeleads_brands")
+    .select("*")
+    .not("email", "is", null);
+  if (teamId) q = q.or(`team_id.is.null,team_id.eq.${teamId}`);
+  if (filters.country) q = q.eq("country_code", filters.country);
+  q = q.order("imported_at", { ascending: false }).limit(limit);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return (data || []).map(storeLeadsToProspect);
+}
+
+function storeLeadsToProspect(row) {
+  const social = (row.contact_info || []).filter((c) => ["instagram", "tiktok", "youtube"].includes(c.type) && c.followers);
+  const socialFollowing = social
+    .map((c) => `${c.type}: ${(c.followers || 0).toLocaleString()} followers`)
+    .join(", ");
+  return {
+    contactId: null,
+    email: row.email,
+    name: [row.contact_first_name, row.contact_last_name].filter(Boolean).join(" ") || row.merchant_name || row.domain,
+    company: row.merchant_name || row.title || row.domain,
+    domain: row.domain,
+    country: row.country_code || "",
+    productTypes: [],
+    brandStory: row.description || row.about_us || "",
+    usp: "",
+    founderName: row.contact_position && /founder|ceo/i.test(row.contact_position) ? row.contact_first_name : "",
+    socialFollowing,
+    hasCreators: false,
+    hasAffiliates: false,
+    hasInfluencers: false,
+    additional: row.contact_position ? `Role: ${row.contact_position}` : "",
+  };
 }
 
 async function fetchFromScraperResults({ teamId, filters, limit }) {

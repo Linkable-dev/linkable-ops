@@ -300,6 +300,51 @@ export function conversationsRoutes() {
     }
   });
 
+  // Lead discovery — pull Shopify brands from StoreLeads, find their
+  // decision-maker via Apollo/Hunter, and write to storeleads_brands so the
+  // bulk runner can use them. Background job; poll the returned run_id.
+  router.post("/discover", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { campaignId, filters = {}, limit = 50 } = req.body;
+      if (!campaignId) return res.status(400).json({ error: "campaignId required" });
+      const { startLeadDiscovery } = await import("../automation/lead-discovery.js");
+      const result = await startLeadDiscovery({
+        teamId,
+        campaignId,
+        filters,
+        limit: Math.min(parseInt(limit) || 50, 1000),
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // List qualified leads available for outreach (storeleads_brands rows
+  // with a verified email).
+  router.get("/leads", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { supabase: db } = await import("../lib/supabase.js");
+      const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+      let q = db
+        .from("storeleads_brands")
+        .select("domain, merchant_name, title, country_code, email, contact_first_name, contact_last_name, contact_position, contact_source, contact_used, imported_at")
+        .not("email", "is", null)
+        .order("imported_at", { ascending: false })
+        .limit(limit);
+      if (req.query.country) q = q.eq("country_code", req.query.country);
+      if (req.query.unused === "true") q = q.eq("contact_used", false);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      void teamId;
+      res.json(data || []);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Stop a running bulk run (cooperative cancellation).
   router.post("/bulk-runs/:id/stop", async (req, res) => {
     try {

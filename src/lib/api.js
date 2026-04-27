@@ -85,6 +85,10 @@ export const api = {
   getAiMetrics: () => request("/conversations/metrics"),
   unpauseAiCampaign: (id) =>
     request(`/conversations/campaigns/${id}/unpause`, { method: "POST" }),
+  discoverLeads: (data) =>
+    request("/conversations/discover", { method: "POST", body: JSON.stringify(data) }),
+  listAiLeads: ({ country, unused, limit } = {}) =>
+    request(`/conversations/leads?${buildQs({ country, unused, limit })}`),
 };
 
 // Helpers for formatting
