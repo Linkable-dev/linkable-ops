@@ -309,6 +309,8 @@ function BulkPanel({ campaigns, theme }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div>
+        <SingleSendCard campaigns={campaigns} campaignId={campaignId} setCampaignId={setCampaignId} theme={theme} />
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>New bulk run</div>
         <Field label="Campaign" theme={theme}>
@@ -337,6 +339,7 @@ function BulkPanel({ campaigns, theme }) {
           {busy ? "Starting…" : "Start bulk run"}
         </Btn>
       </Card>
+      </div>
 
       <div>
         <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Recent runs</div>
@@ -372,6 +375,108 @@ function BulkPanel({ campaigns, theme }) {
       </div>
       {error && <div style={{ gridColumn: "1 / -1", color: "#DC2626", fontSize: 13 }}>{error}</div>}
     </div>
+  );
+}
+
+// Single-prospect send. Quickest way to test the real loop end-to-end —
+// generate + actually send a first message to one address you control,
+// then reply from there to watch the AI handle it.
+function SingleSendCard({ campaigns, campaignId, setCampaignId, theme }) {
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [company, setCompany] = useState("");
+  const [domain, setDomain] = useState("");
+  const [productTypes, setProductTypes] = useState("");
+  const [brandStory, setBrandStory] = useState("");
+  const [dryRun, setDryRun] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function send() {
+    if (!campaignId || !email) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await api.startAiConversation({
+        campaignId,
+        prospect: {
+          email: email.trim(),
+          name: name.trim() || null,
+          company: company.trim() || null,
+          domain: domain.trim() || null,
+          productTypes: productTypes.split(",").map((s) => s.trim()).filter(Boolean),
+          brandStory: brandStory.trim() || null,
+        },
+        dryRun,
+      });
+      setResult(r);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
+        Send to one address (test loop)
+      </div>
+      <p style={{ fontSize: 11, color: theme.textMuted, margin: "0 0 12px", lineHeight: 1.5 }}>
+        Sends a real first message to one prospect. Useful for testing the full loop with your own gmail.
+      </p>
+      <Field label="Campaign" theme={theme}>
+        <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} style={selectStyle(theme)}>
+          <option value="">— pick a campaign —</option>
+          {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Email *" theme={theme}>
+        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+      </Field>
+      <Field label="Name" theme={theme}>
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="First Last" />
+      </Field>
+      <Field label="Company / brand" theme={theme}>
+        <Input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Glow Skin Co" />
+      </Field>
+      <Field label="Domain" theme={theme}>
+        <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="glowskinco.com" />
+      </Field>
+      <Field label="Product types (comma-separated)" theme={theme}>
+        <Input value={productTypes} onChange={(e) => setProductTypes(e.target.value)} placeholder="serums, moisturizers" />
+      </Field>
+      <Field label="Brand story / context" theme={theme}>
+        <Input multiline rows={2} value={brandStory} onChange={(e) => setBrandStory(e.target.value)} placeholder="Optional — gives the AI more to work with." />
+      </Field>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: theme.textMid, margin: "4px 0 12px" }}>
+        <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
+        Dry run (generate but do not send)
+      </label>
+      <Btn onClick={send} disabled={!campaignId || !email || busy}>
+        {busy ? "Sending…" : dryRun ? "Generate (no send)" : "Send first message"}
+      </Btn>
+
+      {error && (
+        <div style={{ marginTop: 12, color: "#DC2626", fontSize: 12 }}>{error}</div>
+      )}
+      {result && (
+        <div style={{ marginTop: 12, padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 12, color: theme.textMid }}>
+          {result.skipped && <div>Skipped: <code>{result.skipped}</code></div>}
+          {result.ai && (
+            <>
+              <div style={{ fontWeight: 600, color: theme.text, marginBottom: 4 }}>{result.ai.subject}</div>
+              <div style={{ whiteSpace: "pre-wrap", color: theme.text }}>{result.ai.body}</div>
+              {result.send?.success && <div style={{ marginTop: 6, color: "#16A34A" }}>✓ sent · {result.send.resendId || "ok"}</div>}
+              {result.send?.error && <div style={{ marginTop: 6, color: "#DC2626" }}>send error: {result.send.error}</div>}
+              {result.send?.dryRun && <div style={{ marginTop: 6, color: theme.textMuted }}>(dry run — nothing sent)</div>}
+            </>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
