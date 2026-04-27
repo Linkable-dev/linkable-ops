@@ -4,10 +4,22 @@ import { tableRoutes } from "../server/routes/tables.js";
 import { analyticsRoutes } from "../server/routes/analytics.js";
 import { opsRoutes } from "../server/routes/ops.js";
 import { authRoutes, requireOpsAdmin } from "../server/routes/auth.js";
+import {
+  conversationsRoutes,
+  conversationsWebhookRoutes,
+} from "../server/routes/conversations.js";
+import { cronRoutes } from "../server/routes/cron.js";
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// `verify` callback captures raw body for Svix HMAC verification —
+// computing HMAC over parsed JSON would re-stringify and not match.
+app.use(express.json({
+  limit: "5mb",
+  verify: (req, _res, buf) => {
+    if (buf && buf.length) req.rawBody = buf;
+  },
+}));
 
 // Vercel rewrites /api/* → /api and sets the original URL in a header.
 // Reassign req.url so Express routers match the client's actual path.
@@ -66,9 +78,17 @@ app.get("/api/migrate-cascade", async (_req, res) => {
 });
 
 app.use("/api/auth", authRoutes());
+
+// Public webhook (no admin auth — secured by Svix signature).
+app.use("/api/conversations", conversationsWebhookRoutes());
+
+// Cron routes (no admin auth — secured by CRON_SECRET / x-vercel-cron).
+app.use("/api/cron", cronRoutes());
+
 app.use("/api/tables", requireOpsAdmin, tableRoutes());
 app.use("/api/analytics", requireOpsAdmin, analyticsRoutes());
 app.use("/api/ops", requireOpsAdmin, opsRoutes());
+app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 
 // Generic 404 with the URL Express actually saw, for easier debugging.
 app.use((req, res) => {
