@@ -374,32 +374,21 @@ export function conversationsWebhookRoutes() {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "RESEND_API_KEY not set" });
 
-    // SDK exposes resend.emails.receiving.get(id) — that's a separate path
-    // from the Retrieve Email endpoint. Probe likely shapes.
-    const probes = [
-      { method: "GET", url: `https://api.resend.com/emails/receiving/${id}` },
-      { method: "GET", url: `https://api.resend.com/receiving/${id}` },
-      { method: "GET", url: `https://api.resend.com/receiving/emails/${id}` },
-      { method: "GET", url: `https://api.resend.com/inbound/${id}` },
-      { method: "GET", url: `https://api.resend.com/inbound/emails/${id}` },
-      { method: "GET", url: `https://api.resend.com/v1/emails/receiving/${id}` },
-    ];
-    const out = [];
-    for (const { method, url } of probes) {
-      try {
-        const r = await fetch(url, { method, headers: { Authorization: `Bearer ${apiKey}` } });
-        const text = await r.text();
-        out.push({
-          method, url,
-          status: r.status,
-          allow: r.headers.get("allow"),
-          body_excerpt: text.slice(0, 300),
-        });
-      } catch (err) {
-        out.push({ method, url, error: err.message });
-      }
+    try {
+      const { fetchResendEmail } = await import("../automation/inbound-parser.js");
+      const data = await fetchResendEmail(id);
+      res.json({
+        ok: true,
+        keys: Object.keys(data || {}),
+        text_len: (data.text || "").length,
+        html_len: (data.html || "").length,
+        text_preview: (data.text || "").slice(0, 400),
+        html_preview: (data.html || "").slice(0, 400),
+        full: data,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-    res.json({ id, probes: out });
   });
 
   // Debug: replay a stored ai_raw_events row through handleInbound.
