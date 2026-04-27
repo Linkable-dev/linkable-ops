@@ -348,6 +348,50 @@ export function conversationsRoutes() {
     }
   });
 
+  // Debug: fetch one email via Resend's API by id. Tells us if the API even
+  // returns body content for inbound emails.
+  router.get("/debug/resend-email/:id", async (req, res) => {
+    try {
+      const { fetchResendEmail } = await import("../automation/inbound-parser.js");
+      const data = await fetchResendEmail(req.params.id);
+      res.json({
+        ok: true,
+        keys: Object.keys(data || {}),
+        text_len: (data.text || "").length,
+        html_len: (data.html || "").length,
+        text_preview: (data.text || "").slice(0, 300),
+        html_preview: (data.html || "").slice(0, 300),
+        full: data,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Debug: replay a stored ai_raw_events row through handleInbound.
+  // Useful to re-run after deploying parser fixes without making the user
+  // send another reply.
+  router.post("/debug/replay-event/:id", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { supabase } = await import("../lib/supabase.js");
+      const { data: ev, error } = await supabase
+        .from("ai_raw_events")
+        .select("payload, event_type")
+        .eq("id", req.params.id)
+        .eq("team_id", teamId)
+        .maybeSingle();
+      if (error || !ev) return res.status(404).json({ error: error?.message || "event not found" });
+      const { handleInbound, handleResendStatusEvent } = await import("../automation/conversation-runner.js");
+      const result = ev.event_type === "email.received" || ev.event_type?.includes("inbound")
+        ? await handleInbound(ev.payload)
+        : await handleResendStatusEvent(ev.payload);
+      res.json({ replayed: true, event_type: ev.event_type, result });
+    } catch (err) {
+      res.status(500).json({ error: err.message, stack: err.stack?.split("\n").slice(0, 5) });
+    }
+  });
+
   return router;
 }
 

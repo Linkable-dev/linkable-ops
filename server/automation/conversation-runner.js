@@ -129,14 +129,22 @@ export async function handleInbound(payload) {
   // threading headers. Fetch the full email content via their API so we
   // have the actual reply text for the LLM.
   let bodyText = norm.text || norm.html || "";
+  let fetchDiag = null;
   if (!bodyText && norm.email_provider_id) {
     try {
       const full = await fetchResendEmail(norm.email_provider_id);
       norm.text = norm.text || full.text || "";
       norm.html = norm.html || full.html || "";
       bodyText = norm.text || norm.html;
+      fetchDiag = {
+        ok: true,
+        text_len: (full.text || "").length,
+        html_len: (full.html || "").length,
+        keys: Object.keys(full || {}),
+      };
     } catch (err) {
       console.error("fetchResendEmail failed:", err.message);
+      fetchDiag = { ok: false, error: err.message };
     }
   }
 
@@ -185,6 +193,7 @@ export async function handleInbound(payload) {
       ignored: "no matching conversation",
       from: norm.from_email,
       refs: candidates,
+      fetch: fetchDiag,
       hint: "Could not find an active thread for this sender. Send a first message to this address before they can reply.",
     };
   }
@@ -192,6 +201,20 @@ export async function handleInbound(payload) {
   // Persist the inbound.
   const cleanBody = extractReplyBody(norm);
   const isOptOut = looksLikeOptOut(cleanBody);
+
+  // Refuse to insert an empty inbound — Claude rejects empty user messages
+  // and the conversation gets stuck. Surface the cause loudly.
+  if (!cleanBody || !cleanBody.trim()) {
+    return {
+      action: "empty-body",
+      conversation_id: conversation.id,
+      from: norm.from_email,
+      fetch: fetchDiag,
+      norm_text_len: (norm.text || "").length,
+      norm_html_len: (norm.html || "").length,
+      hint: "Inbound matched a conversation but the body was empty after fetch+parse. Check fetch.ok and fetch.text_len above.",
+    };
+  }
 
   const inboundRow = await insertMessage({
     team_id: team,
