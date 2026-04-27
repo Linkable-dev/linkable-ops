@@ -123,22 +123,28 @@ async function processOneBrand({ teamId, brand }) {
     if (fromStoreleads) person = fromStoreleads;
   }
 
-  if (!person?.email || !person?.firstName) {
-    return { qualified: false, reason: "no decision-maker email" };
+  if (!person?.email) {
+    return { qualified: false, reason: "no email on brand" };
   }
 
-  // Only keep founders / marketing roles. Mirrors run-storeleads.js logic.
+  // Role filter only when we have a stated position. Apollo / Hunter return
+  // titles; StoreLeads-personal usually doesn't, so we don't gate on it.
   const pos = (person.position || "").toLowerCase();
-  const isFounder = /founder|ceo|owner|co-founder|coo|cto|president/.test(pos);
-  const isMarketing = /marketing|cmo|growth|brand|ecommerce|e-commerce|digital|creator|influencer|partnership/.test(pos);
-  if (!isFounder && !isMarketing && person.source !== "apollo-orgchart") {
-    return { qualified: false, reason: `role ${person.position || "?"} not target` };
+  if (pos) {
+    const isFounder = /founder|ceo|owner|co-founder|coo|cto|president/.test(pos);
+    const isMarketing = /marketing|cmo|growth|brand|ecommerce|e-commerce|digital|creator|influencer|partnership/.test(pos);
+    const fromOrgChart = person.source === "apollo-orgchart";
+    const fromGenericLocal = person.source === "storeleads-personal" && !person.firstName;
+    if (!isFounder && !isMarketing && !fromOrgChart && !fromGenericLocal) {
+      return { qualified: false, reason: `role ${person.position} not target` };
+    }
   }
 
-  // Verify the email if it didn't come from a verified-by-default source.
+  // Verify only if Hunter is alive (skip when key missing or rate-limited).
   if (person.source !== "apollo-orgchart" && process.env.HUNTER_API_KEY) {
     const status = await hunterVerify(person.email).catch(() => "unknown");
     if (status === "invalid") return { qualified: false, reason: "Hunter says invalid" };
+    // 429 etc. → "unknown" → we keep the lead, accepting the deliverability risk.
   }
 
   // Write to storeleads_brands. The bulk runner reads from this table when
@@ -382,6 +388,9 @@ function roleScore(positionRaw) {
 
 // ---------- STORELEADS PERSONAL EMAIL FALLBACK ----------
 
+// Accept any non-generic email on the brand's domain, ranked by likelihood
+// of being a real person. Returns first name when extractable from the
+// local part, otherwise leaves it null and we'll greet generically.
 function pickPersonalFromStoreLeads(domain, contactInfo) {
   const emails = (contactInfo || [])
     .filter((c) => c.type === "email" && c.value)
@@ -389,26 +398,58 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
   if (emails.length === 0) return null;
 
   const root = domain.replace(/^www\./, "").split(".")[0];
-  const REJECT = new Set(["support", "help", "orders", "returns", "billing", "legal", "jobs", "careers", "wholesale", "privacy", "noreply", "no-reply", "abuse", "spam", "postmaster", "mailer-daemon", "unsubscribe", "donotreply", "customerservice", "customercare", "cs", "compliance", "verify", "webmaster", "admin", "hostmaster", "security", "recruitment", "hr", "finance", "accounts", "investor", "ir", "gdpr", "dpo", "data", "hello", "info", "contact", "team", "press", "pr", "media", "hi"]);
+  const HARD_REJECT = new Set(["support", "help", "orders", "returns", "billing", "legal", "jobs", "careers", "wholesale", "privacy", "noreply", "no-reply", "abuse", "spam", "postmaster", "mailer-daemon", "unsubscribe", "donotreply", "customerservice", "customercare", "cs", "compliance", "verify", "webmaster", "admin", "hostmaster", "security", "recruitment", "hr", "finance", "accounts", "investor", "ir", "gdpr", "dpo", "data"]);
+  const SOFT_REJECT = new Set(["hello", "hi", "info", "contact", "team", "press", "pr", "media", "service"]);
 
+  let scored = [];
   for (const e of emails) {
     const local = e.split("@")[0];
     const dom = e.split("@")[1] || "";
-    if (REJECT.has(local)) continue;
     if (!dom.includes(root)) continue;
-    // first.last@ pattern → likely a real person.
-    const m = local.match(/^([a-z]+)\.([a-z]+)$/);
-    if (m) {
-      return {
-        email: e,
-        firstName: cap(m[1]),
-        lastName: cap(m[2]),
-        position: "Unknown",
-        source: "storeleads-personal",
-      };
+    if (HARD_REJECT.has(local)) continue;
+
+    let score = 0;
+    let firstName = null;
+    let lastName = null;
+    let position = null;
+
+    // first.last@ pattern → highest signal, real person.
+    const dotMatch = local.match(/^([a-z]+)\.([a-z]+)$/);
+    if (dotMatch) {
+      score = 100;
+      firstName = cap(dotMatch[1]);
+      lastName = cap(dotMatch[2]);
+    } else if (/^founder|ceo|owner/i.test(local)) {
+      score = 90;
+      position = local;
+    } else if (/^marketing|partnerships?|brand|growth|creators?|influencers?/i.test(local)) {
+      score = 80;
+      position = local;
+    } else if (/^[a-z]{2,12}$/.test(local) && !SOFT_REJECT.has(local)) {
+      // Single-word personal name (sara@, tom@, marco@). Likely a real person.
+      score = 70;
+      firstName = cap(local);
+    } else if (SOFT_REJECT.has(local)) {
+      // Fallback: hello@, info@ — accept but mark generic, no first name.
+      score = 30;
+    } else {
+      // Other patterns: accept conservatively.
+      score = 40;
     }
+
+    scored.push({ email: e, score, firstName, lastName, position });
   }
-  return null;
+
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score === 0) return null;
+  return {
+    email: best.email,
+    firstName: best.firstName,
+    lastName: best.lastName,
+    position: best.position,
+    source: "storeleads-personal",
+  };
 }
 
 function cap(s) {
