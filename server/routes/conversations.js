@@ -374,34 +374,32 @@ export function conversationsWebhookRoutes() {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "RESEND_API_KEY not set" });
 
-    // Probe a list of plausible URL shapes until one returns a body field.
-    const candidates = [
-      `https://api.resend.com/emails/${id}`,
-      `https://api.resend.com/inbound-emails/${id}`,
-      `https://api.resend.com/inbound/emails/${id}`,
-      `https://api.resend.com/inbound/${id}`,
-      `https://api.resend.com/v1/inbound/emails/${id}`,
-      `https://api.resend.com/v1/inbound-emails/${id}`,
+    // The /inbound-emails/{id} path returned 405 (path exists, method wrong).
+    // Try sub-resources and list endpoints.
+    const probes = [
+      { method: "GET",  url: `https://api.resend.com/inbound-emails` },
+      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/raw` },
+      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/content` },
+      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/body` },
+      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/html` },
+      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/text` },
+      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/message` },
+      { method: "POST", url: `https://api.resend.com/inbound-emails/${id}` },
+      { method: "OPTIONS", url: `https://api.resend.com/inbound-emails/${id}` },
     ];
     const out = [];
-    for (const url of candidates) {
+    for (const { method, url } of probes) {
       try {
-        const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+        const r = await fetch(url, { method, headers: { Authorization: `Bearer ${apiKey}` } });
         const text = await r.text();
-        let parsed = null;
-        try { parsed = JSON.parse(text); } catch { /* keep as text */ }
         out.push({
-          url,
+          method, url,
           status: r.status,
-          keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : null,
-          has_text: !!parsed?.text,
-          has_html: !!parsed?.html,
-          text_len: (parsed?.text || "").length,
-          html_len: (parsed?.html || "").length,
-          body_excerpt: text.slice(0, 400),
+          allow: r.headers.get("allow"),
+          body_excerpt: text.slice(0, 300),
         });
       } catch (err) {
-        out.push({ url, error: err.message });
+        out.push({ method, url, error: err.message });
       }
     }
     res.json({ id, probes: out });
