@@ -370,21 +370,41 @@ export function conversationsWebhookRoutes() {
   // see if /emails/{id} even includes body for inbound emails.
   router.get("/debug/resend-email/:id", async (req, res) => {
     if (!checkDebugAuth(req)) return res.status(401).json({ error: "unauthorized" });
-    try {
-      const { fetchResendEmail } = await import("../automation/inbound-parser.js");
-      const data = await fetchResendEmail(req.params.id);
-      res.json({
-        ok: true,
-        keys: Object.keys(data || {}),
-        text_len: (data.text || "").length,
-        html_len: (data.html || "").length,
-        text_preview: (data.text || "").slice(0, 300),
-        html_preview: (data.html || "").slice(0, 300),
-        full: data,
-      });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+    const id = req.params.id;
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "RESEND_API_KEY not set" });
+
+    // Probe a list of plausible URL shapes until one returns a body field.
+    const candidates = [
+      `https://api.resend.com/emails/${id}`,
+      `https://api.resend.com/inbound-emails/${id}`,
+      `https://api.resend.com/inbound/emails/${id}`,
+      `https://api.resend.com/inbound/${id}`,
+      `https://api.resend.com/v1/inbound/emails/${id}`,
+      `https://api.resend.com/v1/inbound-emails/${id}`,
+    ];
+    const out = [];
+    for (const url of candidates) {
+      try {
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch { /* keep as text */ }
+        out.push({
+          url,
+          status: r.status,
+          keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : null,
+          has_text: !!parsed?.text,
+          has_html: !!parsed?.html,
+          text_len: (parsed?.text || "").length,
+          html_len: (parsed?.html || "").length,
+          body_excerpt: text.slice(0, 400),
+        });
+      } catch (err) {
+        out.push({ url, error: err.message });
+      }
     }
+    res.json({ id, probes: out });
   });
 
   // Debug: replay a stored ai_raw_events row through handleInbound.
