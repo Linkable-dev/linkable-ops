@@ -462,6 +462,63 @@ export function conversationsWebhookRoutes() {
     }
   });
 
+  // Debug: which API keys are visible to the deployed function?
+  // Returns booleans only — no values.
+  router.get("/debug/env-check", (req, res) => {
+    if (!checkDebugAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    res.json({
+      RESEND_API_KEY: !!process.env.RESEND_API_KEY,
+      RESEND_WEBHOOK_SIGNING_SECRET: !!process.env.RESEND_WEBHOOK_SIGNING_SECRET,
+      ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
+      STORELEADS_API_KEY: !!process.env.STORELEADS_API_KEY,
+      APOLLO_API_KEY: !!process.env.APOLLO_API_KEY,
+      HUNTER_API_KEY: !!process.env.HUNTER_API_KEY,
+      LINKABLE_REPLY_ADDRESS: !!process.env.LINKABLE_REPLY_ADDRESS,
+      LINKABLE_CALENDAR_URL: !!process.env.LINKABLE_CALENDAR_URL,
+      CRON_SECRET: !!process.env.CRON_SECRET,
+    });
+  });
+
+  // Debug: run the full discovery flow on ONE domain. Reports each step's
+  // outcome (Apollo found / Hunter found / StoreLeads-personal / skipped).
+  router.get("/debug/discover-one/:domain", async (req, res) => {
+    if (!checkDebugAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    const domain = req.params.domain;
+    const out = { domain, steps: {} };
+    try {
+      if (process.env.APOLLO_API_KEY) {
+        const apolloRes = await fetch(`https://api.apollo.io/v1/organizations/enrich?domain=${domain}`, {
+          headers: { "X-Api-Key": process.env.APOLLO_API_KEY },
+        });
+        const apolloData = await apolloRes.json();
+        out.steps.apollo = {
+          status: apolloRes.status,
+          org_name: apolloData?.organization?.name || null,
+          person_ids: (apolloData?.organization?.org_chart_root_people_ids || []).length,
+          error: apolloRes.ok ? null : apolloData?.message || "non-200",
+        };
+      } else {
+        out.steps.apollo = { skipped: "APOLLO_API_KEY not set" };
+      }
+      if (process.env.HUNTER_API_KEY) {
+        const hRes = await fetch(`https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${process.env.HUNTER_API_KEY}&limit=3`);
+        const hData = await hRes.json();
+        out.steps.hunter = {
+          status: hRes.status,
+          emails_returned: (hData?.data?.emails || []).length,
+          first_with_name: (hData?.data?.emails || []).find((e) => e.first_name)
+            ? { name: hData.data.emails.find((e) => e.first_name).first_name, position: hData.data.emails.find((e) => e.first_name).position }
+            : null,
+        };
+      } else {
+        out.steps.hunter = { skipped: "HUNTER_API_KEY not set" };
+      }
+      res.json(out);
+    } catch (err) {
+      res.status(500).json({ error: err.message, ...out });
+    }
+  });
+
   // Debug: replay a stored ai_raw_events row through handleInbound.
   router.post("/debug/replay-event/:id", async (req, res) => {
     if (!checkDebugAuth(req)) return res.status(401).json({ error: "unauthorized" });
