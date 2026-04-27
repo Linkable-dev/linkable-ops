@@ -385,15 +385,19 @@ export function conversationsWebhookRoutes() {
       });
       signatureValid = result.valid;
       if (!result.valid) {
-        await logRawEvent({
-          teamId,
-          source: "resend",
-          eventType,
-          signatureValid: false,
-          payload: req.body,
-          headers: pickSafeHeaders(headers),
-          handlerError: `signature: ${result.reason}`,
-        }).catch(() => {});
+        try {
+          await logRawEvent({
+            teamId,
+            source: "resend",
+            eventType,
+            signatureValid: false,
+            payload: req.body,
+            headers: pickSafeHeaders(headers),
+            handlerError: `signature: ${result.reason}`,
+          });
+        } catch (err) {
+          console.error("logRawEvent failed:", err.message);
+        }
         return res.status(401).json({ error: `bad signature (${result.reason})` });
       }
     } else {
@@ -431,17 +435,23 @@ export function conversationsWebhookRoutes() {
       console.error("webhook handler error:", err);
     }
 
-    // Log every event for replay/debug.
-    logRawEvent({
-      teamId,
-      source: "resend",
-      eventType,
-      signatureValid,
-      payload: req.body,
-      headers: pickSafeHeaders(headers),
-      handlerResult,
-      handlerError,
-    }).catch(() => {});
+    // Log every event for replay/debug. Must await — on Vercel serverless,
+    // unawaited promises get killed when the function suspends after the
+    // response.
+    try {
+      await logRawEvent({
+        teamId,
+        source: "resend",
+        eventType,
+        signatureValid,
+        payload: req.body,
+        headers: pickSafeHeaders(headers),
+        handlerResult,
+        handlerError,
+      });
+    } catch (err) {
+      console.error("logRawEvent failed:", err.message);
+    }
 
     if (handlerError) return res.status(500).json({ error: handlerError });
     res.json(handlerResult || { ok: true });
