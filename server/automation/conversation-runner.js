@@ -271,6 +271,20 @@ async function generateAndScheduleReply(conversation, teamId) {
   // Refresh conversation state in case insertMessage above changed anything.
   const fresh = await getConversation(conversation.id, teamId);
 
+  // Find the latest inbound — its Message-ID is what the AI's reply must
+  // point at via In-Reply-To so mail clients thread it correctly.
+  const { data: latestIn } = await supabase
+    .from("ai_messages")
+    .select("message_id")
+    .eq("team_id", teamId)
+    .eq("conversation_id", conversation.id)
+    .eq("direction", "in")
+    .not("message_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const inReplyToTarget = latestIn?.message_id || conversation.thread_root_message_id;
+
   let gen;
   try {
     gen = await generateReply({ campaign, conversation: fresh, history });
@@ -294,7 +308,7 @@ async function generateAndScheduleReply(conversation, teamId) {
     role: "assistant",
     subject: replySubject(fresh.thread_subject),
     body: gen.body,
-    in_reply_to: conversation.thread_root_message_id,
+    in_reply_to: inReplyToTarget,
     model: gen.model,
     tokens_in: gen.usage?.in,
     tokens_out: gen.usage?.out,
@@ -370,6 +384,26 @@ export async function sendDueScheduled({ limit = 50 } = {}) {
     }
     const campaign = await getCampaign(conv.campaign_id, teamId);
     const messageId = `<${cryptoRandomId()}@linkable.link>`;
+
+    // Build the full References chain: every prior message_id in this
+    // conversation, in chronological order. Mail clients use this + the
+    // In-Reply-To to thread the message. Without the chain, replies show
+    // up as a separate thread in many clients.
+    const { data: priorMsgs } = await supabase
+      .from("ai_messages")
+      .select("message_id")
+      .eq("team_id", teamId)
+      .eq("conversation_id", conv.id)
+      .not("message_id", "is", null)
+      .neq("id", msg.id)
+      .order("created_at", { ascending: true });
+    const references = (priorMsgs || [])
+      .map((m) => m.message_id)
+      .filter(Boolean);
+    if (references.length === 0 && conv.thread_root_message_id) {
+      references.push(conv.thread_root_message_id);
+    }
+
     const send = await sendOutbound({
       campaign,
       toEmail: conv.prospect_email,
@@ -377,8 +411,8 @@ export async function sendDueScheduled({ limit = 50 } = {}) {
       subject: msg.subject || replySubject(conv.thread_subject),
       body: msg.body,
       messageId,
-      inReplyTo: msg.in_reply_to || conv.thread_root_message_id,
-      references: [conv.thread_root_message_id].filter(Boolean),
+      inReplyTo: msg.in_reply_to || references[references.length - 1] || conv.thread_root_message_id,
+      references,
     });
     await supabase
       .from("ai_messages")
