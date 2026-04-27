@@ -447,8 +447,10 @@ async function sendOutbound({ campaign, toEmail, toName, subject, body, messageI
         to: toName ? [`${toName} <${toEmail}>`] : [toEmail],
         reply_to: replyTo,
         subject,
+        // Plain text only — no html field. Cold outreach reads more
+        // personal when it renders in the recipient's default font with
+        // no styling, like a normal one-to-one email.
         text: body,
-        html: textToHtml(body),
         headers,
       }),
     });
@@ -536,15 +538,6 @@ export async function handleResendStatusEvent(payload) {
 }
 
 // ---------- HELPERS ----------
-
-function textToHtml(text) {
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
-  return `<div style="font-family:-apple-system,system-ui,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.6;">${escaped}</div>`;
-}
 
 function replySubject(originalSubject) {
   if (!originalSubject) return "Re:";
