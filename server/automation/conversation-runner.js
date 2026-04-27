@@ -12,6 +12,7 @@ import {
   getCampaign,
   getConversation,
   findConversationByThread,
+  findActiveConversationByEmail,
   createConversation,
   updateConversation,
   insertMessage,
@@ -29,6 +30,7 @@ import {
   extractReplyBody,
   looksLikeAutoReply,
   looksLikeOptOut,
+  fetchResendEmail,
 } from "./inbound-parser.js";
 import { supabase } from "../lib/supabase.js";
 
@@ -123,45 +125,68 @@ export async function handleInbound(payload) {
   const norm = normalizeInboundPayload(payload);
   if (!norm) return { ignored: "unparseable" };
 
+  // Resend's email.received webhook payload is metadata-only — no body, no
+  // threading headers. Fetch the full email content via their API so we
+  // have the actual reply text for the LLM.
+  let bodyText = norm.text || norm.html || "";
+  if (!bodyText && norm.email_provider_id) {
+    try {
+      const full = await fetchResendEmail(norm.email_provider_id);
+      norm.text = norm.text || full.text || "";
+      norm.html = norm.html || full.html || "";
+      bodyText = norm.text || norm.html;
+    } catch (err) {
+      console.error("fetchResendEmail failed:", err.message);
+    }
+  }
+
   // Auto-replies: log and bail.
-  if (looksLikeAutoReply(norm.headers, norm.text || norm.html)) {
+  if (looksLikeAutoReply(norm.headers, bodyText)) {
     return { ignored: "auto-reply", from: norm.from_email };
   }
 
-  // Find the conversation. Try In-Reply-To, References (any), then (campaign,email).
+  // Find the conversation. Order of attempts:
+  //   1. By In-Reply-To / References headers (best, but Resend doesn't expose them)
+  //   2. By scanning ai_messages.message_id for the same refs
+  //   3. By prospect email + active status (works when headers are stripped)
   let conversation = null;
   const candidates = [norm.in_reply_to, ...(norm.references || [])].filter(Boolean);
+
   for (const ref of candidates) {
     const found = await findConversationByThread({
       teamId: team,
-      threadRootMessageId: stripAngles(ref),
+      threadRootMessageId: ref,
     });
-    if (found) {
-      conversation = found;
-      break;
-    }
+    if (found) { conversation = found; break; }
   }
   if (!conversation) {
-    // Fallback: scan messages table for any out-message with this Message-ID
-    // (should be rare since thread_root_message_id covers the first one).
     for (const ref of candidates) {
+      const stripped = stripAngles(ref);
       const { data: msg } = await supabase
         .from("ai_messages")
         .select("conversation_id")
         .eq("team_id", team)
-        .eq("message_id", stripAngles(ref))
+        .in("message_id", [stripped, `<${stripped}>`])
         .maybeSingle();
       if (msg?.conversation_id) {
         const conv = await getConversation(msg.conversation_id, team);
-        if (conv) {
-          conversation = conv;
-          break;
-        }
+        if (conv) { conversation = conv; break; }
       }
     }
   }
+  if (!conversation && norm.from_email) {
+    conversation = await findActiveConversationByEmail({
+      teamId: team,
+      prospectEmail: norm.from_email,
+    });
+  }
   if (!conversation) {
-    return { ignored: "no matching conversation", from: norm.from_email, refs: candidates };
+    return {
+      ignored: "no matching conversation",
+      from: norm.from_email,
+      refs: candidates,
+      hint: "Could not find an active thread for this sender. Send a first message to this address before they can reply.",
+    };
   }
 
   // Persist the inbound.

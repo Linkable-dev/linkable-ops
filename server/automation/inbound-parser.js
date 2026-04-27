@@ -197,3 +197,21 @@ export function extractReplyBody(normalized) {
   const raw = normalized.text || htmlToText(normalized.html);
   return stripQuotedHistory(raw);
 }
+
+// Resend's email.received webhook payload is metadata-only (no body, no
+// headers). To get the actual reply text, we have to fetch the email via
+// their API using the email_id. Returns { text, html } or throws.
+export async function fetchResendEmail(emailId, apiKey = process.env.RESEND_API_KEY) {
+  if (!emailId) throw new Error("fetchResendEmail: emailId required");
+  if (!apiKey) throw new Error("fetchResendEmail: RESEND_API_KEY not set");
+
+  const res = await fetch(`https://api.resend.com/emails/${encodeURIComponent(emailId)}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Resend API ${res.status}: ${data?.message || JSON.stringify(data).slice(0, 200)}`);
+  }
+  return data;
+}

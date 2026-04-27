@@ -97,11 +97,16 @@ export async function getConversation(id, teamId) {
 
 export async function findConversationByThread({ teamId, campaignId, prospectEmail, threadRootMessageId }) {
   if (threadRootMessageId) {
+    // Match against both stripped and angle-bracketed forms — different
+    // mail systems present Message-IDs differently and we historically
+    // stored them with angles.
+    const stripped = String(threadRootMessageId).replace(/^<|>$/g, "").trim();
+    const wrapped = `<${stripped}>`;
     const byThread = await supabase
       .from("ai_conversations")
       .select("*")
       .eq("team_id", teamId)
-      .eq("thread_root_message_id", threadRootMessageId)
+      .in("thread_root_message_id", [stripped, wrapped])
       .maybeSingle();
     if (byThread.data) return byThread.data;
   }
@@ -116,6 +121,24 @@ export async function findConversationByThread({ teamId, campaignId, prospectEma
     if (byPair.data) return byPair.data;
   }
   return null;
+}
+
+// Fallback when threading headers aren't available (Resend's inbound webhook
+// strips them). Pick the most recently updated non-terminal conversation
+// for this prospect — works because in practice a prospect rarely has more
+// than one active thread with us at a time.
+export async function findActiveConversationByEmail({ teamId, prospectEmail }) {
+  if (!prospectEmail) return null;
+  const { data, error } = await supabase
+    .from("ai_conversations")
+    .select("*")
+    .eq("team_id", teamId)
+    .ilike("prospect_email", prospectEmail)
+    .not("status", "in", "(dead,opted_out,booked)")
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return data?.[0] || null;
 }
 
 export async function createConversation({ teamId, campaignId, contactId, prospectEmail, prospectName, prospectCompany, prospectDossier, threadRootMessageId, threadSubject }) {
