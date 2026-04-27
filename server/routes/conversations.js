@@ -374,18 +374,15 @@ export function conversationsWebhookRoutes() {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "RESEND_API_KEY not set" });
 
-    // The /inbound-emails/{id} path returned 405 (path exists, method wrong).
-    // Try sub-resources and list endpoints.
+    // SDK exposes resend.emails.receiving.get(id) — that's a separate path
+    // from the Retrieve Email endpoint. Probe likely shapes.
     const probes = [
-      { method: "GET",  url: `https://api.resend.com/inbound-emails` },
-      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/raw` },
-      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/content` },
-      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/body` },
-      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/html` },
-      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/text` },
-      { method: "GET",  url: `https://api.resend.com/inbound-emails/${id}/message` },
-      { method: "POST", url: `https://api.resend.com/inbound-emails/${id}` },
-      { method: "OPTIONS", url: `https://api.resend.com/inbound-emails/${id}` },
+      { method: "GET", url: `https://api.resend.com/emails/receiving/${id}` },
+      { method: "GET", url: `https://api.resend.com/receiving/${id}` },
+      { method: "GET", url: `https://api.resend.com/receiving/emails/${id}` },
+      { method: "GET", url: `https://api.resend.com/inbound/${id}` },
+      { method: "GET", url: `https://api.resend.com/inbound/emails/${id}` },
+      { method: "GET", url: `https://api.resend.com/v1/emails/receiving/${id}` },
     ];
     const out = [];
     for (const { method, url } of probes) {
