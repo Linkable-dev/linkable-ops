@@ -348,9 +348,28 @@ export function conversationsRoutes() {
     }
   });
 
-  // Debug: fetch one email via Resend's API by id. Tells us if the API even
-  // returns body content for inbound emails.
+  return router;
+}
+
+// Webhook router — separate, mounted WITHOUT requireOpsAdmin.
+//
+// Resend signs every webhook payload via Svix. We verify the signature using
+// the raw request body (captured by the verify callback in server/index.js),
+// log the event regardless of validity, then dispatch by event type.
+//
+// Event types:
+//   email.received           → handleInbound (prospect reply)
+//   email.bounced            → suppression + mark conversation dead
+//   email.complained         → suppression + opt-out
+//   email.delivered          → no-op (heartbeat)
+//   email.opened/clicked     → ignored (we don't act on these for now)
+export function conversationsWebhookRoutes() {
+  const router = Router();
+
+  // Debug: fetch one email via Resend's API by id. Returns shape so we can
+  // see if /emails/{id} even includes body for inbound emails.
   router.get("/debug/resend-email/:id", async (req, res) => {
+    if (!checkDebugAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {
       const { fetchResendEmail } = await import("../automation/inbound-parser.js");
       const data = await fetchResendEmail(req.params.id);
@@ -369,10 +388,10 @@ export function conversationsRoutes() {
   });
 
   // Debug: replay a stored ai_raw_events row through handleInbound.
-  // Useful to re-run after deploying parser fixes without making the user
-  // send another reply.
   router.post("/debug/replay-event/:id", async (req, res) => {
+    if (!checkDebugAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {
+      const { getDefaultTeamId } = await import("../automation/conversation-state.js");
       const teamId = await getDefaultTeamId();
       const { supabase } = await import("../lib/supabase.js");
       const { data: ev, error } = await supabase
@@ -391,24 +410,6 @@ export function conversationsRoutes() {
       res.status(500).json({ error: err.message, stack: err.stack?.split("\n").slice(0, 5) });
     }
   });
-
-  return router;
-}
-
-// Webhook router — separate, mounted WITHOUT requireOpsAdmin.
-//
-// Resend signs every webhook payload via Svix. We verify the signature using
-// the raw request body (captured by the verify callback in server/index.js),
-// log the event regardless of validity, then dispatch by event type.
-//
-// Event types:
-//   email.received           → handleInbound (prospect reply)
-//   email.bounced            → suppression + mark conversation dead
-//   email.complained         → suppression + opt-out
-//   email.delivered          → no-op (heartbeat)
-//   email.opened/clicked     → ignored (we don't act on these for now)
-export function conversationsWebhookRoutes() {
-  const router = Router();
 
   router.post("/inbound", async (req, res) => {
     const eventType = req.body?.type || null;
@@ -502,6 +503,17 @@ export function conversationsWebhookRoutes() {
   });
 
   return router;
+}
+
+// Public debug endpoints, protected by CRON_SECRET. Mounted via the webhook
+// router so they can be hit from outside the admin auth context.
+function checkDebugAuth(req) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) return false;
+  const auth = req.headers.authorization || "";
+  if (auth.replace(/^Bearer\s+/i, "") === expected) return true;
+  if (req.query.secret === expected) return true;
+  return false;
 }
 
 // Drop auth/cookie headers before logging — defense in depth.
