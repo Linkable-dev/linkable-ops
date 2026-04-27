@@ -82,6 +82,9 @@ export const api = {
     request(`/conversations/suppressions?${buildQs({ limit })}`),
   listAiEvents: ({ limit } = {}) =>
     request(`/conversations/events?${buildQs({ limit })}`),
+  getAiMetrics: () => request("/conversations/metrics"),
+  unpauseAiCampaign: (id) =>
+    request(`/conversations/campaigns/${id}/unpause`, { method: "POST" }),
 };
 
 // Helpers for formatting

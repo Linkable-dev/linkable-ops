@@ -42,7 +42,13 @@ function replyToAddress() {
 
 // ---------- FIRST MESSAGE ----------
 
-export async function sendFirstMessage({ teamId, campaignId, prospect, dryRun = false }) {
+// Send a first message to one prospect. Three modes:
+//   dryRun: true               — generate, don't insert/send
+//   scheduledFor: <ISO>        — insert row scheduled for that time, don't send
+//                                 now. Cron picks it up. Used by bulk runner.
+//   neither                    — generate, insert, send immediately. Used by
+//                                 the "Send to one address" button.
+export async function sendFirstMessage({ teamId, campaignId, prospect, dryRun = false, scheduledFor = null }) {
   const team = teamId || (await getDefaultTeamId());
   const campaign = await getCampaign(campaignId, team);
 
@@ -80,17 +86,22 @@ export async function sendFirstMessage({ teamId, campaignId, prospect, dryRun = 
     threadSubject: gen.subject,
   });
 
-  const sendResult = dryRun
-    ? { success: true, dryRun: true }
-    : await sendOutbound({
-        campaign,
-        toEmail: prospect.email,
-        toName: prospect.name,
-        subject: gen.subject,
-        body: gen.body,
-        messageId: rootMessageId,
-        inReplyTo: null,
-      });
+  // Decide whether to send now or schedule.
+  const willScheduleOnly = !!scheduledFor && !dryRun;
+  const willSendNow = !dryRun && !scheduledFor;
+
+  let sendResult = { success: true, dryRun: true };
+  if (willSendNow) {
+    sendResult = await sendOutbound({
+      campaign,
+      toEmail: prospect.email,
+      toName: prospect.name,
+      subject: gen.subject,
+      body: gen.body,
+      messageId: rootMessageId,
+      inReplyTo: null,
+    });
+  }
 
   const outboundRow = await insertMessage({
     team_id: team,
@@ -99,7 +110,9 @@ export async function sendFirstMessage({ teamId, campaignId, prospect, dryRun = 
     role: "assistant",
     subject: gen.subject,
     body: gen.body,
-    message_id: rootMessageId,
+    // Only stamp message_id if we actually sent now. The cron path stamps
+    // it at send time so each scheduled row gets a fresh, valid ID.
+    message_id: willSendNow ? rootMessageId : null,
     in_reply_to: null,
     email_provider_id: sendResult?.resendId || null,
     model: gen.model,
@@ -107,15 +120,28 @@ export async function sendFirstMessage({ teamId, campaignId, prospect, dryRun = 
     tokens_out: gen.usage?.out,
     cache_read_tokens: gen.usage?.cacheRead,
     cache_write_tokens: gen.usage?.cacheWrite,
-    sent_at: sendResult?.success ? new Date().toISOString() : null,
-    error: sendResult?.success ? null : sendResult?.error,
+    scheduled_for: willScheduleOnly ? scheduledFor : null,
+    sent_at: sendResult?.success && willSendNow ? new Date().toISOString() : null,
+    error: sendResult?.success || willScheduleOnly ? null : sendResult?.error,
   });
 
-  await updateConversation(conversation.id, team, {
-    last_outbound_at: new Date().toISOString(),
-  });
+  if (willSendNow) {
+    await updateConversation(conversation.id, team, {
+      last_outbound_at: new Date().toISOString(),
+    });
+  } else if (willScheduleOnly) {
+    await updateConversation(conversation.id, team, {
+      next_action_at: scheduledFor,
+    });
+  }
 
-  return { conversation, outbound: outboundRow, send: sendResult, ai: gen };
+  return {
+    conversation,
+    outbound: outboundRow,
+    send: sendResult,
+    ai: gen,
+    scheduled: willScheduleOnly ? scheduledFor : null,
+  };
 }
 
 // ---------- INBOUND ----------
@@ -383,37 +409,53 @@ export async function sendDueScheduled({ limit = 50 } = {}) {
       continue;
     }
     const campaign = await getCampaign(conv.campaign_id, teamId);
+
+    // Skip when the campaign is paused (manual or auto). Replies STILL go out
+    // because once a thread is open we owe the prospect a response, but new
+    // first messages stay queued until the campaign is unpaused.
+    const isFirstMessage = !msg.in_reply_to;
+    if (campaign.status === "paused" && isFirstMessage) {
+      results.push({ id: msg.id, sent: false, reason: `campaign-paused: ${campaign.auto_pause_reason || "manual"}` });
+      continue;
+    }
     const messageId = `<${cryptoRandomId()}@linkable.link>`;
 
-    // Build the full References chain: every prior message_id in this
-    // conversation, in chronological order. Mail clients use this + the
-    // In-Reply-To to thread the message. Without the chain, replies show
-    // up as a separate thread in many clients.
-    const { data: priorMsgs } = await supabase
-      .from("ai_messages")
-      .select("message_id")
-      .eq("team_id", teamId)
-      .eq("conversation_id", conv.id)
-      .not("message_id", "is", null)
-      .neq("id", msg.id)
-      .order("created_at", { ascending: true });
-    const references = (priorMsgs || [])
-      .map((m) => m.message_id)
-      .filter(Boolean);
-    if (references.length === 0 && conv.thread_root_message_id) {
-      references.push(conv.thread_root_message_id);
+    // For replies only: build the full References chain so mail clients
+    // thread under the original conversation. First messages have no
+    // chain — sending them with a populated References would be wrong.
+    let references = [];
+    let inReplyTo = null;
+    if (!isFirstMessage) {
+      const { data: priorMsgs } = await supabase
+        .from("ai_messages")
+        .select("message_id")
+        .eq("team_id", teamId)
+        .eq("conversation_id", conv.id)
+        .not("message_id", "is", null)
+        .neq("id", msg.id)
+        .order("created_at", { ascending: true });
+      references = (priorMsgs || []).map((m) => m.message_id).filter(Boolean);
+      inReplyTo = msg.in_reply_to || references[references.length - 1] || conv.thread_root_message_id;
     }
 
     const send = await sendOutbound({
       campaign,
       toEmail: conv.prospect_email,
       toName: conv.prospect_name,
-      subject: msg.subject || replySubject(conv.thread_subject),
+      subject: msg.subject || (isFirstMessage ? conv.thread_subject : replySubject(conv.thread_subject)),
       body: msg.body,
       messageId,
-      inReplyTo: msg.in_reply_to || references[references.length - 1] || conv.thread_root_message_id,
+      inReplyTo,
       references,
     });
+
+    // First-message path: stamp the new Message-ID as the conversation's
+    // thread root so future inbound replies match here.
+    if (send.success && isFirstMessage) {
+      await updateConversation(conv.id, teamId, {
+        thread_root_message_id: messageId,
+      });
+    }
     await supabase
       .from("ai_messages")
       .update({

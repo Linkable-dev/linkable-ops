@@ -31,6 +31,7 @@ import {
   listSuppressions,
   listRawEvents,
   listBulkRuns,
+  getCampaignMetrics,
 } from "../automation/conversation-state.js";
 import {
   sendFirstMessage,
@@ -343,6 +344,31 @@ export function conversationsRoutes() {
     try {
       const teamId = await getDefaultTeamId();
       res.json(await listBulkRuns(teamId, { limit: parseInt(req.query.limit) || 25 }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-campaign funnel metrics for the dashboard.
+  router.get("/metrics", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      res.json(await getCampaignMetrics(teamId));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Manually unpause a campaign that auto-paused on bounce rate.
+  router.post("/campaigns/:id/unpause", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const updated = await updateCampaign(req.params.id, teamId, {
+        status: "active",
+        auto_paused_at: null,
+        auto_pause_reason: null,
+      });
+      res.json(updated);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

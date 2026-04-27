@@ -131,6 +131,7 @@ export default function AiInboxPage() {
         </div>
       )}
 
+      {tab === "metrics" && <MetricsPanel theme={theme} />}
       {tab === "bulk" && <BulkPanel campaigns={campaigns} theme={theme} />}
       {tab === "suppressions" && <SuppressionsPanel theme={theme} />}
       {tab === "events" && <EventsPanel theme={theme} />}
@@ -141,6 +142,7 @@ export default function AiInboxPage() {
 function Tabs({ tab, setTab, theme }) {
   const tabs = [
     { id: "threads", label: "Threads" },
+    { id: "metrics", label: "Metrics" },
     { id: "bulk", label: "Bulk start" },
     { id: "suppressions", label: "Suppressions" },
     { id: "events", label: "Webhook events" },
@@ -477,6 +479,112 @@ function SingleSendCard({ campaigns, campaignId, setCampaignId, theme }) {
         </div>
       )}
     </Card>
+  );
+}
+
+function MetricsPanel({ theme }) {
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  async function refresh() {
+    try {
+      const data = await api.getAiMetrics();
+      setRows(data);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function unpause(id) {
+    try {
+      await api.unpauseAiCampaign(id);
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  if (loading && rows.length === 0) {
+    return <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>;
+  }
+  if (error) return <Card><div style={{ color: "#DC2626" }}>{error}</div></Card>;
+  if (rows.length === 0) {
+    return <Card><div style={{ color: theme.textMuted, fontSize: 13 }}>No campaigns yet.</div></Card>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {rows.map((c) => <CampaignMetricsCard key={c.id} c={c} theme={theme} onUnpause={() => unpause(c.id)} />)}
+    </div>
+  );
+}
+
+function CampaignMetricsCard({ c, theme, onUnpause }) {
+  const replyRate = c.conversations > 0 ? Math.round((c.replied / c.conversations) * 100) : 0;
+  const qualifiedRate = c.conversations > 0 ? Math.round(((c.qualified + c.booked) / c.conversations) * 100) : 0;
+  const bookedRate = c.conversations > 0 ? Math.round((c.booked / c.conversations) * 100) : 0;
+  const isPaused = c.status === "paused" || !!c.auto_paused_at;
+
+  return (
+    <Card style={{ padding: 0 }}>
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>{c.name}</div>
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>
+            cap {c.daily_send_cap || "default"}/day · window {c.send_window_start_hour}:00–{c.send_window_end_hour}:00 {c.timezone}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {isPaused ? (
+            <>
+              <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>
+                PAUSED
+              </span>
+              {c.auto_pause_reason && (
+                <span style={{ fontSize: 11, color: theme.textMid, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.auto_pause_reason}
+                </span>
+              )}
+              <button onClick={onUnpause} style={miniBtn(theme)}>Unpause</button>
+            </>
+          ) : (
+            <span style={{ background: "#D1FAE5", color: "#065F46", fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>
+              {c.status}
+            </span>
+          )}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1, background: theme.border }}>
+        <Metric label="Sent today" value={c.sent_today} sub={`/${c.daily_send_cap || "—"}`} theme={theme} />
+        <Metric label="Pending" value={c.scheduled_pending} theme={theme} />
+        <Metric label="Total sent" value={c.sent_total} theme={theme} />
+        <Metric label="Replied" value={`${c.replied}`} sub={`${replyRate}%`} theme={theme} />
+        <Metric label="Qualified" value={`${c.qualified + c.booked}`} sub={`${qualifiedRate}%`} accent="#065F46" theme={theme} />
+        <Metric label="Booked" value={c.booked} sub={`${bookedRate}%`} accent="#065F46" theme={theme} />
+        <Metric label="Dead/Out" value={c.dead + c.opted_out} accent="#991B1B" theme={theme} />
+      </div>
+    </Card>
+  );
+}
+
+function Metric({ label, value, sub, theme, accent }) {
+  return (
+    <div style={{ background: theme.surface, padding: "12px 14px" }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+        <span style={{ fontSize: 18, fontWeight: 600, color: accent || theme.text }}>{value}</span>
+        {sub && <span style={{ fontSize: 11, color: theme.textMuted }}>{sub}</span>}
+      </div>
+    </div>
   );
 }
 
