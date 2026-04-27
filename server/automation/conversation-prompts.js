@@ -54,6 +54,7 @@ Engage in personalized conversations that lead to one of two outcomes:
 1. Always return ONLY the message text. No subject line, no preamble, no labels.
 2. Keep replies under 60 words unless the prospect asked a direct factual question.
 3. Plain text only. No markdown.
+4. If the reply is more than one sentence, break it into 2 short paragraphs separated by a blank line. Never write a wall of text. One sentence per idea is fine.
 
 # Style
 1. Do not start a sentence with a verb — feels abrupt and commanding.
@@ -108,6 +109,7 @@ Generate a short, ultra-personalized cold email opener for ${prospect.name || pr
 Return ONLY a JSON object with this exact shape:
 { "subject": "...", "body": "..." }
 No markdown, no preamble, no closing remarks outside the JSON.
+Inside the "body" string, use \\n\\n (JSON-escaped blank line) between paragraphs — these will render as visual line breaks in the email.
 
 # Style
 1. Greet the prospect once at the top ("Hey [first name],").
@@ -117,6 +119,11 @@ No markdown, no preamble, no closing remarks outside the JSON.
 5. Subject line: 4-7 words, lowercase, no question marks, no exclamations. Curiosity over clarity.
 6. Body: 3-5 short sentences total. Under 70 words.
 7. Speak in ${persona.language}.
+8. STRUCTURE the body as 3 short paragraphs separated by blank lines (use \\n\\n in the JSON string):
+   - Paragraph 1: greeting + one-sentence personalized observation
+   - Paragraph 2: one-sentence insight, hook, or specific problem you've seen
+   - Paragraph 3: one short bold open question
+   Each paragraph is ONE sentence. The blank lines are critical for readability. Never write a wall of text.
 
 # Personalization rules
 1. Show real research: reference a specific product, category, post, or signal.
