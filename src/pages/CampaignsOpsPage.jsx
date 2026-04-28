@@ -134,14 +134,15 @@ export default function CampaignsOpsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
             <colgroup>
               <col style={{ width: 28 }} />
-              <col style={{ width: "26%" }} />
-              <col style={{ width: "16%" }} />
-              <col style={{ width: "8%" }} />
-              <col style={{ width: "9%" }} />
-              <col style={{ width: "8%" }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "7%" }} />
               <col style={{ width: "8%" }} />
               <col style={{ width: "7%" }} />
-              <col style={{ width: "18%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "22%" }} />
             </colgroup>
             <thead>
               <tr style={{ background: theme.bg }}>
@@ -150,6 +151,7 @@ export default function CampaignsOpsPage() {
                 <Th theme={theme}>Brand</Th>
                 <Th theme={theme} num>Applied</Th>
                 <Th theme={theme} num>Accepted</Th>
+                <Th theme={theme} num>Sample acc.</Th>
                 <Th theme={theme} num>Shipped</Th>
                 <Th theme={theme} num>Clicks</Th>
                 <Th theme={theme} num>Sales</Th>
@@ -157,9 +159,9 @@ export default function CampaignsOpsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <SkeletonTableRows rows={8} cols={9} theme={theme} />}
+              {loading && <SkeletonTableRows rows={8} cols={10} theme={theme} />}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={9} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No campaigns match.</td></tr>
+                <tr><td colSpan={10} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No campaigns match.</td></tr>
               )}
               {filtered.map((c) => {
                 const isOpen = expandedId === c.id;
@@ -186,6 +188,7 @@ export default function CampaignsOpsPage() {
                       <Td theme={theme}>{c.brand_name || "—"}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.creators_applied)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.creators_accepted)}</Td>
+                      <Td theme={theme} num>{friendlyNumber(c.samples_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.products_shipped)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.clicks)}</Td>
                       <Td theme={theme} num style={{ fontWeight: c.sales > 0 ? 600 : 400, color: c.sales > 0 ? theme.text : theme.textMuted }}>{friendlyNumber(c.sales)}</Td>
@@ -195,7 +198,7 @@ export default function CampaignsOpsPage() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={9} style={{ padding: 0, background: mode === "dark" ? "#0d0d0d" : "#FAFAFA", borderTop: `1px solid ${theme.border}` }}>
+                        <td colSpan={10} style={{ padding: 0, background: mode === "dark" ? "#0d0d0d" : "#FAFAFA", borderTop: `1px solid ${theme.border}` }}>
                           <CreatorTable
                             theme={theme}
                             mode={mode}
@@ -275,7 +278,7 @@ function BottleneckBadge({ theme, mode, label, tone }) {
   return (
     <span style={{
       display: "inline-block", padding: "3px 8px", borderRadius: 12,
-      fontSize: 11, fontWeight: 600,
+      fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
       background: mode === "dark" ? palette.bgDark : palette.bg,
       color: mode === "dark" ? palette.fgDark : palette.fg,
     }}>{label}</span>
