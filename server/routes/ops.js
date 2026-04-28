@@ -58,10 +58,12 @@ export function opsRoutes() {
           WHERE l.product_id IN (SELECT id FROM page) AND ${ND.replace(/deleted/g, "l.deleted")}
           GROUP BY l.product_id
         ),
-        shipped_agg AS (
-          SELECT sr.product_id, COUNT(DISTINCT sr.influencer_user_id) AS products_shipped
+        sample_agg AS (
+          SELECT sr.product_id,
+                 COUNT(DISTINCT sr.influencer_user_id) FILTER (WHERE sr.status = 'accepted') AS samples_accepted,
+                 COUNT(DISTINCT sr.influencer_user_id) FILTER (WHERE sr.status = 'shipped')  AS products_shipped
           FROM sample_requests sr
-          WHERE sr.product_id IN (SELECT id FROM page) AND ${ND.replace(/deleted/g, "sr.deleted")} AND sr.status = 'shipped'
+          WHERE sr.product_id IN (SELECT id FROM page) AND ${ND.replace(/deleted/g, "sr.deleted")}
           GROUP BY sr.product_id
         ),
         sales_agg AS (
@@ -79,13 +81,14 @@ export function opsRoutes() {
           p.created,
           COALESCE(la.creators_applied, 0)  AS creators_applied,
           COALESCE(la.creators_accepted, 0) AS creators_accepted,
-          COALESCE(sh.products_shipped, 0)  AS products_shipped,
+          COALESCE(sm.samples_accepted, 0)  AS samples_accepted,
+          COALESCE(sm.products_shipped, 0)  AS products_shipped,
           COALESCE(la.clicks, 0)            AS clicks,
           COALESCE(sa.sales, 0)             AS sales,
           COALESCE(sa.revenue, 0)           AS revenue
         FROM page p
         LEFT JOIN link_agg la    ON la.product_id = p.id
-        LEFT JOIN shipped_agg sh ON sh.product_id = p.id
+        LEFT JOIN sample_agg sm  ON sm.product_id = p.id
         LEFT JOIN sales_agg sa   ON sa.product_id = p.id
         ORDER BY p.created DESC NULLS LAST
       `, [searchPattern, LINK_ACCEPTED, limit, offset]);
@@ -111,22 +114,36 @@ export function opsRoutes() {
           COALESCE(NULLIF(TRIM(CONCAT_WS(' ', i.first_name, i.last_name)), ''),
                    i.instagram_username, i.username, 'Unknown creator')                                       AS creator_name,
           i.instagram_username                                                                                AS instagram_username,
-          (SELECT COUNT(*) FROM sample_requests sr WHERE sr.link_id = l.id AND ${ND.replace(/deleted/g, "sr.deleted")}) > 0        AS sample_requested,
-          (SELECT COUNT(*) FROM sample_requests sr WHERE sr.link_id = l.id AND ${ND.replace(/deleted/g, "sr.deleted")} AND sr.status = 'shipped') > 0 AS sample_shipped,
+          sr_latest.status                                                                                    AS sample_request_status,
           (SELECT COUNT(*) FROM orders o WHERE o.link_id = l.id AND ${ND.replace(/deleted/g, "o.deleted")})                        AS sales,
           (SELECT COALESCE(SUM(o.shopify_amount), 0) FROM orders o WHERE o.link_id = l.id AND ${ND.replace(/deleted/g, "o.deleted")}) AS revenue
         FROM links l
         LEFT JOIN influencers i ON i.user_id = l.influencer_user_id
+        LEFT JOIN LATERAL (
+          SELECT sr.status
+          FROM sample_requests sr
+          WHERE sr.link_id = l.id AND ${ND.replace(/deleted/g, "sr.deleted")}
+          ORDER BY sr.created DESC NULLS LAST
+          LIMIT 1
+        ) sr_latest ON true
         WHERE l.product_id = $1 AND ${ND.replace(/deleted/g, "l.deleted")}
         ORDER BY l.created DESC NULLS LAST
       `, [id]);
 
       const result = rows.map((r) => {
+        const srStatus = r.sample_request_status; // 'pending' | 'accepted' | 'shipped' | other | null
         let status = "Applied";
         if (Number(r.sales) > 0) status = "Sold";
-        else if (r.sample_shipped) status = "Shipped";
+        else if (srStatus === "shipped") status = "Shipped";
+        else if (srStatus === "accepted") status = "Sample Accepted";
         else if (r.link_status === LINK_ACCEPTED) status = "Accepted";
-        return { ...r, status };
+        return {
+          ...r,
+          status,
+          // Kept for any consumer still reading the booleans:
+          sample_requested: srStatus != null,
+          sample_shipped: srStatus === "shipped",
+        };
       });
       res.json(result);
     } catch (e) {

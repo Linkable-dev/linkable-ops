@@ -5,14 +5,15 @@ import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, Skeleton } from "../components/ui/Skeleton";
 
 const STATUS_COLORS = {
-  Applied:  { bg: "#FEF3C7", fg: "#92400E", bgDark: "#3B2A0E", fgDark: "#FCD34D" },
-  Accepted: { bg: "#DBEAFE", fg: "#1E40AF", bgDark: "#0F2547", fgDark: "#93C5FD" },
-  Shipped:  { bg: "#E0E7FF", fg: "#3730A3", bgDark: "#1E1B47", fgDark: "#A5B4FC" },
-  Posted:   { bg: "#FCE7F3", fg: "#9D174D", bgDark: "#3F0F26", fgDark: "#F9A8D4" },
-  Sold:     { bg: "#D1FAE5", fg: "#065F46", bgDark: "#0E2E22", fgDark: "#6EE7B7" },
+  Applied:           { bg: "#FEF3C7", fg: "#92400E", bgDark: "#3B2A0E", fgDark: "#FCD34D" },
+  Accepted:          { bg: "#DBEAFE", fg: "#1E40AF", bgDark: "#0F2547", fgDark: "#93C5FD" },
+  "Sample Accepted": { bg: "#CCFBF1", fg: "#115E59", bgDark: "#0E2E2A", fgDark: "#5EEAD4" },
+  Shipped:           { bg: "#E0E7FF", fg: "#3730A3", bgDark: "#1E1B47", fgDark: "#A5B4FC" },
+  Posted:            { bg: "#FCE7F3", fg: "#9D174D", bgDark: "#3F0F26", fgDark: "#F9A8D4" },
+  Sold:              { bg: "#D1FAE5", fg: "#065F46", bgDark: "#0E2E22", fgDark: "#6EE7B7" },
 };
 
-const STAGES = ["Applied", "Accepted", "Shipped", "Sold"];
+const STAGES = ["Applied", "Accepted", "Sample Accepted", "Shipped", "Sold"];
 
 const PAGE_SIZE = 25;
 
@@ -254,10 +255,12 @@ function CampaignRows({ children }) {
 function computeBottleneck(c) {
   const applied = Number(c.creators_applied || 0);
   const accepted = Number(c.creators_accepted || 0);
+  const samplesAccepted = Number(c.samples_accepted || 0);
   const shipped = Number(c.products_shipped || 0);
   const sales = Number(c.sales || 0);
   if (applied === 0) return { label: "No applications", tone: "warn" };
   if (accepted === 0) return { label: "No acceptances", tone: "warn" };
+  if (samplesAccepted > 0 && shipped < samplesAccepted) return { label: "Brand: accepted, not shipped", tone: "danger" };
   if (shipped < accepted) return { label: "Brand: not shipping", tone: "danger" };
   if (sales === 0) return { label: "Content: no sales", tone: "info" };
   return null;
@@ -310,8 +313,7 @@ function CreatorTable({ theme, mode, creators, loading }) {
           <tr style={{ color: theme.textMuted, textAlign: "left" }}>
             <Th theme={theme} sub>Creator</Th>
             <Th theme={theme} sub>Status</Th>
-            <Th theme={theme} sub>Sample requested</Th>
-            <Th theme={theme} sub>Sample shipped</Th>
+            <Th theme={theme} sub>Sample status</Th>
             <Th theme={theme} sub num>Clicks</Th>
             <Th theme={theme} sub num>Sales</Th>
           </tr>
@@ -326,8 +328,7 @@ function CreatorTable({ theme, mode, creators, loading }) {
                 )}
               </Td>
               <Td theme={theme}><StatusPill theme={theme} mode={mode} status={cr.status} /></Td>
-              <Td theme={theme}><YN theme={theme} v={cr.sample_requested} /></Td>
-              <Td theme={theme}><YN theme={theme} v={cr.sample_shipped} /></Td>
+              <Td theme={theme}><SampleStatus theme={theme} v={cr.sample_request_status} /></Td>
               <Td theme={theme} num>{friendlyNumber(cr.clicks)}</Td>
               <Td theme={theme} num style={{ fontWeight: cr.sales > 0 ? 600 : 400, color: cr.sales > 0 ? theme.text : theme.textMuted }}>{friendlyNumber(cr.sales)}</Td>
             </tr>
@@ -342,8 +343,9 @@ function StageFunnel({ theme, mode, creators }) {
   const counts = STAGES.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
   for (const c of creators) {
     counts.Applied += 1;
-    if (c.status === "Accepted" || c.status === "Shipped" || c.status === "Sold") counts.Accepted += 1;
-    if (c.status === "Shipped" || c.status === "Sold") counts.Shipped += 1;
+    if (["Accepted", "Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts.Accepted += 1;
+    if (["Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts["Sample Accepted"] += 1;
+    if (["Shipped", "Sold"].includes(c.status)) counts.Shipped += 1;
     if (c.status === "Sold") counts.Sold += 1;
   }
   return (
@@ -382,6 +384,12 @@ function YN({ theme, v }) {
   return v
     ? <span style={{ color: theme.text, fontWeight: 500 }}>Yes</span>
     : <span style={{ color: theme.textMuted }}>—</span>;
+}
+
+function SampleStatus({ theme, v }) {
+  if (!v) return <span style={{ color: theme.textMuted }}>—</span>;
+  const label = v.charAt(0).toUpperCase() + v.slice(1);
+  return <span style={{ color: theme.text, fontWeight: 500 }}>{label}</span>;
 }
 
 function Th({ children, theme, num, sub }) {
