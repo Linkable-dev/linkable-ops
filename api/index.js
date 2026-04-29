@@ -3,6 +3,7 @@ import cors from "cors";
 import { tableRoutes } from "../server/routes/tables.js";
 import { analyticsRoutes } from "../server/routes/analytics.js";
 import { opsRoutes } from "../server/routes/ops.js";
+import { adminUsersRoutes } from "../server/routes/admin-users.js";
 import { authRoutes, requireOpsAdmin } from "../server/routes/auth.js";
 import {
   conversationsRoutes,
@@ -88,6 +89,7 @@ app.use("/api/cron", cronRoutes());
 app.use("/api/tables", requireOpsAdmin, tableRoutes());
 app.use("/api/analytics", requireOpsAdmin, analyticsRoutes());
 app.use("/api/ops", requireOpsAdmin, opsRoutes());
+app.use("/api/admin-users", requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 
 // Generic 404 with the URL Express actually saw, for easier debugging.
