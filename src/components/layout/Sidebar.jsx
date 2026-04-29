@@ -51,6 +51,14 @@ export default function Sidebar() {
     localStorage.setItem("sidebar:opsOpen", opsOpen ? "1" : "0");
   }, [opsOpen]);
 
+  const [aiOpen, setAiOpen] = useState(() => {
+    const saved = localStorage.getItem("sidebar:aiOpen");
+    return saved === null ? true : saved === "1";
+  });
+  useEffect(() => {
+    localStorage.setItem("sidebar:aiOpen", aiOpen ? "1" : "0");
+  }, [aiOpen]);
+
   useEffect(() => {
     api.getTables()
       .then(setTables)
@@ -206,9 +214,23 @@ export default function Sidebar() {
             marginTop: 4, marginBottom: 6,
           }}>
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
+            {navItem("/users", "Users", path.startsWith("/users"), usersIcon)}
+          </div>
+        )}
+
+        <div style={{ paddingTop: 4 }}>
+          {moduleHeader("AI", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
+        </div>
+        {(aiOpen || !sidebarOpen) && (
+          <div style={{
+            display: "flex", flexDirection: "column", gap: 1,
+            marginLeft: sidebarOpen ? 14 : 0,
+            paddingLeft: sidebarOpen ? 8 : 0,
+            borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
+            marginTop: 4, marginBottom: 6,
+          }}>
             {navItem("/ai/inbox", "AI Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
             {navItem("/ai/test-lab", "AI Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
-            {navItem("/users", "Users", path.startsWith("/users"), usersIcon)}
           </div>
         )}
 
