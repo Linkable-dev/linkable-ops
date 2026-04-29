@@ -30,6 +30,19 @@ export default function CampaignsOpsPage() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortBy, setSortBy] = useState("created");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const handleSort = (key) => {
+    if (sortBy === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(key);
+      // Numeric / severity columns are most useful descending; text ascending.
+      setSortDir(["campaign_name", "brand_name"].includes(key) ? "asc" : "desc");
+    }
+    setPage(0);
+  };
 
   // Debounce search input → server query
   useEffect(() => {
@@ -44,14 +57,14 @@ export default function CampaignsOpsPage() {
     setLoading(true);
     setError(null);
     setExpandedId(null);
-    api.getOpsCampaigns({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: debouncedSearch })
+    api.getOpsCampaigns({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: debouncedSearch, sortBy, sortDir })
       .then((res) => {
         setCampaigns(res.rows || []);
         setTotal(res.total || 0);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [page, debouncedSearch]);
+  }, [page, debouncedSearch, sortBy, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -147,15 +160,15 @@ export default function CampaignsOpsPage() {
             <thead>
               <tr style={{ background: theme.bg }}>
                 <Th theme={theme}></Th>
-                <Th theme={theme}>Campaign</Th>
-                <Th theme={theme}>Brand</Th>
-                <Th theme={theme} num>Applied</Th>
-                <Th theme={theme} num>Accepted</Th>
-                <Th theme={theme} num>Sample acc.</Th>
-                <Th theme={theme} num>Shipped</Th>
-                <Th theme={theme} num>Clicks</Th>
-                <Th theme={theme} num>Sales</Th>
-                <Th theme={theme}>Bottleneck</Th>
+                <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Campaign</Th>
+                <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Brand</Th>
+                <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Applied</Th>
+                <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Accepted</Th>
+                <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Sample acc.</Th>
+                <Th theme={theme} num sortKey="products_shipped"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Shipped</Th>
+                <Th theme={theme} num sortKey="clicks"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Clicks</Th>
+                <Th theme={theme} num sortKey="sales"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Sales</Th>
+                <Th theme={theme}     sortKey="bottleneck"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Bottleneck</Th>
               </tr>
             </thead>
             <tbody>
@@ -395,15 +408,29 @@ function SampleStatus({ theme, v }) {
   return <span style={{ color: theme.text, fontWeight: 500 }}>{label}</span>;
 }
 
-function Th({ children, theme, num, sub }) {
+function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort }) {
+  const isSortable = !!sortKey && !!onSort;
+  const isActive = isSortable && sortBy === sortKey;
+  const arrow = !isActive ? "" : (sortDir === "asc" ? " ↑" : " ↓");
+  const baseStyle = {
+    textAlign: num ? "right" : "left",
+    padding: sub ? "8px 10px" : "12px 12px",
+    fontSize: sub ? 10 : 11, fontWeight: 600,
+    textTransform: "uppercase", letterSpacing: 0.5,
+    color: isActive ? theme.text : theme.textMuted,
+    cursor: isSortable ? "pointer" : "default",
+    userSelect: "none",
+    whiteSpace: "nowrap",
+  };
   return (
-    <th style={{
-      textAlign: num ? "right" : "left",
-      padding: sub ? "8px 10px" : "12px 12px",
-      fontSize: sub ? 10 : 11, fontWeight: 600,
-      textTransform: "uppercase", letterSpacing: 0.5,
-      color: theme.textMuted,
-    }}>{children}</th>
+    <th
+      style={baseStyle}
+      onClick={isSortable ? () => onSort(sortKey) : undefined}
+      onMouseEnter={isSortable ? (e) => { e.currentTarget.style.color = theme.text; } : undefined}
+      onMouseLeave={isSortable ? (e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; } : undefined}
+    >
+      {children}{arrow}
+    </th>
   );
 }
 
