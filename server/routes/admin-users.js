@@ -1,5 +1,6 @@
 import express from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { signedUrls } from "../lib/gcs.js";
 
 // Mirrors the main app's role enum (see linkable-new/backend/models/enums.py
 // — note `routers/users.py` has stale duplicate constants with INFLUENCER=1
@@ -29,6 +30,8 @@ export function adminUsersRoutes() {
   router.get("/brands", async (req, res) => {
     try {
       const { rows } = await listBrands(req.query);
+      const signed = await signedUrls(rows.map((r) => r.logo_pic_name || ""));
+      rows.forEach((r, i) => { r.signed_logo_pic = signed[i]; });
       res.json(rows);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -38,6 +41,8 @@ export function adminUsersRoutes() {
   router.get("/creators", async (req, res) => {
     try {
       const { rows } = await listCreators(req.query);
+      const signed = await signedUrls(rows.map((r) => r.profile_pic_name || ""));
+      rows.forEach((r, i) => { r.signed_profile_pic = signed[i]; });
       res.json(rows);
     } catch (err) {
       res.status(500).json({ error: err.message });

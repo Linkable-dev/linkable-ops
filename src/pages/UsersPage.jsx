@@ -9,11 +9,11 @@ import { Skeleton } from "../components/ui/Skeleton";
 const TABS = [["brands", "Brands"], ["creators", "Creators"]];
 
 function avatarFor(row, kind) {
-  if (kind === "brand") {
-    if (row.logo_pic_name) return `/api/files/signed-url?blob=${row.logo_pic_name}`;
-    return null;
-  }
-  if (row.profile_pic_name) return `/api/files/signed-url?blob=${row.profile_pic_name}`;
+  // Backend pre-signs GCS URLs into signed_logo_pic / signed_profile_pic so
+  // the <img> tag can load them directly. For creators we also fall back to
+  // the live Instagram CDN URL when GCS has no profile pic.
+  if (kind === "brand") return row.signed_logo_pic || null;
+  if (row.signed_profile_pic) return row.signed_profile_pic;
   if (row.instagram_profile_image && /^https?:\/\//.test(row.instagram_profile_image)) {
     return row.instagram_profile_image;
   }
@@ -190,6 +190,8 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImg = avatar && !imgFailed;
 
   return (
     <div style={{
@@ -209,8 +211,8 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
         display: "flex", alignItems: "center", justifyContent: "center",
         fontSize: 11, fontWeight: 700, overflow: "hidden",
       }}>
-        {avatar
-          ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        {showImg
+          ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
           : initials
         }
       </div>
