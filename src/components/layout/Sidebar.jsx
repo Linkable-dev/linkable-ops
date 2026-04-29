@@ -214,12 +214,12 @@ export default function Sidebar() {
             marginTop: 4, marginBottom: 6,
           }}>
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
-            {navItem("/users", "Users", path.startsWith("/users"), usersIcon)}
+            {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
           </div>
         )}
 
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("AI", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
+          {moduleHeader("GTM", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
         </div>
         {(aiOpen || !sidebarOpen) && (
           <div style={{

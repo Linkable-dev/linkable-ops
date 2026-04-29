@@ -79,7 +79,7 @@ export default function UsersPage() {
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 6px", color: theme.text }}>
-          Users
+          Impersonation
         </h1>
         <p style={{ fontSize: 13, color: theme.textMuted, margin: 0 }}>
           Open the production main app as any brand or creator. Sessions are minted in prod and
