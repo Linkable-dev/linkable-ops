@@ -3,6 +3,7 @@ import cors from "cors";
 import { tableRoutes } from "./routes/tables.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { opsRoutes } from "./routes/ops.js";
+import { adminUsersRoutes } from "./routes/admin-users.js";
 import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import {
   conversationsRoutes,
@@ -38,6 +39,7 @@ app.use("/api/cron", cronRoutes());
 app.use("/api/tables", requireOpsAdmin, tableRoutes());
 app.use("/api/analytics", requireOpsAdmin, analyticsRoutes());
 app.use("/api/ops", requireOpsAdmin, opsRoutes());
+app.use("/api/admin-users", requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 
 const PORT = process.env.PORT || 3001;

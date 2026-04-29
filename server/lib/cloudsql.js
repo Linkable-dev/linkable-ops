@@ -4,18 +4,21 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
-// Load .env for local dev
+// Load .env files for local dev. We check `server/.env` first (the canonical
+// server env), then the repo-root `.env` as a fallback so vars like
+// MAIN_APP_CLIENT_URL set in the root file still work locally.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dirname, "..", ".env");
-try {
-  const envContent = readFileSync(envPath, "utf-8");
-  for (const line of envContent.split("\n")) {
-    const [key, ...rest] = line.split("=");
-    if (key && rest.length && !process.env[key.trim()]) {
-      process.env[key.trim()] = rest.join("=").trim();
+for (const envPath of [join(__dirname, "..", ".env"), join(__dirname, "..", "..", ".env")]) {
+  try {
+    const envContent = readFileSync(envPath, "utf-8");
+    for (const line of envContent.split("\n")) {
+      const [key, ...rest] = line.split("=");
+      if (key && rest.length && !process.env[key.trim()]) {
+        process.env[key.trim()] = rest.join("=").trim();
+      }
     }
-  }
-} catch {}
+  } catch {}
+}
 
 let pool = null;
 let connector = null;

@@ -89,6 +89,14 @@ export const api = {
     request("/conversations/discover", { method: "POST", body: JSON.stringify(data) }),
   listAiLeads: ({ country, unused, limit } = {}) =>
     request(`/conversations/leads?${buildQs({ country, unused, limit })}`),
+
+  // Admin Users — list real users from prod DB and mint impersonation sessions
+  listAdminBrands: ({ q, limit, offset } = {}) =>
+    request(`/admin-users/brands?${buildQs({ q, limit, offset })}`),
+  listAdminCreators: ({ q, limit, offset } = {}) =>
+    request(`/admin-users/creators?${buildQs({ q, limit, offset })}`),
+  impersonateUser: (userId) =>
+    request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
 };
 
 // Helpers for formatting
