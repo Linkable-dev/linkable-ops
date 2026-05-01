@@ -470,7 +470,7 @@ export function conversationsWebhookRoutes() {
       RESEND_API_KEY: !!process.env.RESEND_API_KEY,
       RESEND_WEBHOOK_SIGNING_SECRET: !!process.env.RESEND_WEBHOOK_SIGNING_SECRET,
       ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
-      STORELEADS_API_KEY: !!process.env.STORELEADS_API_KEY,
+      STORELEADS_KEY: !!process.env.STORELEADS_KEY,
       APOLLO_API_KEY: !!process.env.APOLLO_API_KEY,
       HUNTER_API_KEY: !!process.env.HUNTER_API_KEY,
       LINKABLE_REPLY_ADDRESS: !!process.env.LINKABLE_REPLY_ADDRESS,

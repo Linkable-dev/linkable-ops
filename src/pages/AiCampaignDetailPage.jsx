@@ -65,7 +65,8 @@ export default function AiCampaignDetailPage() {
 
       <MetricsCard metrics={metrics} theme={theme} />
       <SettingsCard campaign={campaign} theme={theme} onSaved={reload} />
-      <DiscoverCard campaign={campaign} theme={theme} />
+      <DiscoverCard campaign={campaign} theme={theme} onStarted={reload} />
+      <DiscoveryRunsPanel campaign={campaign} theme={theme} />
       <TemplatesCard
         campaign={campaign}
         templates={templates}
@@ -216,7 +217,7 @@ function CampaignActions({ campaign, onChange, navigate }) {
 
 // ---------- DISCOVER ----------
 
-function DiscoverCard({ campaign, theme }) {
+function DiscoverCard({ campaign, theme, onStarted }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
@@ -227,6 +228,7 @@ function DiscoverCard({ campaign, theme }) {
     try {
       const out = await api.discoverForOutboundCampaign(campaign.id, { limit: Number(limit) || 100 });
       setResult(out);
+      if (onStarted) onStarted();
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   }
@@ -247,6 +249,124 @@ function DiscoverCard({ campaign, theme }) {
       {err && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 8 }}>{err}</div>}
     </Card>
   );
+}
+
+// ---------- DISCOVERY RUNS PANEL ----------
+
+const RUN_STATUS_TINTS = {
+  running:  { bg: "#DBEAFE", fg: "#1E40AF" },
+  complete: { bg: "#D1FAE5", fg: "#065F46" },
+  failed:   { bg: "#FEE2E2", fg: "#991B1B" },
+  stopped:  { bg: "#F3F4F6", fg: "#374151" },
+};
+
+function DiscoveryRunsPanel({ campaign, theme }) {
+  const [runs, setRuns] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const res = await api.listOutboundDiscoveryRuns(campaign.id, { limit: 10 });
+      setRuns(res.rows || []);
+      setErr(null);
+    } catch (e) { setErr(e.message); }
+    finally { setLoaded(true); }
+  }, [campaign.id]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  // Poll every 5s while any run is still 'running' so progress counts feel live.
+  const anyRunning = runs.some((r) => r.status === "running");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const t = setInterval(reload, 5000);
+    return () => clearInterval(t);
+  }, [anyRunning, reload]);
+
+  async function stop(runId) {
+    try { await api.stopOutboundDiscoveryRun(runId); reload(); }
+    catch (e) { setErr(e.message); }
+  }
+
+  if (!loaded) {
+    return <Card style={{ marginBottom: 16 }}><div style={{ color: theme.textMuted, fontSize: 13 }}>Loading discovery runs…</div></Card>;
+  }
+  if (runs.length === 0) {
+    return null; // no clutter when there's nothing to show
+  }
+
+  return (
+    <Card style={{ marginBottom: 16, padding: 0 }}>
+      <div style={{ padding: "16px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Recent discovery runs {anyRunning && <span style={{ color: theme.accent, marginLeft: 6 }}>· live</span>}
+        </div>
+        <button onClick={reload} style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", fontWeight: 600, border: `1px solid ${theme.border}`, borderRadius: 4, background: theme.bg, color: theme.text, cursor: "pointer" }}>
+          Refresh
+        </button>
+      </div>
+      {err && <div style={{ color: "#DC2626", fontSize: 12, padding: "0 20px 8px" }}>{err}</div>}
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+            <th style={runTh}>Status</th>
+            <th style={runTh}>Progress</th>
+            <th style={runTh}>Qualified</th>
+            <th style={runTh}>Skipped</th>
+            <th style={runTh}>Failed</th>
+            <th style={runTh}>Started</th>
+            <th style={runTh}>Finished</th>
+            <th style={runTh}>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((r) => {
+            const target = r.total || 1;
+            const pct = Math.min(100, Math.round((r.processed / target) * 100));
+            return (
+              <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                <td style={runTd}>
+                  <Pill tint={RUN_STATUS_TINTS[r.status] || {}}>{r.status}</Pill>
+                  {r.error && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.error}>{r.error}</div>}
+                </td>
+                <td style={runTd}>
+                  <div style={{ color: theme.text }}>{r.processed} / {r.total || "?"}</div>
+                  <div style={{ width: 120, height: 4, background: theme.surfaceAlt, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: r.status === "failed" ? "#DC2626" : theme.accent }} />
+                  </div>
+                </td>
+                <td style={{ ...runTd, color: "#065F46", fontWeight: 600 }}>{r.sent}</td>
+                <td style={{ ...runTd, color: theme.textMuted }}>{r.skipped}</td>
+                <td style={{ ...runTd, color: r.failed ? "#991B1B" : theme.textMuted }}>{r.failed}</td>
+                <td style={{ ...runTd, color: theme.textMuted, whiteSpace: "nowrap" }}>{shortDate(r.started_at || r.created_at)}</td>
+                <td style={{ ...runTd, color: theme.textMuted, whiteSpace: "nowrap" }}>{r.completed_at ? shortDate(r.completed_at) : "—"}</td>
+                <td style={runTd}>
+                  {r.status === "running" ? (
+                    <button onClick={() => stop(r.id)} style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", fontWeight: 600, border: `1px solid ${theme.border}`, borderRadius: 4, background: theme.bg, color: theme.text, cursor: "pointer" }}>Stop</button>
+                  ) : (
+                    <span style={{ color: theme.textMuted, fontSize: 11 }}>—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+const runTh = { padding: "8px 16px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 };
+const runTd = { padding: "8px 16px", verticalAlign: "top" };
+
+function shortDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const opts = sameDay ? { hour: "2-digit", minute: "2-digit" } : { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
+  return d.toLocaleString(undefined, opts);
 }
 
 // ---------- TEMPLATES ----------

@@ -115,6 +115,10 @@ export const api = {
   getOutboundCampaignMetrics: (id) => request(`/outbound/campaigns/${id}/metrics`),
   discoverForOutboundCampaign: (id, body = {}) =>
     request(`/outbound/campaigns/${id}/discover`, { method: "POST", body: JSON.stringify(body) }),
+  listOutboundDiscoveryRuns: (id, { limit } = {}) =>
+    request(`/outbound/campaigns/${id}/discovery-runs?${buildQs({ limit })}`),
+  stopOutboundDiscoveryRun: (runId) =>
+    request(`/outbound/discovery-runs/${runId}/stop`, { method: "POST" }),
 
   // Outbound templates
   listOutboundTemplates: (campaignId) =>

@@ -21,8 +21,8 @@ const STORELEADS_BASE = "https://storeleads.app/json/api/v1/all/domain";
 // ---------- ENTRY ----------
 
 export async function startLeadDiscovery({ teamId, campaignId, filters = {}, limit = 50 }) {
-  if (!process.env.STORELEADS_API_KEY) {
-    throw new Error("STORELEADS_API_KEY not set");
+  if (!process.env.STORELEADS_KEY) {
+    throw new Error("STORELEADS_KEY not set");
   }
   const run = await createBulkRun({
     teamId,
@@ -196,7 +196,7 @@ async function fetchStoreLeadsBatch({ filters, cursor }) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${process.env.STORELEADS_API_KEY}` },
+        headers: { Authorization: `Bearer ${process.env.STORELEADS_KEY}` },
         signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) {

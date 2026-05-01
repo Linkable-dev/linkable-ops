@@ -218,6 +218,39 @@ export function outboundCampaignsRoutes() {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // List recent discovery runs for this campaign. The discover route tags each
+  // run with filters.email_campaign_id, which is what we filter on here.
+  router.get("/campaigns/:id/discovery-runs", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+      const { data, error } = await supabase
+        .from("ai_bulk_runs")
+        .select("id,status,source,filters,total,processed,sent,skipped,failed,error,started_at,completed_at,created_at")
+        .eq("team_id", teamId)
+        .eq("source", "discover_storeleads")
+        .eq("filters->>email_campaign_id", req.params.id)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw new Error(error.message);
+      res.json({ rows: data || [] });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Cooperative cancel — the discovery worker polls for status='stopped'.
+  router.post("/discovery-runs/:id/stop", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { data, error } = await supabase
+        .from("ai_bulk_runs")
+        .update({ status: "stopped" })
+        .eq("team_id", teamId).eq("id", req.params.id).eq("status", "running")
+        .select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      res.json({ stopped: !!data });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ---------- TEMPLATES ----------
 
   router.get("/campaigns/:id/templates", async (req, res) => {
