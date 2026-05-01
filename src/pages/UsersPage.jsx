@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate, friendlyNumber } from "../lib/api";
 import { TabBar } from "../components/ui/TabBar";
@@ -7,6 +7,35 @@ import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 
 const TABS = [["brands", "Brands"], ["creators", "Creators"]];
+
+const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
+const TEXT_SORT_KEYS = new Set([
+  "store_name", "email", "owner_name", "creator_name", "instagram_username",
+]);
+
+function ownerName(row) {
+  return [row.first_name, row.last_name].filter(Boolean).join(" ");
+}
+function creatorName(row) {
+  return ownerName(row) || row.instagram_name || "";
+}
+
+function sortValue(row, key) {
+  switch (key) {
+    case "store_name":           return (row.store_name || "").toLowerCase();
+    case "email":                return (row.email || "").toLowerCase();
+    case "owner_name":           return ownerName(row).toLowerCase();
+    case "creator_name":         return creatorName(row).toLowerCase();
+    case "instagram_username":   return (row.instagram_username || "").replace(/^@+/, "").toLowerCase();
+    case "instagram_followers_count": {
+      const n = Number(row.instagram_followers_count);
+      return Number.isFinite(n) ? n : -1;
+    }
+    case "user_created":
+    case "last_sign_in":         return row[key] ? new Date(row[key]).getTime() : 0;
+    default:                     return row[key] ?? "";
+  }
+}
 
 function avatarFor(row, kind) {
   // Backend pre-signs GCS URLs into signed_logo_pic / signed_profile_pic so
@@ -36,6 +65,29 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [impersonating, setImpersonating] = useState(null); // user_id being acted on
   const [actionError, setActionError] = useState("");
+  const [sortBy, setSortBy] = useState(DEFAULT_SORT.sortBy);
+  const [sortDir, setSortDir] = useState(DEFAULT_SORT.sortDir);
+
+  const handleSort = (key) => {
+    if (sortBy === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(key);
+      // Text columns default ascending (A→Z); dates and numbers default descending.
+      setSortDir(TEXT_SORT_KEYS.has(key) ? "asc" : "desc");
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortValue(a, sortBy);
+      const vb = sortValue(b, sortBy);
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+  }, [rows, sortBy, sortDir]);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -88,7 +140,12 @@ export default function UsersPage() {
         </p>
       </div>
 
-      <TabBar tabs={TABS} active={tab} onSelect={(id) => { setTab(id); setQ(""); }} />
+      <TabBar tabs={TABS} active={tab} onSelect={(id) => {
+        setTab(id);
+        setQ("");
+        setSortBy(DEFAULT_SORT.sortBy);
+        setSortDir(DEFAULT_SORT.sortDir);
+      }} />
 
       <div style={{ marginBottom: 16, maxWidth: 420 }}>
         <Input
@@ -132,20 +189,20 @@ export default function UsersPage() {
           <span></span>
           {tab === "brands" ? (
             <>
-              <span>Store</span>
-              <span>Email</span>
-              <span>Owner</span>
-              <span>Joined</span>
-              <span>Last sign in</span>
+              <SortHeader theme={theme} sortKey="store_name"   label="Store"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="email"        label="Email"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="owner_name"   label="Owner"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="last_sign_in" label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <span></span>
             </>
           ) : (
             <>
-              <span>Creator</span>
-              <span>Email</span>
-              <span>IG Handle</span>
-              <span>Followers</span>
-              <span>Last sign in</span>
+              <SortHeader theme={theme} sortKey="creator_name"               label="Creator"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="email"                      label="Email"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="instagram_username"         label="IG Handle"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="instagram_followers_count"  label="Followers"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="last_sign_in"               label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <span></span>
             </>
           )}
@@ -166,7 +223,7 @@ export default function UsersPage() {
             No {tab} found{q ? ` matching "${q}"` : ""}.
           </div>
         ) : (
-          rows.map((row) => (
+          sortedRows.map((row) => (
             <UserRow
               key={row.user_id}
               row={row}
@@ -280,5 +337,24 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
         </Btn>
       </div>
     </div>
+  );
+}
+
+function SortHeader({ theme, sortKey, label, sortBy, sortDir, onSort }) {
+  const isActive = sortBy === sortKey;
+  const arrow = !isActive ? "" : (sortDir === "asc" ? " ↑" : " ↓");
+  return (
+    <span
+      onClick={() => onSort(sortKey)}
+      style={{
+        cursor: "pointer", userSelect: "none",
+        color: isActive ? theme.text : theme.textMuted,
+        transition: "color 0.12s",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; }}
+    >
+      {label}{arrow}
+    </span>
   );
 }
