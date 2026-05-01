@@ -98,7 +98,9 @@ export const api = {
     request("/outbound/stop", { method: "POST", body: JSON.stringify({ emails, reason }) }),
 
   // Outbound campaigns
-  listOutboundCampaigns: () => request("/outbound/campaigns"),
+  listOutboundCampaigns: ({ status, limit, offset } = {}) =>
+    request(`/outbound/campaigns?${buildQs({ status, limit, offset })}`),
+  getOutboundCampaignStatusCounts: () => request("/outbound/campaigns/status-counts"),
   createOutboundCampaign: (data) =>
     request("/outbound/campaigns", { method: "POST", body: JSON.stringify(data) }),
   getOutboundCampaign: (id) => request(`/outbound/campaigns/${id}`),

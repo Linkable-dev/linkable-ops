@@ -9,6 +9,8 @@ import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
+import { TabBar } from "../components/ui/TabBar";
+import { Pagination } from "../components/ui/Pagination";
 
 const STATUS_TINTS = {
   active:   { bg: "#D1FAE5", fg: "#065F46" },
@@ -17,24 +19,53 @@ const STATUS_TINTS = {
   pending:  { bg: "#DBEAFE", fg: "#1E40AF" },
   running:  { bg: "#DBEAFE", fg: "#1E40AF" },
   complete: { bg: "#D1FAE5", fg: "#065F46" },
+  failed:   { bg: "#FEE2E2", fg: "#991B1B" },
+  stopped:  { bg: "#F3F4F6", fg: "#374151" },
 };
+
+const TABS = [
+  ["all",      "All"],
+  ["running",  "Running"],
+  ["complete", "Complete"],
+  ["failed",   "Failed"],
+  ["paused",   "Paused"],
+  ["pending",  "Pending"],
+  ["archived", "Archived"],
+];
 
 export default function AiCampaignsPage() {
   const { theme } = useTheme();
   const [campaigns, setCampaigns] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  const loadCounts = useCallback(() => {
+    api.getOutboundCampaignStatusCounts()
+      .then(setCounts)
+      .catch(() => {});
+  }, []);
 
   const reload = useCallback(() => {
     setLoading(true); setError(null);
-    api.listOutboundCampaigns()
-      .then((res) => setCampaigns(res.rows || []))
+    api.listOutboundCampaigns({
+      status: tab,
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+    })
+      .then((res) => { setCampaigns(res.rows || []); setTotal(res.total || 0); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [tab, page, pageSize]);
 
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { loadCounts(); }, [loadCounts]);
+  useEffect(() => { setPage(1); }, [tab, pageSize]);
 
   return (
     <div>
@@ -58,16 +89,27 @@ export default function AiCampaignsPage() {
         <CreateCampaignCard
           theme={theme}
           onCancel={() => setCreating(false)}
-          onCreated={() => { setCreating(false); reload(); }}
+          onCreated={() => { setCreating(false); reload(); loadCounts(); }}
         />
       )}
+
+      <TabBar
+        tabs={TABS.map(([id, label]) => {
+          const n = counts[id];
+          return [id, n != null ? `${label} (${n})` : label];
+        })}
+        active={tab}
+        onSelect={setTab}
+      />
 
       {loading && campaigns.length === 0 ? (
         <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>
       ) : campaigns.length === 0 ? (
         <Card>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>
-            No campaigns yet. Create one to start outbound — it'll seed the 9 default templates (G1/G2/G3 × T+0/T+3/T+7) which you can edit or override with AI-generated drafts.
+            {tab === "all"
+              ? "No campaigns yet. Create one to start outbound — it'll seed the 9 default templates (G1/G2/G3 × T+0/T+3/T+7) which you can edit or override with AI-generated drafts."
+              : `No campaigns with status "${tab}".`}
           </div>
         </Card>
       ) : (
@@ -108,6 +150,16 @@ export default function AiCampaignsPage() {
             </tbody>
           </table>
         </Card>
+      )}
+
+      {total > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       )}
     </div>
   );

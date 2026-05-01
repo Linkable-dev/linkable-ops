@@ -32,14 +32,33 @@ export function outboundCampaignsRoutes() {
   router.get("/campaigns", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
+      const status = (req.query.status || "all").toString();
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+      let q = supabase.from("email_campaigns")
+        .select("*", { count: "exact" })
+        .eq("team_id", teamId);
+      if (status !== "all") q = q.eq("status", status);
+      q = q.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+
+      const { data, error, count } = await q;
+      if (error) throw new Error(error.message);
+      res.json({ rows: data || [], total: count || 0, limit, offset });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get("/campaigns/status-counts", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
       const { data, error } = await supabase
         .from("email_campaigns")
-        .select("*")
-        .eq("team_id", teamId)
-        .order("created_at", { ascending: false })
-        .limit(200);
+        .select("status")
+        .eq("team_id", teamId);
       if (error) throw new Error(error.message);
-      res.json({ rows: data || [] });
+      const counts = { all: data.length };
+      for (const r of data) counts[r.status] = (counts[r.status] || 0) + 1;
+      res.json(counts);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
