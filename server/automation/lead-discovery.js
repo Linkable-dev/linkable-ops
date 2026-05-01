@@ -24,6 +24,19 @@ export async function startLeadDiscovery({ teamId, campaignId, filters = {}, lim
   if (!process.env.STORELEADS_KEY) {
     throw new Error("STORELEADS_KEY not set");
   }
+
+  // Self-heal: any prior discovery run still flagged 'running' but quiet for
+  // more than 5 minutes is almost certainly dead (Vercel serverless killed
+  // the worker mid-loop). Mark them failed so the dashboard stops showing
+  // a fake "live" status.
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  await supabase.from("ai_bulk_runs")
+    .update({ status: "failed", error: "stalled — likely killed by serverless timeout", completed_at: new Date().toISOString() })
+    .eq("team_id", teamId)
+    .eq("source", "discover_storeleads")
+    .eq("status", "running")
+    .lt("started_at", fiveMinAgo);
+
   const run = await createBulkRun({
     teamId,
     campaignId,
