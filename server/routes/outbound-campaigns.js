@@ -290,11 +290,18 @@ export function outboundCampaignsRoutes() {
 
   // Full category list discovered from the StoreLeads index. Returns paths
   // (Google product taxonomy) with brand counts so the UI can sort by relevance.
+  // Matching is token-based and plural-tolerant: "drinks" matches "Drink",
+  // "kids shoes" matches "Kids' Footwear", etc.
   router.get("/storeleads/categories", async (req, res) => {
     const q = (req.query.q || "").toString().trim().toLowerCase();
-    let list = STORELEADS_CATEGORIES;
-    if (q) list = list.filter((c) => c.path.toLowerCase().includes(q));
-    res.json({ categories: list.slice(0, 200) });
+    if (!q) return res.json({ categories: STORELEADS_CATEGORIES.slice(0, 200) });
+
+    const tokens = q.split(/\s+/).filter(Boolean).map((t) => t.replace(/s$/, ""));
+    const matches = STORELEADS_CATEGORIES.filter((c) => {
+      const hay = c.path.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    });
+    res.json({ categories: matches.slice(0, 200) });
   });
 
   // Cooperative cancel — the discovery worker polls for status='stopped'.

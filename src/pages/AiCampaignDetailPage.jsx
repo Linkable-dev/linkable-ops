@@ -129,13 +129,17 @@ function SettingsCard({ campaign, theme, onSaved }) {
   const [catSearch, setCatSearch] = useState("");
   const [catResults, setCatResults] = useState([]);
   const [catFocused, setCatFocused] = useState(false);
+  const [catErr, setCatErr] = useState(null);
+  const [catLoading, setCatLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setCatLoading(true);
     const t = setTimeout(() => {
       api.getStoreLeadsCategories({ q: catSearch })
-        .then((res) => { if (!cancelled) setCatResults(res.categories || []); })
-        .catch(() => {});
+        .then((res) => { if (!cancelled) { setCatResults(res.categories || []); setCatErr(null); } })
+        .catch((e) => { if (!cancelled) setCatErr(e.message); })
+        .finally(() => { if (!cancelled) setCatLoading(false); });
     }, 150);
     return () => { cancelled = true; clearTimeout(t); };
   }, [catSearch]);
@@ -212,28 +216,42 @@ function SettingsCard({ campaign, theme, onSaved }) {
               onBlur={() => setTimeout(() => setCatFocused(false), 150)}
               placeholder="Search StoreLeads categories — e.g. skincare, footwear, supplements"
             />
-            {catFocused && catResults.length > 0 && (
+            {catFocused && (
               <div style={{
                 position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, marginTop: 4,
                 maxHeight: 280, overflowY: "auto", borderRadius: 8,
                 border: `1px solid ${theme.border}`, background: theme.surface, boxShadow: theme.shadow,
               }}>
-                {catResults.filter((r) => !form.categories.includes(r.path)).slice(0, 50).map((r) => (
-                  <button key={r.path}
-                    onMouseDown={(e) => { e.preventDefault(); toggleCategory(r.path); }}
-                    style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      width: "100%", padding: "8px 12px", border: "none",
-                      background: "transparent", cursor: "pointer", textAlign: "left",
-                      fontFamily: "inherit", fontSize: 13, color: theme.text,
-                      borderBottom: `1px solid ${theme.border}`,
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceAlt}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-                    <span>{r.path}</span>
-                    <span style={{ fontSize: 11, color: theme.textMuted }}>{r.count} brands</span>
-                  </button>
-                ))}
+                {catErr ? (
+                  <div style={{ padding: "10px 12px", fontSize: 12, color: "#DC2626" }}>
+                    Couldn't load categories: {catErr}. (If you just deployed, the server may not be ready yet.)
+                  </div>
+                ) : catLoading && catResults.length === 0 ? (
+                  <div style={{ padding: "10px 12px", fontSize: 12, color: theme.textMuted }}>Searching…</div>
+                ) : catResults.filter((r) => !form.categories.includes(r.path)).length === 0 ? (
+                  <div style={{ padding: "10px 12px", fontSize: 12, color: theme.textMuted }}>
+                    {catSearch
+                      ? `No StoreLeads categories match "${catSearch}". Try fewer or broader words.`
+                      : "Start typing to search categories."}
+                  </div>
+                ) : (
+                  catResults.filter((r) => !form.categories.includes(r.path)).slice(0, 50).map((r) => (
+                    <button key={r.path}
+                      onMouseDown={(e) => { e.preventDefault(); toggleCategory(r.path); }}
+                      style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        width: "100%", padding: "8px 12px", border: "none",
+                        background: "transparent", cursor: "pointer", textAlign: "left",
+                        fontFamily: "inherit", fontSize: 13, color: theme.text,
+                        borderBottom: `1px solid ${theme.border}`,
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceAlt}
+                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                      <span>{r.path}</span>
+                      <span style={{ fontSize: 11, color: theme.textMuted }}>{r.count} brands</span>
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>
