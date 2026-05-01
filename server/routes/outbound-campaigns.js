@@ -21,7 +21,8 @@
 
 import express from "express";
 import { supabase } from "../lib/supabase.js";
-import { getDefaultTeamId } from "../automation/conversation-state.js";
+import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
+import { DEFAULT_OFFERING, DEFAULT_PERSONA, buildContextPrompt } from "../automation/conversation-prompts.js";
 import { SEQUENCE_TEMPLATES } from "../automation/templates.js";
 
 export function outboundCampaignsRoutes() {
@@ -128,6 +129,37 @@ export function outboundCampaignsRoutes() {
       if (Object.keys(patch).length === 0) {
         return res.status(400).json({ error: "no updatable fields in body" });
       }
+
+      // Auto-link the AI persona when auto_reply is turned on and the campaign
+      // doesn't already have one. Keeps the UI to a single toggle by hiding the
+      // ai_campaigns concept — we create or reuse an ai_campaigns row tied to
+      // this email campaign so the conversation runner has somewhere to thread.
+      if (patch.auto_reply === true && !patch.ai_campaign_id) {
+        const { data: current } = await supabase
+          .from("email_campaigns").select("id,name,brief,ai_campaign_id")
+          .eq("team_id", teamId).eq("id", req.params.id).maybeSingle();
+        if (current && !current.ai_campaign_id) {
+          const offering = { ...DEFAULT_OFFERING };
+          const persona = { ...DEFAULT_PERSONA };
+          const goal = "book a 15-min intro call";
+          const goalLink = process.env.LINKABLE_CALENDAR_URL || null;
+          const ctx = current.brief
+            ? `${buildContextPrompt({ offering, persona, goal, goalLink })}\n\nCampaign brief:\n${current.brief}`
+            : buildContextPrompt({ offering, persona, goal, goalLink });
+          const aiCampaign = await createAiCampaign({
+            teamId,
+            name: `${current.name} — replies`,
+            offering,
+            persona,
+            contextPrompt: ctx,
+            firstMessagePrompt: null,
+            goal,
+            goalLink,
+          });
+          patch.ai_campaign_id = aiCampaign.id;
+        }
+      }
+
       const { data, error } = await supabase
         .from("email_campaigns")
         .update(patch)

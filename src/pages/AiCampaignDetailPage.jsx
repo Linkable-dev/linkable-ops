@@ -118,7 +118,6 @@ function SettingsCard({ campaign, theme, onSaved }) {
     sender_from: campaign.sender_from,
     reply_to: campaign.reply_to,
     auto_reply: campaign.auto_reply,
-    ai_campaign_id: campaign.ai_campaign_id || "",
     brief: campaign.brief || "",
     countries: (campaign.target_filters?.countries || []).join(","),
     categories: (campaign.target_filters?.categories || []).join(", "),
@@ -145,7 +144,6 @@ function SettingsCard({ campaign, theme, onSaved }) {
         sender_from: form.sender_from,
         reply_to: form.reply_to,
         auto_reply: !!form.auto_reply,
-        ai_campaign_id: form.ai_campaign_id || null,
         brief: form.brief || null,
         target_filters,
       });
@@ -179,11 +177,15 @@ function SettingsCard({ campaign, theme, onSaved }) {
         <Field label="Reply mode" theme={theme} colSpan={2}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.text }}>
             <input type="checkbox" checked={!!form.auto_reply} onChange={set("auto_reply")} />
-            Auto-reply with AI (requires linked AI campaign)
+            Auto-reply with AI
           </label>
-          {form.auto_reply && (
-            <Input value={form.ai_campaign_id} onChange={set("ai_campaign_id")} placeholder="ai_campaigns.id" style={{ marginTop: 8 }} />
-          )}
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6, paddingLeft: 24 }}>
+            {form.auto_reply
+              ? (campaign.ai_campaign_id
+                  ? "Replies to this campaign's emails will be answered by the linked AI persona."
+                  : "When you save, an AI persona will be created automatically using the brief above. Tweak it later in AI Test Lab.")
+              : "Off — replies land in AI Inbox for manual handling."}
+          </div>
         </Field>
       </div>
       {err && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 8 }}>{err}</div>}
