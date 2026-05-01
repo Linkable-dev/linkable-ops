@@ -121,6 +121,8 @@ export const api = {
     request(`/outbound/discovery-runs/${runId}/stop`, { method: "POST" }),
   getStoreLeadsCategoryPresets: () =>
     request("/outbound/storeleads/category-presets"),
+  getStoreLeadsCategories: ({ q } = {}) =>
+    request(`/outbound/storeleads/categories?${buildQs({ q })}`),
 
   // Outbound templates
   listOutboundTemplates: (campaignId) =>

@@ -126,13 +126,19 @@ function SettingsCard({ campaign, theme, onSaved }) {
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [presets, setPresets] = useState([]);
+  const [catSearch, setCatSearch] = useState("");
+  const [catResults, setCatResults] = useState([]);
+  const [catFocused, setCatFocused] = useState(false);
 
   useEffect(() => {
-    api.getStoreLeadsCategoryPresets()
-      .then((res) => setPresets(res.presets || []))
-      .catch(() => {});
-  }, []);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.getStoreLeadsCategories({ q: catSearch })
+        .then((res) => { if (!cancelled) setCatResults(res.categories || []); })
+        .catch(() => {});
+    }, 150);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [catSearch]);
 
   function set(k) { return (e) => setForm((f) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value })); }
 
@@ -180,26 +186,59 @@ function SettingsCard({ campaign, theme, onSaved }) {
         <Field label="Min revenue $/mo" theme={theme}><Input type="number" value={form.min_revenue} onChange={set("min_revenue")} /></Field>
         <Field label="Max revenue $/mo" theme={theme}><Input type="number" value={form.max_revenue} onChange={set("max_revenue")} /></Field>
         <Field label="Categories" theme={theme} colSpan={2}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {presets.length === 0 && <span style={{ fontSize: 12, color: theme.textMuted }}>Loading…</span>}
-            {presets.map((p) => {
-              const checked = form.categories.includes(p.id);
-              return (
-                <label key={p.id} style={{
+          {form.categories.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+              {form.categories.map((c) => (
+                <span key={c} style={{
                   display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
-                  padding: "6px 10px", borderRadius: 999, cursor: "pointer",
-                  border: `1.5px solid ${checked ? theme.accent : theme.border}`,
-                  background: checked ? theme.accent + "15" : theme.bg,
-                  color: theme.text,
+                  padding: "4px 8px 4px 10px", borderRadius: 999,
+                  border: `1.5px solid ${theme.accent}`,
+                  background: theme.accent + "15", color: theme.text,
                 }}>
-                  <input type="checkbox" checked={checked} onChange={() => toggleCategory(p.id)} style={{ margin: 0 }} />
-                  {p.label}
-                </label>
-              );
-            })}
+                  {c}
+                  <button onClick={() => toggleCategory(c)} title="Remove" style={{
+                    border: "none", background: "transparent", cursor: "pointer",
+                    color: theme.textMuted, padding: 0, fontSize: 14, lineHeight: 1,
+                  }}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div style={{ position: "relative" }}>
+            <Input
+              value={catSearch}
+              onChange={(e) => setCatSearch(e.target.value)}
+              onFocus={() => setCatFocused(true)}
+              onBlur={() => setTimeout(() => setCatFocused(false), 150)}
+              placeholder="Search StoreLeads categories — e.g. skincare, footwear, supplements"
+            />
+            {catFocused && catResults.length > 0 && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, marginTop: 4,
+                maxHeight: 280, overflowY: "auto", borderRadius: 8,
+                border: `1px solid ${theme.border}`, background: theme.surface, boxShadow: theme.shadow,
+              }}>
+                {catResults.filter((r) => !form.categories.includes(r.path)).slice(0, 50).map((r) => (
+                  <button key={r.path}
+                    onMouseDown={(e) => { e.preventDefault(); toggleCategory(r.path); }}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      width: "100%", padding: "8px 12px", border: "none",
+                      background: "transparent", cursor: "pointer", textAlign: "left",
+                      fontFamily: "inherit", fontSize: 13, color: theme.text,
+                      borderBottom: `1px solid ${theme.border}`,
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceAlt}
+                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                    <span>{r.path}</span>
+                    <span style={{ fontSize: 11, color: theme.textMuted }}>{r.count} brands</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6 }}>
-            Leave all unchecked to use the default beauty + wellness preset.
+            Leave empty to use the default beauty + wellness preset.
           </div>
         </Field>
         <Field label="Brief (used for AI drafts)" theme={theme} colSpan={2}>

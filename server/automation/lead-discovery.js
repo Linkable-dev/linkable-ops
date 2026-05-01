@@ -278,7 +278,11 @@ function categoriesToBleveMatch(categories) {
   const out = [];
   for (const c of categories) {
     if (typeof c !== "string") continue;
-    if (c.startsWith("/")) { out.push(c); continue; }      // already a path
+    if (c.startsWith("/")) {
+      // Real Google-taxonomy path — encode spaces as the bleve analyzer expects.
+      out.push(c.replace(/ /g, "..."));
+      continue;
+    }
     const preset = CATEGORY_PRESETS[c.toLowerCase()];
     if (preset) out.push(...preset.paths);
   }

@@ -20,11 +20,24 @@
 //   DELETE /templates/:id                      — soft delete (is_active=false)
 
 import express from "express";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
 import { DEFAULT_OFFERING, DEFAULT_PERSONA, buildContextPrompt } from "../automation/conversation-prompts.js";
 import { SEQUENCE_TEMPLATES } from "../automation/templates.js";
 import { CATEGORY_PRESETS } from "../automation/lead-discovery.js";
+
+// Snapshot of distinct StoreLeads category paths discovered by sampling the
+// index. Refresh via scripts/refresh-storeleads-categories.js.
+let STORELEADS_CATEGORIES = [];
+try {
+  const here = dirname(fileURLToPath(import.meta.url));
+  STORELEADS_CATEGORIES = JSON.parse(readFileSync(join(here, "..", "data", "storeleads-categories.json"), "utf-8"));
+} catch (e) {
+  console.warn("storeleads-categories.json not loaded:", e.message);
+}
 
 export function outboundCampaignsRoutes() {
   const router = express.Router();
@@ -273,6 +286,15 @@ export function outboundCampaignsRoutes() {
   router.get("/storeleads/category-presets", async (_req, res) => {
     const presets = Object.entries(CATEGORY_PRESETS).map(([id, p]) => ({ id, label: p.label }));
     res.json({ presets });
+  });
+
+  // Full category list discovered from the StoreLeads index. Returns paths
+  // (Google product taxonomy) with brand counts so the UI can sort by relevance.
+  router.get("/storeleads/categories", async (req, res) => {
+    const q = (req.query.q || "").toString().trim().toLowerCase();
+    let list = STORELEADS_CATEGORIES;
+    if (q) list = list.filter((c) => c.path.toLowerCase().includes(q));
+    res.json({ categories: list.slice(0, 200) });
   });
 
   // Cooperative cancel — the discovery worker polls for status='stopped'.

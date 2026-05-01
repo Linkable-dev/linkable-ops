@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 server/data/*.json
+!server/data/storeleads-categories.json
 server/.env
 .env
 dist-ssr

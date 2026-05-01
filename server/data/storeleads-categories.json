@@ -1,0 +1,942 @@
+[
+  {
+    "path": "/Apparel",
+    "count": 215
+  },
+  {
+    "path": "/Food & Drink/Food",
+    "count": 88
+  },
+  {
+    "path": "/Apparel/Footwear",
+    "count": 75
+  },
+  {
+    "path": "/Sports/Sporting Goods",
+    "count": 74
+  },
+  {
+    "path": "/Apparel/Clothing Accessories",
+    "count": 66
+  },
+  {
+    "path": "/Beauty & Fitness/Face & Body Care/Skin & Nail Care",
+    "count": 60
+  },
+  {
+    "path": "/Apparel/Women's Clothing",
+    "count": 58
+  },
+  {
+    "path": "/Health/Nutrition/Vitamins & Supplements",
+    "count": 53
+  },
+  {
+    "path": "/Food & Drink/Beverages/Coffee & Tea",
+    "count": 51
+  },
+  {
+    "path": "/Beauty & Fitness/Hair Care",
+    "count": 49
+  },
+  {
+    "path": "/Beauty & Fitness/Face & Body Care/Make-Up & Cosmetics",
+    "count": 47
+  },
+  {
+    "path": "/Food & Drink",
+    "count": 43
+  },
+  {
+    "path": "/Home & Garden",
+    "count": 40
+  },
+  {
+    "path": "/Apparel/Casual Apparel",
+    "count": 37
+  },
+  {
+    "path": "/Beauty & Fitness/Face & Body Care",
+    "count": 33
+  },
+  {
+    "path": "/Home & Garden/Gardening & Landscaping",
+    "count": 33
+  },
+  {
+    "path": "/Sports/Individual Sports/Cycling",
+    "count": 32
+  },
+  {
+    "path": "/Beauty & Fitness/Fitness",
+    "count": 31
+  },
+  {
+    "path": "/Home & Garden/Bed & Bath",
+    "count": 30
+  },
+  {
+    "path": "/Apparel/Athletic Apparel",
+    "count": 29
+  },
+  {
+    "path": "/Pets & Animals/Pet Food & Supplies",
+    "count": 28
+  },
+  {
+    "path": "/Home & Garden/Home Appliances",
+    "count": 26
+  },
+  {
+    "path": "/Autos & Vehicles/Parts & Services",
+    "count": 26
+  },
+  {
+    "path": "/Home & Garden/Home Furnishings",
+    "count": 25
+  },
+  {
+    "path": "/Food & Drink/Food/Meat & Seafood",
+    "count": 24
+  },
+  {
+    "path": "/Food & Drink/Beverages/Alcoholic Beverages",
+    "count": 23
+  },
+  {
+    "path": "/Toys & Hobbies/Arts & Crafts",
+    "count": 23
+  },
+  {
+    "path": "/Home & Garden/Kitchen & Dining/Cookware & Diningware",
+    "count": 22
+  },
+  {
+    "path": "/Food & Drink/Beverages",
+    "count": 22
+  },
+  {
+    "path": "/Travel",
+    "count": 21
+  },
+  {
+    "path": "/Apparel/Undergarments",
+    "count": 21
+  },
+  {
+    "path": "/Pets & Animals/Dogs",
+    "count": 20
+  },
+  {
+    "path": "/Apparel/Eyewear",
+    "count": 20
+  },
+  {
+    "path": "/Beauty & Fitness",
+    "count": 19
+  },
+  {
+    "path": "/Beauty & Fitness/Face & Body Care/Perfumes & Fragrances",
+    "count": 18
+  },
+  {
+    "path": "/Computers",
+    "count": 18
+  },
+  {
+    "path": "/Sports/Individual Sports/Golf",
+    "count": 17
+  },
+  {
+    "path": "/Sports/Sporting Goods/Outdoors",
+    "count": 17
+  },
+  {
+    "path": "/Sports",
+    "count": 17
+  },
+  {
+    "path": "/Home & Garden/Home & Interior Decor",
+    "count": 16
+  },
+  {
+    "path": "/Home & Garden/Kitchen & Dining",
+    "count": 16
+  },
+  {
+    "path": "/Consumer Electronics/Mobile & Wireless/Mobile & Wireless Accessories",
+    "count": 16
+  },
+  {
+    "path": "/Food & Drink/Food/Candy & Sweets",
+    "count": 16
+  },
+  {
+    "path": "/Smoking & Vaping",
+    "count": 16
+  },
+  {
+    "path": "/Food & Drink/Food/Baked Goods & Desserts",
+    "count": 15
+  },
+  {
+    "path": "/Books & Literature",
+    "count": 15
+  },
+  {
+    "path": "/Consumer Electronics",
+    "count": 15
+  },
+  {
+    "path": "/Beauty & Fitness/Face & Body Care/Hygiene & Toiletries",
+    "count": 15
+  },
+  {
+    "path": "/Gifts & Special Events",
+    "count": 14
+  },
+  {
+    "path": "/Consumer Electronics/Audio Equipment",
+    "count": 14
+  },
+  {
+    "path": "/Adult",
+    "count": 14
+  },
+  {
+    "path": "/Business & Industrial/Agriculture & Forestry",
+    "count": 14
+  },
+  {
+    "path": "/Business & Industrial/Business Services/Office Supplies",
+    "count": 14
+  },
+  {
+    "path": "/Games/Computer & Video Games",
+    "count": 13
+  },
+  {
+    "path": "/Apparel/Swimwear",
+    "count": 13
+  },
+  {
+    "path": "/Home & Garden/Home Improvement",
+    "count": 13
+  },
+  {
+    "path": "/Apparel/Men's Clothing",
+    "count": 13
+  },
+  {
+    "path": "/Home & Garden/Yard & Patio",
+    "count": 13
+  },
+  {
+    "path": "/Health/Nutrition",
+    "count": 13
+  },
+  {
+    "path": "/Apparel/Headwear",
+    "count": 13
+  },
+  {
+    "path": "/Toys & Hobbies",
+    "count": 11
+  },
+  {
+    "path": "/Health/Vision Care/Eyeglasses & Contacts",
+    "count": 11
+  },
+  {
+    "path": "/Autos & Vehicles",
+    "count": 11
+  },
+  {
+    "path": "/Safety & Survival/Safety/Security Products",
+    "count": 10
+  },
+  {
+    "path": "/Health",
+    "count": 10
+  },
+  {
+    "path": "/Food & Drink/Food/Snack Foods",
+    "count": 10
+  },
+  {
+    "path": "/Consumer Electronics/Camera & Photo Equipment",
+    "count": 9
+  },
+  {
+    "path": "/Arts & Entertainment/Movies",
+    "count": 9
+  },
+  {
+    "path": "/Business & Industrial/Industrial Materials & Equipment",
+    "count": 9
+  },
+  {
+    "path": "/Computers/Computer Hardware/Computer Peripherals",
+    "count": 9
+  },
+  {
+    "path": "/Toys & Hobbies/Arts & Crafts/Fiber & Textile Arts",
+    "count": 9
+  },
+  {
+    "path": "/Arts & Entertainment/Visual Art & Design",
+    "count": 9
+  },
+  {
+    "path": "/Sports/Sporting Goods/Fishing",
+    "count": 9
+  },
+  {
+    "path": "/Home & Garden/Bed & Bath/Bathroom",
+    "count": 8
+  },
+  {
+    "path": "/Home & Garden/HVAC & Climate Control",
+    "count": 8
+  },
+  {
+    "path": "/Books & Literature/Notebooks & Planners",
+    "count": 8
+  },
+  {
+    "path": "/Home & Garden/Home Furnishings/Lamps & Lighting",
+    "count": 8
+  },
+  {
+    "path": "/Health/Medical Devices & Equipment",
+    "count": 7
+  },
+  {
+    "path": "/Home & Garden/Kitchen & Dining/Small Kitchen Appliances",
+    "count": 7
+  },
+  {
+    "path": "/Health/Health Conditions/Sleep Disorders",
+    "count": 7
+  },
+  {
+    "path": "/Sports/Sporting Goods/Hiking & Camping",
+    "count": 7
+  },
+  {
+    "path": "/Apparel/Children's Clothing",
+    "count": 7
+  },
+  {
+    "path": "/Beauty & Fitness/Face & Body Care/Shaving & Hair Removal",
+    "count": 7
+  },
+  {
+    "path": "/Sports/Combat Sports/Martial Arts",
+    "count": 6
+  },
+  {
+    "path": "/Home & Garden/Cleaning",
+    "count": 6
+  },
+  {
+    "path": "/Gifts & Special Events/Flowers",
+    "count": 6
+  },
+  {
+    "path": "/Pets & Animals/Cats",
+    "count": 6
+  },
+  {
+    "path": "/Antiques & Collectibles",
+    "count": 6
+  },
+  {
+    "path": "/Health/Nutrition/Special & Restricted Diets",
+    "count": 6
+  },
+  {
+    "path": "/Home & Garden/Home Improvement/Construction & Power Tools",
+    "count": 6
+  },
+  {
+    "path": "/Computers/Computer Hardware",
+    "count": 5
+  },
+  {
+    "path": "/Games",
+    "count": 5
+  },
+  {
+    "path": "/Beauty & Fitness/Spas & Beauty Services",
+    "count": 5
+  },
+  {
+    "path": "/Consumer Electronics/Mobile & Wireless/Mobile Phones",
+    "count": 5
+  },
+  {
+    "path": "/Sports/Team Sports/Baseball",
+    "count": 5
+  },
+  {
+    "path": "/Home & Garden/Home Improvement/Plumbing",
+    "count": 5
+  },
+  {
+    "path": "/Home & Garden/Home Furnishings/Living Room Furniture",
+    "count": 5
+  },
+  {
+    "path": "/Health/Reproductive Health",
+    "count": 5
+  },
+  {
+    "path": "/Business & Industrial/Renewable & Alternative Energy",
+    "count": 5
+  },
+  {
+    "path": "/Sports/Water Sports/Swimming",
+    "count": 5
+  },
+  {
+    "path": "/Home & Garden/Home Safety & Security",
+    "count": 4
+  },
+  {
+    "path": "/Consumer Electronics/Car Electronics",
+    "count": 4
+  },
+  {
+    "path": "/Sports/Individual Sports/Racquet Sports",
+    "count": 4
+  },
+  {
+    "path": "/Home & Garden/Home Swimming Pools Saunas & Spas",
+    "count": 4
+  },
+  {
+    "path": "/Arts & Entertainment/Humor",
+    "count": 4
+  },
+  {
+    "path": "/Science",
+    "count": 4
+  },
+  {
+    "path": "/Sports/Individual Sports",
+    "count": 4
+  },
+  {
+    "path": "/Computers/Electronics & Electrical/Power Supplies",
+    "count": 4
+  },
+  {
+    "path": "/Health/Women's Health",
+    "count": 4
+  },
+  {
+    "path": "/Arts & Entertainment/Visual Art & Design/Art Museums & Galleries",
+    "count": 4
+  },
+  {
+    "path": "/Sports/Water Sports",
+    "count": 4
+  },
+  {
+    "path": "/Sports/Winter Sports",
+    "count": 4
+  },
+  {
+    "path": "/Home & Garden/Home Storage & Shelving",
+    "count": 4
+  },
+  {
+    "path": "/Autos & Vehicles/Motor Vehicles/Motorcycles & Scooters",
+    "count": 4
+  },
+  {
+    "path": "/Home & Garden/Home Furnishings/Rugs & Carpets",
+    "count": 4
+  },
+  {
+    "path": "/Games/Arcade & Coin-Op Games",
+    "count": 3
+  },
+  {
+    "path": "/Arts & Entertainment/Comics & Animation/Comics",
+    "count": 3
+  },
+  {
+    "path": "/Consumer Electronics/Mobile & Wireless",
+    "count": 3
+  },
+  {
+    "path": "/Arts & Entertainment/TV Shows & Programs",
+    "count": 3
+  },
+  {
+    "path": "/Toys & Hobbies/Stuffed Toys",
+    "count": 3
+  },
+  {
+    "path": "/Autos & Vehicles/Motor Vehicles/Trucks & SUVs",
+    "count": 3
+  },
+  {
+    "path": "/Sports/Individual Sports/Skate Sports",
+    "count": 3
+  },
+  {
+    "path": "/Pets & Animals/Fish & Aquaria",
+    "count": 3
+  },
+  {
+    "path": "/Libraries & Museums",
+    "count": 3
+  },
+  {
+    "path": "/Science/Engineering & Technology",
+    "count": 3
+  },
+  {
+    "path": "/Photo & Video Services",
+    "count": 3
+  },
+  {
+    "path": "/Beauty & Fitness/Weight Loss",
+    "count": 3
+  },
+  {
+    "path": "/Arts & Entertainment/Visual Art & Design/Painting",
+    "count": 3
+  },
+  {
+    "path": "/Business & Industrial/Agriculture & Forestry/Beekeeping",
+    "count": 3
+  },
+  {
+    "path": "/Health/Pharmacy/Drugs & Medications",
+    "count": 3
+  },
+  {
+    "path": "/Arts & Entertainment/Comics & Animation/Anime & Manga",
+    "count": 3
+  },
+  {
+    "path": "/Sports/Team Sports/Basketball",
+    "count": 3
+  },
+  {
+    "path": "/Computers/Computer Hardware/Laptops & Notebooks",
+    "count": 3
+  },
+  {
+    "path": "/Beauty & Fitness/Body Art",
+    "count": 3
+  },
+  {
+    "path": "/Safety & Survival/Military",
+    "count": 3
+  },
+  {
+    "path": "/Business & Industrial/Business Services",
+    "count": 3
+  },
+  {
+    "path": "/Business & Industrial/Chemicals Industry",
+    "count": 3
+  },
+  {
+    "path": "/Sports/Winter Sports/Skiing & Snowboarding",
+    "count": 3
+  },
+  {
+    "path": "/Sports/Team Sports",
+    "count": 3
+  },
+  {
+    "path": "/Computers/Game Systems & Consoles",
+    "count": 2
+  },
+  {
+    "path": "/Computers/Networking",
+    "count": 2
+  },
+  {
+    "path": "/Home & Garden/Home Improvement/Doors & Windows",
+    "count": 2
+  },
+  {
+    "path": "/Consumer Electronics/TV & Video Equipment",
+    "count": 2
+  },
+  {
+    "path": "/Science/Astronomy",
+    "count": 2
+  },
+  {
+    "path": "/Apparel/Formal Wear",
+    "count": 2
+  },
+  {
+    "path": "/Food & Drink/Beverages/Juice",
+    "count": 2
+  },
+  {
+    "path": "/Food & Drink/Food/Breakfast Foods",
+    "count": 2
+  },
+  {
+    "path": "/Health/Health Conditions",
+    "count": 2
+  },
+  {
+    "path": "/Attractions/Zoos, Aquariums & Preserves",
+    "count": 2
+  },
+  {
+    "path": "/Sports/Team Sports/American Football",
+    "count": 2
+  },
+  {
+    "path": "/Health/Health Conditions/Skin Conditions",
+    "count": 2
+  },
+  {
+    "path": "/Food & Drink/Food/Grains & Pasta",
+    "count": 2
+  },
+  {
+    "path": "/Computers/Electronics & Electrical",
+    "count": 2
+  },
+  {
+    "path": "/Science/Computer Science",
+    "count": 2
+  },
+  {
+    "path": "/Consumer Electronics/Radio & Communications",
+    "count": 2
+  },
+  {
+    "path": "/Firearms & Weapons",
+    "count": 2
+  },
+  {
+    "path": "/Computers/Computer Hardware/Desktop Computers",
+    "count": 2
+  },
+  {
+    "path": "/Holidays & Seasonal",
+    "count": 2
+  },
+  {
+    "path": "/Autos & Vehicles/Motor Vehicles/Electric & Alternative",
+    "count": 2
+  },
+  {
+    "path": "/Health/Oral & Dental Care",
+    "count": 2
+  },
+  {
+    "path": "/Games/Puzzles & Brainteasers",
+    "count": 2
+  },
+  {
+    "path": "/Wedding",
+    "count": 2
+  },
+  {
+    "path": "/Home & Garden/HVAC & Climate Control/Fireplaces & Stoves",
+    "count": 2
+  },
+  {
+    "path": "/Food & Drink/Food/Pizza",
+    "count": 2
+  },
+  {
+    "path": "/Arts & Entertainment/Performing Arts",
+    "count": 2
+  },
+  {
+    "path": "/Health/Occupational Health & Safety",
+    "count": 2
+  },
+  {
+    "path": "/Safety & Survival/Safety",
+    "count": 2
+  },
+  {
+    "path": "/Beauty & Fitness/Spas & Beauty Services/Massage Therapy",
+    "count": 2
+  },
+  {
+    "path": "/Sports/Sporting Goods/Sports Memorabilia",
+    "count": 2
+  },
+  {
+    "path": "/Home & Garden/Home Improvement/Flooring",
+    "count": 2
+  },
+  {
+    "path": "/Autos & Vehicles/Repair & Maintenance",
+    "count": 2
+  },
+  {
+    "path": "/Travel/Hotels & Accommodations",
+    "count": 2
+  },
+  {
+    "path": "/Home & Garden/Home Improvement/House Painting & Finishing",
+    "count": 2
+  },
+  {
+    "path": "/Safety & Survival",
+    "count": 2
+  },
+  {
+    "path": "/Apparel/Costumes",
+    "count": 2
+  },
+  {
+    "path": "/Toys & Hobbies/Dolls",
+    "count": 2
+  },
+  {
+    "path": "/Coupons & Discounts",
+    "count": 2
+  },
+  {
+    "path": "/Business & Industrial/Manufacturing",
+    "count": 2
+  },
+  {
+    "path": "/Business & Industrial/Metals & Mining",
+    "count": 2
+  },
+  {
+    "path": "/Sports/Water Sports/Surfing",
+    "count": 2
+  },
+  {
+    "path": "/Autos & Vehicles/Boats & Watercraft",
+    "count": 2
+  },
+  {
+    "path": "/Books & Literature/Geographic Reference",
+    "count": 2
+  },
+  {
+    "path": "/Arts & Entertainment/Comics & Animation/Cartoons",
+    "count": 1
+  },
+  {
+    "path": "/Games/Board Games",
+    "count": 1
+  },
+  {
+    "path": "/Health/Health Conditions/Heart & Hypertension",
+    "count": 1
+  },
+  {
+    "path": "/Food & Drink/Beverages/Soft Drinks",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Agriculture & Forestry/Wood & Forestry",
+    "count": 1
+  },
+  {
+    "path": "/Finance/Investing/Currencies & Foreign Exchange",
+    "count": 1
+  },
+  {
+    "path": "/Safety & Survival/Safety/Law Enforcement",
+    "count": 1
+  },
+  {
+    "path": "/Consumer Electronics/Mobile & Wireless/Mobile Apps & Add-Ons",
+    "count": 1
+  },
+  {
+    "path": "/Autos & Vehicles/Campers & RVs",
+    "count": 1
+  },
+  {
+    "path": "/Science/Biological Sciences/Neuroscience",
+    "count": 1
+  },
+  {
+    "path": "/Pets & Animals/Veterinary & Health",
+    "count": 1
+  },
+  {
+    "path": "/Travel/Bags & Luggage",
+    "count": 1
+  },
+  {
+    "path": "/Pets & Animals",
+    "count": 1
+  },
+  {
+    "path": "/Sports/Combat Sports/Wrestling",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Mail & Package Delivery",
+    "count": 1
+  },
+  {
+    "path": "/Games/Table Games",
+    "count": 1
+  },
+  {
+    "path": "/Arts & Entertainment/Performing Arts/Magic",
+    "count": 1
+  },
+  {
+    "path": "/Sports/Team Sports/Soccer",
+    "count": 1
+  },
+  {
+    "path": "/Attractions/Regional Parks & Gardens",
+    "count": 1
+  },
+  {
+    "path": "/Internet",
+    "count": 1
+  },
+  {
+    "path": "/Attractions/Theme Parks",
+    "count": 1
+  },
+  {
+    "path": "/Science/Biological Sciences",
+    "count": 1
+  },
+  {
+    "path": "/Arts & Entertainment/Visual Art & Design/Architecture",
+    "count": 1
+  },
+  {
+    "path": "/Home & Garden/Home Furnishings/Kitchen & Dining Furniture",
+    "count": 1
+  },
+  {
+    "path": "/Mass Merchants & Department Stores",
+    "count": 1
+  },
+  {
+    "path": "/Toys & Hobbies/Radio Control & Modeling",
+    "count": 1
+  },
+  {
+    "path": "/Sports/Motor Sports",
+    "count": 1
+  },
+  {
+    "path": "/Arts & Entertainment/Concerts & Music Festivals",
+    "count": 1
+  },
+  {
+    "path": "/Food & Drink/Food/Soups & Stews",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Agriculture & Forestry/Livestock",
+    "count": 1
+  },
+  {
+    "path": "/Sports/Winter Sports/Ice Skating",
+    "count": 1
+  },
+  {
+    "path": "/Health/Health Conditions/Allergies",
+    "count": 1
+  },
+  {
+    "path": "/Home & Garden/Home Furnishings/Curtains & Window Treatments",
+    "count": 1
+  },
+  {
+    "path": "/Games/Card Games/Poker & Casino Games",
+    "count": 1
+  },
+  {
+    "path": "/Food & Drink/Food/BBQ & Grilling",
+    "count": 1
+  },
+  {
+    "path": "/Science/Chemistry",
+    "count": 1
+  },
+  {
+    "path": "/Computers/Computer Hardware/Computer Components",
+    "count": 1
+  },
+  {
+    "path": "/Health/Mental Health",
+    "count": 1
+  },
+  {
+    "path": "/Health/Social Services",
+    "count": 1
+  },
+  {
+    "path": "/Computers/Computer Hardware/Computer Drives & Storage",
+    "count": 1
+  },
+  {
+    "path": "/Health/Health Conditions/Diabetes",
+    "count": 1
+  },
+  {
+    "path": "/Home & Garden/Laundry",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Chemicals Industry/Plastics & Polymers",
+    "count": 1
+  },
+  {
+    "path": "/Consumer Electronics/GPS & Navigation",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Metals & Mining/Precious Metals",
+    "count": 1
+  },
+  {
+    "path": "/Games/Roleplaying Games",
+    "count": 1
+  },
+  {
+    "path": "/Sports/Extreme Sports",
+    "count": 1
+  },
+  {
+    "path": "/Travel/Bus & Rail",
+    "count": 1
+  },
+  {
+    "path": "/Toys & Hobbies/Drawing & Coloring",
+    "count": 1
+  },
+  {
+    "path": "/Sports/Combat Sports/Boxing",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Retail Equipment & Technology",
+    "count": 1
+  },
+  {
+    "path": "/Business & Industrial/Business Services/E-Commerce Services",
+    "count": 1
+  },
+  {
+    "path": "/Games/Computer & Video Games/Sports Games",
+    "count": 1
+  }
+]
