@@ -9,6 +9,7 @@ import { Router } from "express";
 import { sendDueScheduled } from "../automation/conversation-runner.js";
 import { processFollowUps } from "../automation/conversation-followup.js";
 import { runDailyOutbound } from "../automation/run-daily-200.js";
+import { processOneRunTick } from "../automation/lead-discovery.js";
 
 function checkCronAuth(req) {
   const expected = process.env.CRON_SECRET;
@@ -80,6 +81,21 @@ export function cronRoutes() {
       res.json({ ...result, log: lines });
     } catch (err) {
       console.error("/cron/run-daily-outbound error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Lead-discovery worker tick. Each invocation processes one pending or
+  // already-running discovery run for ~50 seconds, then yields. Vercel Cron
+  // hits this every minute; the run resumes from its persisted cursor.
+  router.get("/process-discovery", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const deadlineMs = Math.min(parseInt(req.query.deadlineMs) || 50_000, 55_000);
+      const result = await processOneRunTick({ deadlineMs });
+      res.json(result);
+    } catch (err) {
+      console.error("/cron/process-discovery error:", err);
       res.status(500).json({ error: err.message });
     }
   });

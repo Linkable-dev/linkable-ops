@@ -51,9 +51,9 @@ export async function queueLeadDiscovery({ teamId, campaignId, filters = {}, lim
 // Backward-compat alias — older callers still import startLeadDiscovery.
 export const startLeadDiscovery = queueLeadDiscovery;
 
-// Worker entry point. Picks the oldest pending run for the team (or any team
-// if teamId omitted), flips it to 'running', and processes it to completion.
-// Returns the final run row, or null if nothing was pending.
+// Worker entry point — drains the queue end-to-end. Used by the CLI script.
+// Picks the oldest pending run for the team (or any team if teamId omitted),
+// flips it to 'running', and processes it to completion. No deadline.
 export async function processOnePendingRun({ teamId } = {}) {
   if (!process.env.STORELEADS_KEY) throw new Error("STORELEADS_KEY not set");
 
@@ -83,12 +83,67 @@ export async function processOnePendingRun({ teamId } = {}) {
   return final;
 }
 
-async function processDiscovery(runId, teamId, campaignId, filters, limit) {
-  const counters = { processed: 0, sent: 0, skipped: 0, failed: 0 };
-  let cursor = null;
+// Cron tick — designed to run inside a Vercel function with maxDuration=60s.
+// Picks oldest pending OR resumes oldest already-running run, processes for
+// at most `deadlineMs` ms (default 50s), then yields. The next tick continues.
+export async function processOneRunTick({ teamId, deadlineMs = 50_000 } = {}) {
+  if (!process.env.STORELEADS_KEY) throw new Error("STORELEADS_KEY not set");
+
+  // Prefer continuing an in-flight run before starting a new one.
+  const baseSelect = supabase.from("ai_bulk_runs")
+    .select("*").eq("source", "discover_storeleads")
+    .order("created_at", { ascending: true }).limit(1);
+
+  let target = null;
+  {
+    const { data: running } = await (teamId ? baseSelect.eq("team_id", teamId) : baseSelect)
+      .eq("status", "running").maybeSingle();
+    if (running) target = running;
+  }
+  if (!target) {
+    const { data: pending } = await (teamId
+      ? supabase.from("ai_bulk_runs").select("*").eq("source", "discover_storeleads").eq("team_id", teamId).eq("status", "pending").order("created_at", { ascending: true }).limit(1).maybeSingle()
+      : supabase.from("ai_bulk_runs").select("*").eq("source", "discover_storeleads").eq("status", "pending").order("created_at", { ascending: true }).limit(1).maybeSingle());
+    if (!pending) return { picked: null };
+
+    const { data: claimed } = await supabase.from("ai_bulk_runs")
+      .update({ status: "running", started_at: new Date().toISOString() })
+      .eq("id", pending.id).eq("status", "pending").select("*").maybeSingle();
+    if (!claimed) return { picked: null };
+    target = claimed;
+  }
+
+  try {
+    const out = await processDiscovery(target.id, target.team_id, target.campaign_id, target.filters || {}, target.total || 50, { deadlineMs });
+    return { picked: target.id, ...out };
+  } catch (err) {
+    await updateBulkRun(target.id, {
+      status: "failed", error: err.message, completed_at: new Date().toISOString(),
+    }).catch(() => {});
+    throw err;
+  }
+}
+
+async function processDiscovery(runId, teamId, campaignId, filters, limit, opts = {}) {
+  // Resume from whatever state is in the row — counters and cursor live in
+  // ai_bulk_runs so each cron tick can pick up where the last left off.
+  const { data: existingRow } = await supabase
+    .from("ai_bulk_runs").select("*").eq("id", runId).maybeSingle();
+  const counters = {
+    processed: existingRow?.processed || 0,
+    sent: existingRow?.sent || 0,
+    skipped: existingRow?.skipped || 0,
+    failed: existingRow?.failed || 0,
+  };
+  let cursor = filters?._cursor || null;
   let cancelled = false;
 
-  while (counters.sent < limit && !cancelled) {
+  // Soft deadline lets the cron tick exit cleanly before Vercel kills it
+  // (default 50s with 60s maxDuration). When unset (CLI runs), runs forever.
+  const deadlineAt = opts.deadlineMs ? Date.now() + opts.deadlineMs : null;
+  const deadlineHit = () => deadlineAt != null && Date.now() >= deadlineAt;
+
+  while (counters.sent < limit && !cancelled && !deadlineHit()) {
     // Cooperative cancel.
     if (counters.processed % 20 === 0 && counters.processed > 0) {
       const { data: row } = await supabase
@@ -106,9 +161,11 @@ async function processDiscovery(runId, teamId, campaignId, filters, limit) {
     }
     if (!batch?.domains?.length) break;
     cursor = batch.nextCursor;
+    // Persist the new cursor immediately so we can resume if killed mid-page.
+    await updateBulkRun(runId, { filters: { ...filters, _cursor: cursor } });
 
     for (const brand of batch.domains) {
-      if (counters.sent >= limit || cancelled) break;
+      if (counters.sent >= limit || cancelled || deadlineHit()) break;
       try {
         const result = await processOneBrand({ teamId, brand });
         counters.processed++;
@@ -129,6 +186,18 @@ async function processDiscovery(runId, teamId, campaignId, filters, limit) {
       }
     }
     if (!batch.hasMore) break;
+  }
+
+  // Deadline-yield path: save state, leave status='running' so the next tick
+  // continues. Don't flip to complete.
+  if (deadlineHit() && counters.sent < limit) {
+    await updateBulkRun(runId, {
+      processed: counters.processed,
+      sent: counters.sent,
+      skipped: counters.skipped,
+      failed: counters.failed,
+    });
+    return { yielded: true, ...counters };
   }
 
   await updateBulkRun(runId, {
