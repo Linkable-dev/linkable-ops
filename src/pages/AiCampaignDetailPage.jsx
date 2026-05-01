@@ -120,21 +120,37 @@ function SettingsCard({ campaign, theme, onSaved }) {
     auto_reply: campaign.auto_reply,
     brief: campaign.brief || "",
     countries: (campaign.target_filters?.countries || []).join(","),
-    categories: (campaign.target_filters?.categories || []).join(", "),
+    categories: campaign.target_filters?.categories || [],
     min_revenue: campaign.target_filters?.min_revenue || "",
     max_revenue: campaign.target_filters?.max_revenue || "",
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [presets, setPresets] = useState([]);
+
+  useEffect(() => {
+    api.getStoreLeadsCategoryPresets()
+      .then((res) => setPresets(res.presets || []))
+      .catch(() => {});
+  }, []);
 
   function set(k) { return (e) => setForm((f) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value })); }
+
+  function toggleCategory(id) {
+    setForm((f) => ({
+      ...f,
+      categories: f.categories.includes(id)
+        ? f.categories.filter((c) => c !== id)
+        : [...f.categories, id],
+    }));
+  }
 
   async function save() {
     setBusy(true); setErr(null);
     try {
       const target_filters = {
         countries: form.countries.split(",").map((s) => s.trim()).filter(Boolean),
-        categories: form.categories.split(",").map((s) => s.trim()).filter(Boolean),
+        categories: form.categories,
         min_revenue: Number(form.min_revenue) || undefined,
         max_revenue: Number(form.max_revenue) || undefined,
       };
@@ -161,9 +177,31 @@ function SettingsCard({ campaign, theme, onSaved }) {
         <Field label="Sender (from)" theme={theme}><Input value={form.sender_from} onChange={set("sender_from")} /></Field>
         <Field label="Reply-to" theme={theme}><Input value={form.reply_to} onChange={set("reply_to")} /></Field>
         <Field label="Countries (comma)" theme={theme}><Input value={form.countries} onChange={set("countries")} /></Field>
-        <Field label="Categories (comma)" theme={theme}><Input value={form.categories} onChange={set("categories")} /></Field>
         <Field label="Min revenue $/mo" theme={theme}><Input type="number" value={form.min_revenue} onChange={set("min_revenue")} /></Field>
         <Field label="Max revenue $/mo" theme={theme}><Input type="number" value={form.max_revenue} onChange={set("max_revenue")} /></Field>
+        <Field label="Categories" theme={theme} colSpan={2}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {presets.length === 0 && <span style={{ fontSize: 12, color: theme.textMuted }}>Loading…</span>}
+            {presets.map((p) => {
+              const checked = form.categories.includes(p.id);
+              return (
+                <label key={p.id} style={{
+                  display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
+                  padding: "6px 10px", borderRadius: 999, cursor: "pointer",
+                  border: `1.5px solid ${checked ? theme.accent : theme.border}`,
+                  background: checked ? theme.accent + "15" : theme.bg,
+                  color: theme.text,
+                }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleCategory(p.id)} style={{ margin: 0 }} />
+                  {p.label}
+                </label>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6 }}>
+            Leave all unchecked to use the default beauty + wellness preset.
+          </div>
+        </Field>
         <Field label="Brief (used for AI drafts)" theme={theme} colSpan={2}>
           <textarea
             value={form.brief} onChange={set("brief")}

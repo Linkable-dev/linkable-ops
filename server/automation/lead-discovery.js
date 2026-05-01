@@ -243,23 +243,46 @@ function buildStoreLeadsBQ(filters) {
   if (countries) {
     conjuncts.push({ field: "cc", operator: "or", analyzer: "advanced", match: countries });
   }
-  if (filters.categories?.length) {
-    conjuncts.push({
-      field: "cat",
-      operator: "or",
-      analyzer: "advanced",
-      match: filters.categories.join(" "),
-    });
-  } else {
-    // Default: beauty + wellness
-    conjuncts.push({
-      field: "cat",
-      operator: "or",
-      analyzer: "advanced",
-      match: "/Beauty...&...Fitness /Beauty...&...Fitness/Face...&...Body...Care /Beauty...&...Fitness/Face...&...Body...Care/Skin...&...Nail...Care /Health/Nutrition /Beauty...&...Fitness/Face...&...Body...Care/Make-Up...&...Cosmetics /Beauty...&...Fitness/Face...&...Body...Care/Perfumes...&...Fragrances",
-    });
+  const matchString = categoriesToBleveMatch(filters.categories);
+  if (matchString) {
+    conjuncts.push({ field: "cat", operator: "or", analyzer: "advanced", match: matchString });
   }
   return JSON.stringify({ must: { conjuncts } });
+}
+
+// Friendly preset → StoreLeads `cat` paths (Google product taxonomy, with the
+// bleve-analyzer encoding "..." for spaces). Plain words like "beauty" match
+// nothing in the StoreLeads index, so the UI now picks from these presets.
+export const CATEGORY_PRESETS = {
+  beauty:    { label: "Beauty (broad)",    paths: ["/Beauty...&...Fitness", "/Beauty...&...Fitness/Face...&...Body...Care"] },
+  skincare:  { label: "Skincare",          paths: ["/Beauty...&...Fitness/Face...&...Body...Care/Skin...&...Nail...Care"] },
+  makeup:    { label: "Makeup / Cosmetics",paths: ["/Beauty...&...Fitness/Face...&...Body...Care/Make-Up...&...Cosmetics"] },
+  fragrance: { label: "Fragrance",         paths: ["/Beauty...&...Fitness/Face...&...Body...Care/Perfumes...&...Fragrances"] },
+  haircare:  { label: "Haircare",          paths: ["/Beauty...&...Fitness/Face...&...Body...Care/Hair...Care"] },
+  wellness:  { label: "Wellness / Nutrition", paths: ["/Health", "/Health/Nutrition"] },
+  fitness:   { label: "Fitness",           paths: ["/Beauty...&...Fitness/Fitness"] },
+  apparel:   { label: "Apparel",           paths: ["/Apparel"] },
+};
+
+function categoriesToBleveMatch(categories) {
+  if (!categories?.length) {
+    // Default: beauty + wellness umbrella
+    return [
+      ...CATEGORY_PRESETS.beauty.paths,
+      ...CATEGORY_PRESETS.skincare.paths,
+      ...CATEGORY_PRESETS.makeup.paths,
+      ...CATEGORY_PRESETS.fragrance.paths,
+      ...CATEGORY_PRESETS.wellness.paths,
+    ].join(" ");
+  }
+  const out = [];
+  for (const c of categories) {
+    if (typeof c !== "string") continue;
+    if (c.startsWith("/")) { out.push(c); continue; }      // already a path
+    const preset = CATEGORY_PRESETS[c.toLowerCase()];
+    if (preset) out.push(...preset.paths);
+  }
+  return out.join(" ");
 }
 
 // ---------- APOLLO ----------

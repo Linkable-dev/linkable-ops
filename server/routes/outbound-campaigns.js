@@ -24,6 +24,7 @@ import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
 import { DEFAULT_OFFERING, DEFAULT_PERSONA, buildContextPrompt } from "../automation/conversation-prompts.js";
 import { SEQUENCE_TEMPLATES } from "../automation/templates.js";
+import { CATEGORY_PRESETS } from "../automation/lead-discovery.js";
 
 export function outboundCampaignsRoutes() {
   const router = express.Router();
@@ -267,6 +268,11 @@ export function outboundCampaignsRoutes() {
       if (error) throw new Error(error.message);
       res.json({ rows: data || [] });
     } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get("/storeleads/category-presets", async (_req, res) => {
+    const presets = Object.entries(CATEGORY_PRESETS).map(([id, p]) => ({ id, label: p.label }));
+    res.json({ presets });
   });
 
   // Cooperative cancel — the discovery worker polls for status='stopped'.
