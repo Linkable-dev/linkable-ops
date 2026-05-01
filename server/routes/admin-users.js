@@ -97,9 +97,12 @@ async function listBrands({ q = "", limit = "50", offset = "0" }) {
        LEFT JOIN LATERAL (
          -- Last real sign-in: max(tokens.created) excluding admin_impersonation
          -- tokens minted from /users (state = 'admin_impersonation:<email>').
+         -- Real OAuth tokens are inserted with user_id='000…0' and identify the
+         -- user via sub/email instead, so join on those.
          SELECT MAX(t.created) AS last_sign_in
            FROM tokens t
-          WHERE t.user_id = u.id::text
+          WHERE ((COALESCE(u.sub, '') <> '' AND t.sub = u.sub)
+                 OR t.email = u.email)
             AND (t.state IS NULL OR t.state NOT LIKE 'admin_impersonation:%')
        ) sig ON true
        LEFT JOIN LATERAL (
@@ -166,10 +169,12 @@ async function listCreators({ q = "", limit = "50", offset = "0" }) {
        LEFT JOIN influencers i ON i.user_id = u.id
                                AND i.deleted = ${ENTITY_ACTIVE}
        LEFT JOIN LATERAL (
-         -- Last real sign-in (excludes admin_impersonation tokens).
+         -- Last real sign-in (excludes admin_impersonation tokens). OAuth tokens
+         -- use user_id='000…0' and identify by sub/email — see brands query above.
          SELECT MAX(t.created) AS last_sign_in
            FROM tokens t
-          WHERE t.user_id = u.id::text
+          WHERE ((COALESCE(u.sub, '') <> '' AND t.sub = u.sub)
+                 OR t.email = u.email)
             AND (t.state IS NULL OR t.state NOT LIKE 'admin_impersonation:%')
        ) sig ON true
        LEFT JOIN LATERAL (
