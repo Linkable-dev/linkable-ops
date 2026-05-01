@@ -14,6 +14,9 @@ import SetupPasswordPage from "./pages/SetupPasswordPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
 import AiTestLabPage from "./pages/AiTestLabPage";
 import AiInboxPage from "./pages/AiInboxPage";
+import AiOutboundPage from "./pages/AiOutboundPage";
+import AiCampaignsPage from "./pages/AiCampaignsPage";
+import AiCampaignDetailPage from "./pages/AiCampaignDetailPage";
 import UsersPage from "./pages/UsersPage";
 import "./index.css";
 
@@ -31,6 +34,9 @@ createRoot(document.getElementById("root")).render(
                 <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
                 <Route path="/ai/test-lab" element={<AiTestLabPage />} />
                 <Route path="/ai/inbox" element={<AiInboxPage />} />
+                <Route path="/ai/outbound" element={<AiOutboundPage />} />
+                <Route path="/ai/campaigns" element={<AiCampaignsPage />} />
+                <Route path="/ai/campaigns/:id" element={<AiCampaignDetailPage />} />
                 <Route path="/users" element={<UsersPage />} />
                 <Route path="/tables/:table" element={<TablePage />} />
                 <Route path="/tables/:table/analytics" element={<TableAnalyticsPage />} />

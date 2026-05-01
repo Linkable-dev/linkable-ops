@@ -33,6 +33,7 @@ import {
   fetchResendEmail,
 } from "./inbound-parser.js";
 import { supabase } from "../lib/supabase.js";
+import { cancelPendingTouches } from "./sequencer.js";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -179,6 +180,46 @@ export async function handleInbound(payload) {
     return { ignored: "auto-reply", from: norm.from_email };
   }
 
+  // Daily-200 sequencer cancel + replied_at stamp run BEFORE the conversation
+  // match — daily-200 prospects don't have ai_conversations rows, so the
+  // "no matching conversation" branch below would otherwise skip them.
+  if (norm.from_email) {
+    const isOptOutEarly = looksLikeOptOut(extractReplyBody(norm) || "");
+    try {
+      const cancelReason = isOptOutEarly ? "opted_out" : "replied";
+      const { cancelled } = await cancelPendingTouches({
+        teamId: team, email: norm.from_email, reason: cancelReason,
+      });
+      if (cancelled > 0) {
+        console.log(`[conversation-runner] cancelled ${cancelled} pending touches for ${norm.from_email} (${cancelReason})`);
+      }
+      const { data: target } = await supabase
+        .from("email_sends")
+        .select("id")
+        .eq("team_id", team)
+        .ilike("to_email", norm.from_email)
+        .eq("status", "sent")
+        .not("sequence_id", "is", null)
+        .is("replied_at", null)
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (target?.id) {
+        await supabase.from("email_sends")
+          .update({ replied_at: new Date().toISOString() })
+          .eq("id", target.id);
+      }
+      if (isOptOutEarly) {
+        await upsertSuppression({
+          teamId: team, email: norm.from_email,
+          reason: "opt_out", detail: "inbound opt-out (daily-200)",
+        }).catch((e) => console.error("opt-out suppression failed:", e.message));
+      }
+    } catch (err) {
+      console.error("daily-200 inbound bookkeeping failed:", err.message);
+    }
+  }
+
   // Find the conversation. Order of attempts:
   //   1. By In-Reply-To / References headers (best, but Resend doesn't expose them)
   //   2. By scanning ai_messages.message_id for the same refs
@@ -214,13 +255,25 @@ export async function handleInbound(payload) {
       prospectEmail: norm.from_email,
     });
   }
+  // Last resort before giving up: if this address is part of a daily-200
+  // sequence whose email_campaigns.auto_reply is on, spin up an ai_conversation
+  // tied to the configured ai_campaign so the AI can take over from here.
+  if (!conversation && norm.from_email) {
+    conversation = await maybeUpgradeToAutoReply({
+      teamId: team,
+      fromEmail: norm.from_email,
+      subject: norm.subject,
+      messageId: norm.message_id,
+    });
+  }
+
   if (!conversation) {
     return {
-      ignored: "no matching conversation",
+      ignored: "no matching conversation - manual triage",
       from: norm.from_email,
       refs: candidates,
       fetch: fetchDiag,
-      hint: "Could not find an active thread for this sender. Send a first message to this address before they can reply.",
+      hint: "Reply landed but campaign is in manual mode (auto_reply=false) or no daily-200 enrollment found.",
     };
   }
 
@@ -257,6 +310,10 @@ export async function handleInbound(payload) {
   await updateConversation(conversation.id, team, {
     last_inbound_at: new Date().toISOString(),
   });
+
+  // (daily-200 cancel + replied_at + opt-out suppression already ran earlier,
+  // before the conversation match — daily-200 prospects have no ai_conversations
+  // row so they'd otherwise be skipped here.)
 
   // Hard-stop on opt-outs. Also write to global suppression list so the
   // address can't be hit by any other campaign.
@@ -538,10 +595,16 @@ async function sendOutbound({ campaign, toEmail, toName, subject, body, messageI
   }
 }
 
-// ---------- RESEND STATUS EVENTS (bounce / complaint / delivered) ----------
+// ---------- RESEND STATUS EVENTS ----------
 //
 // Wired by the webhook route. Resend posts these for emails WE sent.
 // Body shape: { type, data: { email_id, to, from, ... } }
+//
+// Two systems care about these:
+//   1. The AI conversations system (ai_messages / ai_conversations) — legacy
+//   2. The daily-200 sequencer (email_sends) — newer, drives the dashboard
+// We update both whenever the corresponding row exists. resend_id / email_id
+// is the join key on each side.
 export async function handleResendStatusEvent(payload) {
   if (!payload?.type) return { ignored: "no event type" };
   const teamId = await getDefaultTeamId();
@@ -550,20 +613,27 @@ export async function handleResendStatusEvent(payload) {
   const recipientEmail = typeof recipient === "string"
     ? recipient.replace(/.*<([^>]+)>.*/, "$1").toLowerCase()
     : recipient?.address?.toLowerCase() || recipient?.email?.toLowerCase();
+  const resendId = data.email_id || null;
 
-  // Find the conversation via email_provider_id on the outbound message.
+  // ai_messages match (legacy system)
   let conversation = null;
-  if (data.email_id) {
+  if (resendId) {
     const { data: msg } = await supabase
       .from("ai_messages")
       .select("conversation_id")
       .eq("team_id", teamId)
-      .eq("email_provider_id", data.email_id)
+      .eq("email_provider_id", resendId)
       .maybeSingle();
     if (msg?.conversation_id) {
       conversation = await getConversation(msg.conversation_id, teamId);
     }
   }
+
+  // Stamp email_sends regardless of whether the conversation exists. Returns
+  // the matched row so we know whether the daily-200 cared about this event.
+  const sendRow = await stampEmailSendForResendEvent({
+    teamId, resendId, recipientEmail, eventType: payload.type, data,
+  });
 
   switch (payload.type) {
     case "email.bounced": {
@@ -583,7 +653,7 @@ export async function handleResendStatusEvent(payload) {
           next_action_at: null,
         });
       }
-      return { action: "bounce", email: recipientEmail, conversation_id: conversation?.id };
+      return { action: "bounce", email: recipientEmail, conversation_id: conversation?.id, send_id: sendRow?.id };
     }
     case "email.complained": {
       if (recipientEmail) {
@@ -602,14 +672,128 @@ export async function handleResendStatusEvent(payload) {
           next_action_at: null,
         });
       }
-      return { action: "complaint", email: recipientEmail, conversation_id: conversation?.id };
+      return { action: "complaint", email: recipientEmail, conversation_id: conversation?.id, send_id: sendRow?.id };
     }
-    case "email.delivered": {
-      // No state change needed; useful as a heartbeat.
-      return { action: "delivered", email: recipientEmail };
-    }
+    case "email.delivered":
+      return { action: "delivered", email: recipientEmail, send_id: sendRow?.id };
+    case "email.opened":
+      return { action: "opened", email: recipientEmail, send_id: sendRow?.id };
+    case "email.clicked":
+      return { action: "clicked", email: recipientEmail, send_id: sendRow?.id };
     default:
       return { ignored: payload.type };
+  }
+}
+
+// Stamp the matching email_sends row with the appropriate timestamp + status
+// transition for this Resend event. First-write-wins for opened/clicked so we
+// don't trample "first interaction" metrics with the second click.
+async function stampEmailSendForResendEvent({ teamId, resendId, recipientEmail, eventType, data }) {
+  if (!resendId && !recipientEmail) return null;
+
+  let q = supabase.from("email_sends").select("id, status, opened_at, clicked_at").eq("team_id", teamId);
+  q = resendId ? q.eq("resend_id", resendId) : q.ilike("to_email", recipientEmail);
+  // Sequence rows only — legacy A-F sends share to_email but we don't want to
+  // count them in the new dashboard. resend_id match is precise either way.
+  if (!resendId) q = q.not("sequence_id", "is", null);
+  const { data: rows } = await q.order("sent_at", { ascending: false }).limit(1);
+  const row = rows?.[0];
+  if (!row) return null;
+
+  const now = new Date().toISOString();
+  const patch = {};
+  switch (eventType) {
+    case "email.delivered":
+      patch.delivered_at = now;
+      break;
+    case "email.opened":
+      if (!row.opened_at) patch.opened_at = now;   // first-open wins
+      break;
+    case "email.clicked":
+      if (!row.clicked_at) patch.clicked_at = now;
+      // A click implies an open; backfill if missing.
+      if (!row.opened_at) patch.opened_at = now;
+      break;
+    case "email.bounced":
+      patch.bounced_at = now;
+      patch.status = "bounced";
+      patch.error = data?.bounce?.message || data?.reason || "bounced";
+      break;
+    case "email.complained":
+      patch.complained_at = now;
+      // Don't override bounced status — complaint after delivery is normal.
+      break;
+  }
+  if (Object.keys(patch).length === 0) return row;
+
+  const { data: updated, error } = await supabase
+    .from("email_sends").update(patch).eq("id", row.id).select("id").single();
+  if (error) console.error(`stampEmailSendForResendEvent ${eventType}: ${error.message}`);
+  return updated || row;
+}
+
+// ---------- AUTO-REPLY BRIDGE ----------
+//
+// When a daily-200 prospect replies AND their email_campaigns.auto_reply=true
+// AND the campaign has an ai_campaign_id pointing at an ai_campaigns row, we
+// upgrade the thread by creating an ai_conversations row on the fly. This
+// lets the existing AI reply pipeline take it from there. If any link is
+// missing we return null and the caller falls through to manual triage.
+async function maybeUpgradeToAutoReply({ teamId, fromEmail, subject, messageId }) {
+  // Find this prospect's most recent SENT daily-200 row.
+  const { data: sendRow } = await supabase
+    .from("email_sends")
+    .select("id, campaign_id, subject, body, resend_id, to_email, to_name, contact_id, template_key")
+    .eq("team_id", teamId)
+    .ilike("to_email", fromEmail)
+    .eq("status", "sent")
+    .not("sequence_id", "is", null)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!sendRow?.campaign_id) return null;
+
+  const { data: campaign } = await supabase
+    .from("email_campaigns")
+    .select("id, name, auto_reply, ai_campaign_id")
+    .eq("team_id", teamId).eq("id", sendRow.campaign_id).maybeSingle();
+  if (!campaign?.auto_reply || !campaign.ai_campaign_id) return null;
+
+  // Spin up a conversation tied to the AI campaign. Use the original outbound
+  // message-id as thread_root_message_id so future inbound replies thread
+  // here without re-running this logic.
+  try {
+    const conv = await createConversation({
+      teamId,
+      campaignId: campaign.ai_campaign_id,
+      contactId: sendRow.contact_id,
+      prospectEmail: fromEmail.toLowerCase(),
+      prospectName: sendRow.to_name,
+      prospectCompany: null,
+      prospectDossier: { source: "daily-200", template_key: sendRow.template_key, email_campaign_id: campaign.id, email_campaign_name: campaign.name },
+      threadRootMessageId: messageId ? stripAngles(messageId) : null,
+      threadSubject: subject || `Re: ${sendRow.subject}`,
+    });
+
+    // Stub the original outbound so the LLM has prior turns context.
+    await insertMessage({
+      team_id: teamId,
+      conversation_id: conv.id,
+      direction: "out",
+      role: "assistant",
+      subject: sendRow.subject,
+      body: sendRow.body,
+      raw_body: sendRow.body,
+      email_provider_id: sendRow.resend_id,
+      message_id: null,
+      in_reply_to: null,
+    }).catch((e) => console.error("auto-reply stub message failed:", e.message));
+
+    console.log(`[conversation-runner] auto-reply upgraded ${fromEmail} into ai_conversation ${conv.id}`);
+    return conv;
+  } catch (err) {
+    console.error("maybeUpgradeToAutoReply failed:", err.message);
+    return null;
   }
 }
 

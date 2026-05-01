@@ -1,106 +1,104 @@
-// 5 A/B test email templates for cold outreach
-// Linkable = creator affiliate platform for Shopify ecommerce brands
-// Turn creator partnerships into a measurable, trackable sales channel
+// 6 templates — optimized for REPLY and CONVERSION
+// 18% open rate = subjects work. Fix: body must trigger action.
 //
-// A/B mix: A, C have link — B, D, E are no-link (reply-driven)
-//
-// Available placeholders:
-//   {{brandName}}      - The brand/store name
-//   {{firstName}}      - Contact's first name (or "there" fallback)
-//   {{domain}}         - Brand's website domain
-//   {{productType}}    - Main product category (e.g. "skincare", "haircare")
-//   {{country}}        - US or UK
-//   {{observation}}    - AI-generated specific observation about the brand
+// Each template uses a different psychological angle:
+// A = Curiosity gap (make them NEED to know)
+// B = FOMO (others are doing it, you're not)
+// C = Mirror their pain (feel understood → trust → action)
+// D = Give value first (observation shows you did homework)
+// E = Direct ask (respect their time, make it easy)
+// F = Risk reversal (nothing to lose)
 
 export const TEMPLATES = [
   {
     variant: "A",
-    name: "Direct — with link",
-    subject_template: "A thought for the {{brandName}} team",
+    name: "Curiosity gap",
+    subject_template: "{{brandName}} — one question",
     body_template: `Hi {{firstName}},
 
-I hope this finds you well. I came across {{brandName}} recently and was genuinely impressed by what you're building in the {{productType}} space.
+What percentage of {{brandName}}'s sales come from creators?
 
-I wanted to reach out because I think something we've built might be useful to you. Linkable is a Shopify app that helps brands understand which of their creator partnerships actually drive sales, with attribution, reporting, and automated payouts all in one place.
+If you don't know the exact number, that's the problem we solve. Linkable plugs into Shopify and shows you in real time.
 
-If you'd like to take a look, you can find us here: https://www.linkable.link
+Takes 2 minutes to set up: https://linkable.link
 
-Thank you for your time.
-
-Best Regards,
-
-Federico,
-Founder at Linkable`,
+Federico`,
   },
   {
     variant: "B",
-    name: "Pain point — no link",
-    subject_template: "A question about creator attribution at {{brandName}}",
+    name: "FOMO",
+    subject_template: "Your competitors are tracking this",
     body_template: `Hi {{firstName}},
 
-I hope you're doing well. I wanted to reach out with a question I've been asking a lot of {{productType}} founders lately: how do you currently track which of your creator partnerships actually drive sales?
+Other {{productType}} brands are using Linkable to see exactly which creators drive sales — and cutting the ones that don't.
 
-Most teams I speak with tell me the same thing — it's a mix of spreadsheets, DMs, and educated guesses. It's something we've been working to solve with Linkable, a Shopify app that gives brands clear visibility into creator-driven revenue and handles payouts automatically.
+{{brandName}} could be doing the same. It takes 2 minutes to connect to Shopify.
 
-If this is something you're thinking about, I'd be happy to share more.
+https://linkable.link
 
-Best Regards,
-
-Federico,
-Founder at Linkable`,
+Federico`,
   },
   {
     variant: "C",
-    name: "Social proof — with link",
-    subject_template: "A {{productType}} brand attributed 32% of sales to creators",
+    name: "Mirror pain",
+    subject_template: "The creator problem at {{brandName}}",
     body_template: `Hi {{firstName}},
 
-I wanted to share a quick story that made me think of {{brandName}}. One of the founders we work with recently told me that 32% of their sales now come directly through creator partnerships — and for the first time, they can see exactly which creators are driving revenue.
+You send products to creators. They post. You see likes and comments. But when it comes to actual sales — you have no idea who's driving what.
 
-We built Linkable to make this possible for Shopify brands: clear attribution, real reporting, and automated payouts for creators.
+Sound familiar? That's exactly why I built Linkable. It connects to Shopify and gives you the answer.
 
-If you'd like to see how it works: https://www.linkable.link
+2-minute setup, free to try: https://linkable.link
 
-Best Regards,
-
-Federico,
-Founder at Linkable`,
+Federico`,
   },
   {
     variant: "D",
-    name: "Observation — no link",
-    subject_template: "A note about {{brandName}}",
+    name: "Personalized observation",
+    subject_template: "{{brandName}} + Linkable",
     body_template: `Hi {{firstName}},
 
 {{observation}}
 
-I'm the founder of Linkable, a Shopify app built to help brands like yours turn creator partnerships into a measurable sales channel, with attribution, reporting, and payouts all handled in one place.
+I built Linkable to help brands like {{brandName}} see exactly which creators drive revenue. It connects to Shopify in 2 minutes.
 
-If it sounds relevant, I'd love to show you how it could work for {{brandName}}.
+Worth a look? https://linkable.link
 
-Best Regards,
+Or I can show you in 15 min: https://calendly.com/federico-linkable/linkable-demo?utm_source=outreach
 
-Federico,
-Founder at Linkable`,
+Federico`,
   },
   {
     variant: "E",
-    name: "Casual / founder — with link",
-    subject_template: "Introducing Linkable to the {{brandName}} team",
+    name: "Respectful direct ask",
+    subject_template: "15 minutes — Linkable for {{brandName}}",
     body_template: `Hi {{firstName}},
 
-My name is Federico, and I'm the founder of Linkable. I started this company after speaking with dozens of DTC founders who all shared the same frustration: creators were posting about their products, but there was no reliable way to know if those partnerships were actually driving sales.
+I'll keep this short. Linkable is a Shopify app that shows you which creators drive sales and automates their payouts.
 
-Linkable solves exactly that. It's a Shopify app that gives brands full visibility into creator-driven revenue and automates the payout process.
+I'd love 15 minutes to show you how it works for {{brandName}}:
 
-If this is something {{brandName}} might benefit from, you can learn more here: https://www.linkable.link
+https://calendly.com/federico-linkable/linkable-demo?utm_source=outreach
 
-Thank you for your time.
+If now's not the right time, no worries at all.
 
-Best Regards,
+Federico`,
+  },
+  {
+    variant: "F",
+    name: "Risk reversal",
+    subject_template: "Free to try, nothing to install — {{brandName}}",
+    body_template: `Hi {{firstName}},
 
-Federico,
-Founder at Linkable`,
+Linkable connects to your Shopify store in 2 minutes. You'll immediately see which creators drive actual sales — not just engagement.
+
+No contract. No credit card. Free trial.
+
+https://linkable.link
+
+If it's not useful, just disconnect. But most brands are surprised by what they find.
+
+Federico`,
   },
 ];
 
@@ -144,4 +142,162 @@ export function getPrimaryProductType(matchedKeywords = [], sampleTypes = [], br
 // Pick a template variant using round-robin for even A/B distribution
 export function pickTemplate(contactIndex, activeTemplates = TEMPLATES) {
   return activeTemplates[contactIndex % activeTemplates.length];
+}
+
+// ---------- 3-touch sequence templates (G1/G2/G3 × T1/T2/T3) ----------
+//
+// These drive the new multi-touch sequencer. Each row has a stable key
+// `{group}-T{touch}` so the orchestrator can pick the right body for
+// (brand_group, touch_number).
+//
+// All bodies use the existing placeholder set: {{brandName}}, {{firstName}},
+// {{productType}}, {{observation}}. ROI argument is conditional on the
+// power-law premise (defensible without internal data).
+
+export const SEQUENCE_TEMPLATES = [
+  // ----- G1 · Creator-active -----
+  {
+    key: "G1-T1",
+    group: "G1",
+    touch: 1,
+    name: "G1 · Free creator audit",
+    subject_template: "which {{brandName}} creators actually convert?",
+    body_template: `Hi {{firstName}},
+
+You're paying creators — in product, fees, or commissions — based on engagement metrics that have zero correlation with sales. If you're like most brands, ~5% of your creators drive ~80% of your creator-attributed revenue. The rest is noise you're paying for.
+
+Send me your top 3 creator handles. I'll come back with their actual conversion numbers. Free, no call.
+
+Federico`,
+  },
+  {
+    key: "G1-T2",
+    group: "G1",
+    touch: 2,
+    name: "G1 · Trial with ROI math",
+    subject_template: "2-min Shopify install — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+Quick math: if {{brandName}} gifts 50 creators a month and only 5 drive most of the revenue, you're spending 90% of your creator budget on the wrong people.
+
+Linkable plugs into Shopify in 2 minutes and tells you exactly which is which. Cut the dead weight, double down on the winners.
+
+Free trial, no card: https://linkable.link
+
+Federico`,
+  },
+  {
+    key: "G1-T3",
+    group: "G1",
+    touch: 3,
+    name: "G1 · Reply ask",
+    subject_template: "last note — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+15 minutes to see exactly which {{brandName}} creators are converting and which you should stop paying.
+
+Reply yes and I'll send a calendar link.
+
+Federico`,
+  },
+
+  // ----- G2 · Summer-seasonal -----
+  {
+    key: "G2-T1",
+    group: "G2",
+    touch: 1,
+    name: "G2 · Summer window + trial",
+    subject_template: "{{brandName}}'s summer creator window",
+    body_template: `Hi {{firstName}},
+
+The next 8 weeks are your peak revenue window for {{productType}}. If you're using creators to drive summer sales, most of that budget will go to partners who don't actually convert — that's just how creator performance distributes.
+
+Linkable shows you in real time which creators move Shopify revenue. Cut the dead weight before peak, double down on the winners.
+
+2-min install, free: https://linkable.link
+
+Federico`,
+  },
+  {
+    key: "G2-T2",
+    group: "G2",
+    touch: 2,
+    name: "G2 · Power law + trial",
+    subject_template: "most of your creator spend is wasted",
+    body_template: `Hi {{firstName}},
+
+Creator-driven revenue follows a brutal power law — a small handful of partners drive most of the sales, and the rest are dead weight you're paying for in product, time, and commission.
+
+For a {{productType}} brand at peak summer, that waste compounds week by week. Linkable shows you who's converting, on Shopify, in real time.
+
+2-min install, free: https://linkable.link
+
+Federico`,
+  },
+  {
+    key: "G2-T3",
+    group: "G2",
+    touch: 3,
+    name: "G2 · Summer deadline reply ask",
+    subject_template: "summer's almost here — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+Every week before peak that you don't know which creators convert is a week of wasted spend on the ones that don't.
+
+Reply and I'll set you up in 15 minutes — by next week you'll know exactly who's worth paying.
+
+Federico`,
+  },
+
+  // ----- G3 · Cold catch-all -----
+  {
+    key: "G3-T1",
+    group: "G3",
+    touch: 1,
+    name: "G3 · Observation + trial",
+    subject_template: "{{brandName}} + Linkable",
+    body_template: `Hi {{firstName}},
+
+{{observation}}
+
+If {{brandName}} works with creators or affiliates, you're almost certainly overpaying — most brands have no idea which partners actually drive Shopify revenue, so the budget gets spread across people who do nothing.
+
+Linkable plugs into Shopify in 2 minutes and shows you who's actually converting. Free trial: https://linkable.link
+
+Federico`,
+  },
+  {
+    key: "G3-T2",
+    group: "G3",
+    touch: 2,
+    name: "G3 · Demo with power-law ROI",
+    subject_template: "15 min on creator attribution — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+If creator performance follows a power law at {{brandName}} — as it does for most brands — you're paying for 70–90% of partners who drive almost nothing.
+
+15 min and I'll show you what {{brandName}}'s creator data would look like inside Linkable: https://calendly.com/federico-linkable/linkable-demo?utm_source=outreach
+
+Federico`,
+  },
+  {
+    key: "G3-T3",
+    group: "G3",
+    touch: 3,
+    name: "G3 · Reply ask",
+    subject_template: "final note — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+Is "are we overpaying creators?" a question {{brandName}} cares about?
+
+Yes or no. I'll stop reaching out either way.
+
+Federico`,
+  },
+];
+
+// Look up the template for a (group, touch) pair. Returns null if missing —
+// caller should treat that as a config error, not a fallback opportunity.
+export function getSequenceTemplate(group, touch) {
+  return SEQUENCE_TEMPLATES.find((t) => t.group === group && t.touch === touch) || null;
 }

@@ -121,8 +121,8 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.4fr) 120px 130px"
-            : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 130px",
+            ? "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.4fr) 120px 120px 130px"
+            : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
           background: theme.surfaceAlt,
@@ -136,6 +136,7 @@ export default function UsersPage() {
               <span>Email</span>
               <span>Owner</span>
               <span>Joined</span>
+              <span>Last sign in</span>
               <span></span>
             </>
           ) : (
@@ -144,6 +145,7 @@ export default function UsersPage() {
               <span>Email</span>
               <span>IG Handle</span>
               <span>Followers</span>
+              <span>Last sign in</span>
               <span></span>
             </>
           )}
@@ -236,6 +238,9 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
           <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
             {friendlyDate(row.user_created)}
           </div>
+          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
+            {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
+          </div>
         </>
       ) : (
         <>
@@ -262,6 +267,9 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
             {row.instagram_followers_count && row.instagram_followers_count !== "undefined"
               ? friendlyNumber(row.instagram_followers_count)
               : <span style={{ color: theme.textMuted }}>—</span>}
+          </div>
+          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
+            {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
         </>
       )}

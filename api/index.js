@@ -10,6 +10,8 @@ import {
   conversationsWebhookRoutes,
 } from "../server/routes/conversations.js";
 import { cronRoutes } from "../server/routes/cron.js";
+import { outboundRoutes } from "../server/routes/outbound.js";
+import { outboundCampaignsRoutes } from "../server/routes/outbound-campaigns.js";
 
 const app = express();
 app.use(cors());
@@ -91,6 +93,8 @@ app.use("/api/analytics", requireOpsAdmin, analyticsRoutes());
 app.use("/api/ops", requireOpsAdmin, opsRoutes());
 app.use("/api/admin-users", requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
+app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
+app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
 
 // Generic 404 with the URL Express actually saw, for easier debugging.
 app.use((req, res) => {

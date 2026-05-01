@@ -9,6 +9,10 @@ const ROLE_ADMIN = 1;
 const ROLE_BRAND = 2;
 const ROLE_INFLUENCER = 3;
 
+// Status enums used for "active" aggregates (see linkable/proto/*.proto).
+const PRODUCT_STATUS_ACTIVE = 2;
+const LINK_STATUS_ACCEPTED = 3;
+
 function clientUrl() {
   // Strip trailing slash(es) so the gateway URL never has `//?token=`.
   return (process.env.MAIN_APP_CLIENT_URL || "http://localhost:3002").replace(/\/+$/, "");
@@ -80,10 +84,49 @@ async function listBrands({ q = "", limit = "50", offset = "0" }) {
             b.last_name,
             b.logo_pic_name,
             b.location,
-            b.niche
+            b.niche,
+            sig.last_sign_in,
+            COALESCE(camp.n, 0)::int    AS active_campaigns,
+            COALESCE(prom.n, 0)::int    AS active_promoters,
+            COALESCE(lk.clicks, 0)::int AS total_clicks,
+            COALESCE(rev.amount, 0)     AS total_revenue,
+            COALESCE(rev.currency, '')  AS revenue_currency
        FROM users u
        LEFT JOIN brands b ON b.user_id = u.id
                           AND b.deleted = ${ENTITY_ACTIVE}
+       LEFT JOIN LATERAL (
+         -- Last real sign-in: max(tokens.created) excluding admin_impersonation
+         -- tokens minted from /users (state = 'admin_impersonation:<email>').
+         SELECT MAX(t.created) AS last_sign_in
+           FROM tokens t
+          WHERE t.user_id = u.id::text
+            AND (t.state IS NULL OR t.state NOT LIKE 'admin_impersonation:%')
+       ) sig ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS n FROM products p
+          WHERE p.user_id = u.id
+            AND p.status = ${PRODUCT_STATUS_ACTIVE}
+            AND p.deleted = ${ENTITY_ACTIVE}
+       ) camp ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(DISTINCT l.influencer_user_id) AS n FROM links l
+          WHERE l.brand_user_id = u.id
+            AND l.status = ${LINK_STATUS_ACCEPTED}
+            AND l.deleted = ${ENTITY_ACTIVE}
+       ) prom ON true
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(l.clicks_counter), 0) AS clicks FROM links l
+          WHERE l.brand_user_id = u.id
+            AND l.deleted = ${ENTITY_ACTIVE}
+       ) lk ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(o.shopify_amount) AS amount,
+                MAX(o.shopify_currency) AS currency
+           FROM orders o
+           JOIN links l ON l.id = o.link_id
+          WHERE l.brand_user_id = u.id
+            AND o.deleted = ${ENTITY_ACTIVE}
+       ) rev ON true
        WHERE ${where}
        ORDER BY u.created DESC
        LIMIT $1 OFFSET $2`,
@@ -114,10 +157,35 @@ async function listCreators({ q = "", limit = "50", offset = "0" }) {
             i.instagram_profile_image,
             i.location_country,
             i.location_city,
-            i.niche
+            i.niche,
+            sig.last_sign_in,
+            COALESCE(part.n, 0)::int    AS active_partnerships,
+            COALESCE(rev.amount, 0)     AS total_revenue,
+            COALESCE(rev.currency, '')  AS revenue_currency
        FROM users u
        LEFT JOIN influencers i ON i.user_id = u.id
                                AND i.deleted = ${ENTITY_ACTIVE}
+       LEFT JOIN LATERAL (
+         -- Last real sign-in (excludes admin_impersonation tokens).
+         SELECT MAX(t.created) AS last_sign_in
+           FROM tokens t
+          WHERE t.user_id = u.id::text
+            AND (t.state IS NULL OR t.state NOT LIKE 'admin_impersonation:%')
+       ) sig ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(DISTINCT l.brand_user_id) AS n FROM links l
+          WHERE l.influencer_user_id = u.id
+            AND l.status = ${LINK_STATUS_ACCEPTED}
+            AND l.deleted = ${ENTITY_ACTIVE}
+       ) part ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(o.shopify_amount) AS amount,
+                MAX(o.shopify_currency) AS currency
+           FROM orders o
+           JOIN links l ON l.id = o.link_id
+          WHERE l.influencer_user_id = u.id
+            AND o.deleted = ${ENTITY_ACTIVE}
+       ) rev ON true
        WHERE ${where}
        ORDER BY u.created DESC
        LIMIT $1 OFFSET $2`,

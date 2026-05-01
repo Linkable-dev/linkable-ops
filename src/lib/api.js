@@ -90,6 +90,44 @@ export const api = {
   listAiLeads: ({ country, unused, limit } = {}) =>
     request(`/conversations/leads?${buildQs({ country, unused, limit })}`),
 
+  // Outbound — daily-200 email sequencer dashboard
+  listOutboundSends: ({ group, touch, status, scope, limit } = {}) =>
+    request(`/outbound/sends?${buildQs({ group, touch, status, scope, limit })}`),
+  getOutboundStats: () => request("/outbound/stats"),
+  stopOutbound: ({ emails, reason }) =>
+    request("/outbound/stop", { method: "POST", body: JSON.stringify({ emails, reason }) }),
+
+  // Outbound campaigns
+  listOutboundCampaigns: () => request("/outbound/campaigns"),
+  createOutboundCampaign: (data) =>
+    request("/outbound/campaigns", { method: "POST", body: JSON.stringify(data) }),
+  getOutboundCampaign: (id) => request(`/outbound/campaigns/${id}`),
+  updateOutboundCampaign: (id, data) =>
+    request(`/outbound/campaigns/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  pauseOutboundCampaign: (id) =>
+    request(`/outbound/campaigns/${id}/pause`, { method: "POST" }),
+  resumeOutboundCampaign: (id) =>
+    request(`/outbound/campaigns/${id}/resume`, { method: "POST" }),
+  archiveOutboundCampaign: (id) =>
+    request(`/outbound/campaigns/${id}/archive`, { method: "POST" }),
+  getOutboundCampaignMetrics: (id) => request(`/outbound/campaigns/${id}/metrics`),
+  discoverForOutboundCampaign: (id, body = {}) =>
+    request(`/outbound/campaigns/${id}/discover`, { method: "POST", body: JSON.stringify(body) }),
+
+  // Outbound templates
+  listOutboundTemplates: (campaignId) =>
+    request(`/outbound/campaigns/${campaignId}/templates`),
+  createOutboundTemplate: (campaignId, data) =>
+    request(`/outbound/campaigns/${campaignId}/templates`, { method: "POST", body: JSON.stringify(data) }),
+  seedDefaultOutboundTemplates: (campaignId) =>
+    request(`/outbound/campaigns/${campaignId}/templates/seed-defaults`, { method: "POST" }),
+  generateOutboundDrafts: (campaignId, body = {}) =>
+    request(`/outbound/campaigns/${campaignId}/templates/generate-drafts`, { method: "POST", body: JSON.stringify(body) }),
+  updateOutboundTemplate: (id, data) =>
+    request(`/outbound/templates/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteOutboundTemplate: (id) =>
+    request(`/outbound/templates/${id}`, { method: "DELETE" }),
+
   // Admin Users — list real users from prod DB and mint impersonation sessions
   listAdminBrands: ({ q, limit, offset } = {}) =>
     request(`/admin-users/brands?${buildQs({ q, limit, offset })}`),

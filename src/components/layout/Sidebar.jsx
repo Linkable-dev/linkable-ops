@@ -229,6 +229,8 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
+            {navItem("/ai/campaigns", "AI Campaigns", path.startsWith("/ai/campaigns"), aiIcon)}
+            {navItem("/ai/outbound", "AI Outbound", path.startsWith("/ai/outbound"), aiIcon)}
             {navItem("/ai/inbox", "AI Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
             {navItem("/ai/test-lab", "AI Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
           </div>
