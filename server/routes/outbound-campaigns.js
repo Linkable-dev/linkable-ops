@@ -541,6 +541,20 @@ export async function generateDraftsForCampaign({ teamId, campaign, apiKey, grou
     ? `\nADDITIONAL DIRECTION (highest priority — override the reference if it conflicts):\n${refinementPrompt}\n`
     : "";
 
+  // Wipe stale AI drafts for the slots we're about to regenerate so each
+  // click replaces prior drafts instead of stacking on top. We only touch
+  // is_draft=true rows — active/accepted templates stay untouched.
+  const { error: delErr } = await supabase
+    .from("email_templates")
+    .delete()
+    .eq("team_id", teamId)
+    .eq("campaign_id", campaign.id)
+    .eq("is_draft", true)
+    .eq("generated_by_ai", true)
+    .in("brand_group", groups)
+    .in("touch_number", touches);
+  if (delErr) console.warn("draft cleanup warning:", delErr.message);
+
   // For each (group, touch), find the existing default to anchor on.
   const defaults = Object.fromEntries(
     SEQUENCE_TEMPLATES.map((t) => [`${t.group}-T${t.touch}`, t])
