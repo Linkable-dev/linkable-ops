@@ -128,51 +128,63 @@ async function resolveCampaign(teamId, explicitId) {
   return c;
 }
 
-// ---------- MAIN ----------
+// ---------- CALLABLE FROM CRON ROUTE ----------
 
-async function main() {
-  const { cap: capOverride, dryRun, campaignId: explicitCampaignId } = parseArgs();
+// Same logic as the CLI main(), but takes options + returns a structured
+// result instead of console.log-only. The cron route at /api/cron/run-daily-outbound
+// calls this; the CLI wraps it with arg parsing + stdout printing.
+//
+// Important: Vercel serverless functions have hard timeouts (10s Hobby,
+// up to 300s Pro). With 1.5s rate-limit per send, ~30 sends fits a 60s
+// function. Pass `cap: 30` from the cron and run it hourly to spread load.
+export async function runDailyOutbound({
+  teamId = TEAM_ID,
+  campaignId: explicitCampaignId = null,
+  cap: capOverride = null,
+  dryRun = false,
+  log = console.log,
+} = {}) {
   const resendApiKey = process.env.RESEND_API_KEY;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-
   if (!resendApiKey && !dryRun) throw new Error("RESEND_API_KEY not set");
-  if (!anthropicApiKey) console.warn("ANTHROPIC_API_KEY not set — observations will be empty");
 
-  const campaign = await resolveCampaign(TEAM_ID, explicitCampaignId);
-  const cap = capOverride ?? campaign.daily_cap ?? DEFAULT_CAP;
+  const campaign = await resolveCampaign(teamId, explicitCampaignId);
+  const dailyCap = campaign.daily_cap ?? DEFAULT_CAP;
+  const perRunCap = capOverride ?? dailyCap;   // cap-per-invocation; daily total enforced separately
 
-  console.log(`[daily-200] campaign=${campaign.name} (${campaign.id}) cap=${cap} dryRun=${dryRun}`);
+  log(`[daily-200] campaign=${campaign.name} (${campaign.id}) perRunCap=${perRunCap} dailyCap=${dailyCap} dryRun=${dryRun}`);
 
-  const sentToday = await todaySentCount(TEAM_ID);
-  const remaining = Math.max(0, cap - sentToday);
-  console.log(`[daily-200] already sent today: ${sentToday}/${cap}; remaining: ${remaining}`);
+  const sentToday = await todaySentCount(teamId);
+  const dailyRemaining = Math.max(0, dailyCap - sentToday);
+  const remaining = Math.min(perRunCap, dailyRemaining);
+  log(`[daily-200] sent today: ${sentToday}/${dailyCap}; daily remaining: ${dailyRemaining}; this-run cap: ${remaining}`);
 
   if (remaining === 0) {
-    console.log("[daily-200] daily cap already reached, exiting");
-    return;
+    log("[daily-200] daily cap reached or per-run cap=0; exiting");
+    return { campaign_id: campaign.id, sent: 0, failed: 0, cancelled: 0, reason: "cap-reached" };
   }
 
   const campaignId = campaign.id;
   const senderFrom = campaign.sender_from;
   const replyTo = campaign.reply_to;
-  const templateBuckets = await loadTemplateBucketsForCampaign(TEAM_ID, campaignId);
+  const templateBuckets = await loadTemplateBucketsForCampaign(teamId, campaignId);
 
   // ---------- 1. Drain due rows from prior enrollments (T+3, T+7) ----------
-  const dueRows = await fetchDueRows({ teamId: TEAM_ID, limit: remaining });
-  console.log(`[daily-200] due rows from prior enrollments: ${dueRows.length}`);
+  const dueRows = await fetchDueRows({ teamId, limit: remaining });
+  log(`[daily-200] due rows from prior enrollments: ${dueRows.length}`);
 
   let sent = 0, failed = 0, cancelled = 0;
   for (const row of dueRows) {
     if (sent + failed >= remaining) break;
     if (dryRun) {
-      console.log(`  DRY: would send seq=${row.sequence_id} touch=${row.touch_number} to=${row.to_email} variant=${row.template_variant}`);
+      log(`  DRY: would send seq=${row.sequence_id} touch=${row.touch_number} to=${row.to_email} variant=${row.template_variant}`);
       continue;
     }
     const result = await sendDueRow(row, { resendApiKey, senderFrom, replyTo });
     if (result.cancelled) cancelled++;
     else if (result.sent) sent++;
     else failed++;
-    console.log(`  [drain] ${row.template_variant} → ${row.to_email}: ${result.sent ? "OK" : result.cancelled ? "cancelled" : "FAIL"} ${result.error || ""}`);
+    log(`  [drain] ${row.template_variant} → ${row.to_email}: ${result.sent ? "OK" : result.cancelled ? "cancelled" : "FAIL"} ${result.error || ""}`);
     await delaySend();
   }
 
@@ -182,13 +194,13 @@ async function main() {
   // N T+1 sends today (T+3/T+7 will be on future days), so we can enroll up
   // to slotsLeft new prospects.
   if (slotsLeft <= 0) {
-    console.log("[daily-200] cap hit during drain phase, no fresh enrollment");
+    log("[daily-200] cap hit during drain phase, no fresh enrollment");
   } else {
     const quota = allocateDailyQuota(slotsLeft);
-    console.log(`[daily-200] enrolling fresh: ${JSON.stringify(quota)}`);
+    log(`[daily-200] enrolling fresh: ${JSON.stringify(quota)}`);
 
-    const buckets = await fetchFreshProspectsByGroup({ teamId: TEAM_ID, perGroupQuota: quota });
-    console.log(`[daily-200] available pool: G1=${buckets.G1.length} G2=${buckets.G2.length} G3=${buckets.G3.length}`);
+    const buckets = await fetchFreshProspectsByGroup({ teamId, perGroupQuota: quota });
+    log(`[daily-200] available pool: G1=${buckets.G1.length} G2=${buckets.G2.length} G3=${buckets.G3.length}`);
 
     // Round-robin across groups so the day's sends aren't 120 G2 emails in a
     // row from one IP — better deliverability spread.
@@ -198,14 +210,14 @@ async function main() {
       if (sent + failed >= remaining) break;
 
       if (dryRun) {
-        console.log(`  DRY: would enroll ${group} ${row.email} (${row.merchant_name})`);
+        log(`  DRY: would enroll ${group} ${row.email} (${row.merchant_name})`);
         continue;
       }
 
       const enroll = await enrollProspect({
-        teamId: TEAM_ID,
+        teamId,
         campaignId,
-        contactId: null,        // contacts table population happens elsewhere; sequencer doesn't require it
+        contactId: null,
         toEmail: row.email,
         toName: [row.contact_first_name, row.contact_last_name].filter(Boolean).join(" ") || null,
         brand,
@@ -215,15 +227,14 @@ async function main() {
       });
 
       if (enroll.skipped) {
-        console.log(`  [enroll skip] ${row.email}: ${enroll.skipped}`);
+        log(`  [enroll skip] ${row.email}: ${enroll.skipped}`);
         await markStoreleadsUsed(row.id);
         continue;
       }
 
-      // Touch 1 is now `pending` with scheduled_at = now. Pull and send it.
       const t1 = enroll.touches.find((t) => t.touch_number === 1);
       if (!t1) {
-        console.warn(`  [enroll warn] no T1 row for ${row.email}`);
+        log(`  [enroll warn] no T1 row for ${row.email}`);
         continue;
       }
       const { data: t1Row } = await supabase
@@ -234,14 +245,22 @@ async function main() {
       if (result.cancelled) cancelled++;
       else if (result.sent) sent++;
       else failed++;
-      console.log(`  [enroll T1] ${group} → ${row.email}: ${result.sent ? "OK" : result.cancelled ? "cancelled" : "FAIL"} ${result.error || ""}`);
+      log(`  [enroll T1] ${group} → ${row.email}: ${result.sent ? "OK" : result.cancelled ? "cancelled" : "FAIL"} ${result.error || ""}`);
 
       await markStoreleadsUsed(row.id);
       await delaySend();
     }
   }
 
-  console.log(`[daily-200] DONE — sent=${sent} failed=${failed} cancelled=${cancelled}`);
+  log(`[daily-200] DONE — sent=${sent} failed=${failed} cancelled=${cancelled}`);
+  return { campaign_id: campaign.id, sent, failed, cancelled };
+}
+
+// ---------- CLI WRAPPER ----------
+
+async function main() {
+  const { cap, dryRun, campaignId } = parseArgs();
+  await runDailyOutbound({ cap, dryRun, campaignId });
 }
 
 // Round-robin merge of N arrays.
@@ -262,7 +281,12 @@ function interleave(arrays) {
   return out;
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run as a CLI when invoked directly (`node run-daily-200.js`); when
+// imported by the cron route, just expose runDailyOutbound.
+import { fileURLToPath } from "url";
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

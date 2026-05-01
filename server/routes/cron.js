@@ -8,6 +8,7 @@
 import { Router } from "express";
 import { sendDueScheduled } from "../automation/conversation-runner.js";
 import { processFollowUps } from "../automation/conversation-followup.js";
+import { runDailyOutbound } from "../automation/run-daily-200.js";
 
 function checkCronAuth(req) {
   const expected = process.env.CRON_SECRET;
@@ -54,6 +55,31 @@ export function cronRoutes() {
       res.json(result);
     } catch (err) {
       console.error("/cron/follow-ups error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Daily-200 outbound orchestrator. Cron hits this hourly during business
+  // hours; each invocation drains a small batch (default cap=30) so the
+  // function fits under Vercel's serverless timeout. The orchestrator's own
+  // daily-cap check stops further sends once the campaign's daily_cap is hit.
+  //
+  // Query params:
+  //   ?cap=30             — per-invocation cap (default 30)
+  //   ?campaign=<uuid>    — explicit campaign id (else picks most-recent active daily-200)
+  //   ?dry=1              — log only, no sends
+  router.get("/run-daily-outbound", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const cap = Math.min(parseInt(req.query.cap) || 30, 200);
+      const campaignId = req.query.campaign || null;
+      const dryRun = req.query.dry === "1" || req.query.dry === "true";
+      const lines = [];
+      const log = (s) => lines.push(s);
+      const result = await runDailyOutbound({ cap, campaignId, dryRun, log });
+      res.json({ ...result, log: lines });
+    } catch (err) {
+      console.error("/cron/run-daily-outbound error:", err);
       res.status(500).json({ error: err.message });
     }
   });
