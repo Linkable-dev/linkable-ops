@@ -13,7 +13,8 @@
 // Default reason is `replied` (soft cancel — prospect engaged, may convert).
 // Use `--reason opted_out` for explicit "stop emailing me" replies.
 
-import "dotenv/config";
+// supabase.js auto-loads server/.env when SUPABASE_URL is unset, so importing
+// it first populates process.env for the rest of the script.
 import { supabase } from "../lib/supabase.js";
 import { cancelPendingTouches } from "./sequencer.js";
 

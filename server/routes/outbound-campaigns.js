@@ -414,7 +414,7 @@ const TOUCH_DESCRIPTIONS = {
   3: "Final touch 7 days after touch 1. Short reply ask — yes/no, last note, soft close.",
 };
 
-async function generateDraftsForCampaign({ teamId, campaign, apiKey, groups, touches, variantsPerSlot, briefOverride }) {
+export async function generateDraftsForCampaign({ teamId, campaign, apiKey, groups, touches, variantsPerSlot, briefOverride }) {
   const brief = briefOverride || campaign.brief ||
     "Linkable is a Shopify app for creator attribution and affiliate payouts. Cold outbound to D2C brand founders / heads of marketing.";
 

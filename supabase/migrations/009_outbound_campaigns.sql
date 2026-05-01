@@ -62,3 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_email_sends_resend_id
 -- can be triggered from email_campaigns too, so make it nullable. (We keep the
 -- FK so it still cascades when an ai_campaigns row is deleted.)
 ALTER TABLE ai_bulk_runs ALTER COLUMN campaign_id DROP NOT NULL;
+
+-- email_sends.template_variant was CHAR(1) for the legacy A-F templates. The
+-- sequence templates use multi-char keys like 'G2-T1', so widen to TEXT.
+ALTER TABLE email_sends ALTER COLUMN template_variant TYPE TEXT;

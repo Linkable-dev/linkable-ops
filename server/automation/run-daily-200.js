@@ -9,7 +9,8 @@
 // Usage:
 //   node server/automation/run-daily-200.js [--cap 200] [--dry-run]
 
-import "dotenv/config";
+// supabase.js loads .env from server/.env when SUPABASE_URL is unset, so importing
+// it first guarantees the rest of process.env is populated for downstream callers.
 import { supabase } from "../lib/supabase.js";
 import { delaySend } from "./send.js";
 import {
