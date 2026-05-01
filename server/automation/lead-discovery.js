@@ -20,15 +20,14 @@ const STORELEADS_BASE = "https://storeleads.app/json/api/v1/all/domain";
 
 // ---------- ENTRY ----------
 
-export async function startLeadDiscovery({ teamId, campaignId, filters = {}, limit = 50 }) {
-  if (!process.env.STORELEADS_KEY) {
-    throw new Error("STORELEADS_KEY not set");
-  }
-
-  // Self-heal: any prior discovery run still flagged 'running' but quiet for
-  // more than 5 minutes is almost certainly dead (Vercel serverless killed
-  // the worker mid-loop). Mark them failed so the dashboard stops showing
-  // a fake "live" status.
+// Queue a discovery run. The web handler can't actually do the work — Vercel
+// kills serverless functions ~60s after the response, mid-loop. So we just
+// persist a 'pending' row here; an out-of-band worker (run-discovery-worker.js,
+// invoked by cron / a scheduled Claude Code agent / locally) picks it up and
+// drives it to completion.
+export async function queueLeadDiscovery({ teamId, campaignId, filters = {}, limit = 50 }) {
+  // Self-heal: prior 'running' rows quiet for 5+ minutes are dead worker
+  // remnants from the old in-handler design. Mark them failed.
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   await supabase.from("ai_bulk_runs")
     .update({ status: "failed", error: "stalled — likely killed by serverless timeout", completed_at: new Date().toISOString() })
@@ -43,18 +42,45 @@ export async function startLeadDiscovery({ teamId, campaignId, filters = {}, lim
     source: "discover_storeleads",
     filters,
     total: limit,
+    status: "pending",
   });
 
-  processDiscovery(run.id, teamId, campaignId, filters, limit).catch((err) => {
-    console.error(`discovery run ${run.id} failed:`, err);
-    updateBulkRun(run.id, {
-      status: "failed",
-      error: err.message,
-      completed_at: new Date().toISOString(),
+  return { run_id: run.id, target: limit, status: "pending" };
+}
+
+// Backward-compat alias — older callers still import startLeadDiscovery.
+export const startLeadDiscovery = queueLeadDiscovery;
+
+// Worker entry point. Picks the oldest pending run for the team (or any team
+// if teamId omitted), flips it to 'running', and processes it to completion.
+// Returns the final run row, or null if nothing was pending.
+export async function processOnePendingRun({ teamId } = {}) {
+  if (!process.env.STORELEADS_KEY) throw new Error("STORELEADS_KEY not set");
+
+  let q = supabase.from("ai_bulk_runs")
+    .select("*").eq("source", "discover_storeleads").eq("status", "pending")
+    .order("created_at", { ascending: true }).limit(1);
+  if (teamId) q = q.eq("team_id", teamId);
+  const { data: pending } = await q.maybeSingle();
+  if (!pending) return null;
+
+  // Claim the run. Conditional update guards against two workers racing.
+  const { data: claimed } = await supabase.from("ai_bulk_runs")
+    .update({ status: "running", started_at: new Date().toISOString() })
+    .eq("id", pending.id).eq("status", "pending")
+    .select("*").maybeSingle();
+  if (!claimed) return null; // someone else got it
+
+  try {
+    await processDiscovery(claimed.id, claimed.team_id, claimed.campaign_id, claimed.filters || {}, claimed.total || 50);
+  } catch (err) {
+    await updateBulkRun(claimed.id, {
+      status: "failed", error: err.message, completed_at: new Date().toISOString(),
     }).catch(() => {});
-  });
-
-  return { run_id: run.id, target: limit };
+    throw err;
+  }
+  const { data: final } = await supabase.from("ai_bulk_runs").select("*").eq("id", claimed.id).maybeSingle();
+  return final;
 }
 
 async function processDiscovery(runId, teamId, campaignId, filters, limit) {

@@ -497,7 +497,7 @@ export async function listRawEvents(teamId, { limit = 100 } = {}) {
 
 // ---------- BULK RUNS ----------
 
-export async function createBulkRun({ teamId, campaignId, source, filters, total }) {
+export async function createBulkRun({ teamId, campaignId, source, filters, total, status }) {
   const { data, error } = await supabase
     .from("ai_bulk_runs")
     .insert({
@@ -506,7 +506,7 @@ export async function createBulkRun({ teamId, campaignId, source, filters, total
       source,
       filters: filters || {},
       total: total || 0,
-      status: "running",
+      status: status || "running",
     })
     .select("*")
     .single();

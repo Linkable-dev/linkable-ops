@@ -334,13 +334,15 @@ function DiscoverCard({ campaign, theme, onStarted }) {
     <Card style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Lead discovery</div>
       <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
-        Pull fresh prospects from StoreLeads matching this campaign's filters, enrich via Apollo + Hunter, and add to the pool. The orchestrator picks them up on the next daily run.
+        Queues a discovery run for this campaign's filters. A worker (cron / scheduled agent) pulls fresh prospects from StoreLeads, enriches via Apollo + Hunter, and adds them to the pool. Watch progress in the panel below.
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <Input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} style={{ width: 120 }} />
         <Btn onClick={run} disabled={busy}>{busy ? "Starting…" : "Run discovery"}</Btn>
         {result?.run_id && (
-          <span style={{ fontSize: 12, color: "#065F46" }}>✓ run started: {result.run_id} (target {result.target})</span>
+          <span style={{ fontSize: 12, color: "#065F46" }}>
+            ✓ queued (target {result.target}) — picked up by the next worker run
+          </span>
         )}
       </div>
       {err && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 8 }}>{err}</div>}
@@ -351,6 +353,7 @@ function DiscoverCard({ campaign, theme, onStarted }) {
 // ---------- DISCOVERY RUNS PANEL ----------
 
 const RUN_STATUS_TINTS = {
+  pending:  { bg: "#FEF3C7", fg: "#92400E" },
   running:  { bg: "#DBEAFE", fg: "#1E40AF" },
   complete: { bg: "#D1FAE5", fg: "#065F46" },
   failed:   { bg: "#FEE2E2", fg: "#991B1B" },
@@ -374,7 +377,7 @@ function DiscoveryRunsPanel({ campaign, theme }) {
   useEffect(() => { reload(); }, [reload]);
 
   // Poll every 5s while any run is still 'running' so progress counts feel live.
-  const anyRunning = runs.some((r) => r.status === "running");
+  const anyRunning = runs.some((r) => r.status === "running" || r.status === "pending");
   useEffect(() => {
     if (!anyRunning) return;
     const t = setInterval(reload, 5000);
