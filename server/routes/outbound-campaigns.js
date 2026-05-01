@@ -166,7 +166,7 @@ export function outboundCampaignsRoutes() {
             offering,
             persona,
             contextPrompt: ctx,
-            firstMessagePrompt: null,
+            firstMessagePrompt: "(generated per-prospect by buildFirstMessagePrompt)",
             goal,
             goalLink,
           });
