@@ -47,33 +47,41 @@ export async function scrapeBrand(domain) {
   const cleanDomain = domain.replace(/^www\./, "");
   const allEmails = new Set();
 
-  // Fetch homepage + contact page in parallel
-  const [homepageHtml, contactHtml] = await Promise.all([
+  // Fetch homepage + contact + about in parallel (3 most likely to have emails)
+  const [homepageHtml, contactHtml, aboutHtml] = await Promise.all([
     fetchFast(`https://${cleanDomain}`),
     fetchFast(`https://${cleanDomain}/pages/contact`),
+    fetchFast(`https://${cleanDomain}/pages/about`),
   ]);
 
-  // Extract emails from both
-  for (const html of [homepageHtml, contactHtml]) {
+  // Extract emails from all pages
+  for (const html of [homepageHtml, contactHtml, aboutHtml]) {
     if (!html) continue;
     extractEmails(html).forEach(e => allEmails.add(e.toLowerCase()));
     const mailtos = html.match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || [];
     mailtos.forEach(m => allEmails.add(m.replace("mailto:", "").split("?")[0].toLowerCase()));
   }
 
-  // Score real emails
+  // If nothing found yet, try alternate contact paths
+  if (allEmails.size === 0) {
+    const extras = await Promise.all([
+      fetchFast(`https://${cleanDomain}/contact`),
+      fetchFast(`https://${cleanDomain}/about`),
+      fetchFast(`https://${cleanDomain}/pages/partnerships`),
+    ]);
+    for (const html of extras) {
+      if (!html) continue;
+      extractEmails(html).forEach(e => allEmails.add(e.toLowerCase()));
+      const mailtos = html.match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || [];
+      mailtos.forEach(m => allEmails.add(m.replace("mailto:", "").split("?")[0].toLowerCase()));
+    }
+  }
+
+  // Score ONLY real emails found on site — no guesses
   const scored = [...allEmails]
     .map(e => ({ email: e, score: scoreEmail(e, cleanDomain) }))
     .filter(e => e.score > 0)
     .sort((a, b) => b.score - a.score);
-
-  const realCount = scored.length;
-
-  // Fallback: common patterns
-  if (scored.length === 0) {
-    scored.push({ email: `hello@${cleanDomain}`, score: 1 });
-    scored.push({ email: `info@${cleanDomain}`, score: 1 });
-  }
 
   // Brand info from homepage text
   const text = homepageHtml ? htmlToText(homepageHtml).slice(0, 5000) : "";
@@ -90,9 +98,9 @@ export async function scrapeBrand(domain) {
   return {
     domain: cleanDomain,
     emails: scored.map(e => e.email),
-    bestEmail: scored[0]?.email || null,
-    emailCount: realCount,
-    foundOnSite: realCount > 0,
+    bestEmail: scored.length > 0 ? scored[0].email : null,
+    emailCount: scored.length,
+    foundOnSite: scored.length > 0,
     brandInfo,
   };
 }

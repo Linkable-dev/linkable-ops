@@ -7,11 +7,14 @@ import { TEMPLATES, getPrimaryProductType, pickTemplate } from "./templates.js";
 import { generateObservation, renderTemplate, validateRenderedEmail } from "./personalize.js";
 import { sendEmail } from "./send.js";
 import { scrapeBrand } from "./scrape-brand.js";
-import { discoverBrands } from "./discover-brands.js";
+import { CURATED_BRANDS } from "./discover-brands.js";
+import { BRANDS_BATCH2 } from "./brands-batch2.js";
+import { BRANDS_BATCH3 } from "./brands-batch3.js";
+import { discoverLive } from "./discover-live.js";
 
 const TEAM_ID = "a0000000-0000-0000-0000-000000000001";
-const MAX_EMAILS = 1000;
-const DEADLINE = new Date(Date.now() + 2 * 3600000); // 2 hours from now
+const MAX_EMAILS = 1890; // 890 already sent + 1000 new = 1890
+const DEADLINE = new Date(Date.now() + 6 * 3600000); // 6 hours
 const FROM = "Federico from Linkable <brand@linkable.link>";
 const REPLY_TO = "federico@linkable.link";
 const MIN_DELAY = 10000; // minimum 10s between sends
@@ -80,20 +83,22 @@ async function init() {
   campaignId = campaign.id;
 }
 
+// Check if a domain (or its root brand name) was already contacted
+function isDomainSent(domain) {
+  if (processedDomains.has(domain)) return true;
+  // Check root brand name (e.g. "twinings" matches "twinings.com" and "twinings.co.uk")
+  const root = domain.split(".")[0];
+  for (const d of processedDomains) {
+    if (d.split(".")[0] === root) return true;
+  }
+  return false;
+}
+
 async function processBrand(domain, index) {
   const cleanDomain = domain.replace(/^www\./, "").replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase();
 
-  // Check multiple domain variations
-  if (processedDomains.has(cleanDomain)) return "skip_duplicate";
-  // Also check if any already-sent domain matches the brand root
-  const brandRoot = cleanDomain.split(".")[0];
-  for (const sentDomain of processedDomains) {
-    if (sentDomain.startsWith(brandRoot + ".") || sentDomain === cleanDomain) {
-      processedDomains.add(cleanDomain);
-      return "skip_duplicate";
-    }
-  }
-  processedDomains.add(cleanDomain);
+  if (isDomainSent(cleanDomain)) return "skip_duplicate";
+  // Don't add to processedDomains yet — add after email domain check below
 
   if (pastDeadline()) return "deadline";
   if (totalAlreadySent + sent >= MAX_EMAILS) return "limit";
@@ -116,17 +121,29 @@ async function processBrand(domain, index) {
   if (brandData?.bestEmail) email = brandData.bestEmail;
 
   if (!email) { skipped++; console.log(`  SKIP: no email`); return "skip"; }
-  if (processedEmails.has(email.toLowerCase())) { skipped++; console.log(`  SKIP: ${email} already sent`); return "skip"; }
 
-  // Check if email's domain was already contacted (different from current domain)
+  // HARD CHECK: query DB directly to see if ANY email was ever sent to this email domain
   const emailDomain = email.split("@")[1]?.toLowerCase();
-  if (emailDomain && emailDomain !== cleanDomain && processedDomains.has(emailDomain)) {
+  const emailRoot = emailDomain?.split(".")[0];
+  const { data: existingForDomain } = await supabase
+    .from("email_sends")
+    .select("to_email")
+    .eq("team_id", TEAM_ID)
+    .eq("status", "sent")
+    .ilike("to_email", `%${emailRoot}%`)
+    .limit(1);
+
+  if (existingForDomain?.length > 0) {
     skipped++;
-    console.log(`  SKIP: ${emailDomain} already contacted via different domain`);
+    processedDomains.add(cleanDomain);
+    if (emailDomain) processedDomains.add(emailDomain);
+    console.log(`  SKIP: ${emailDomain} already in DB (${existingForDomain[0].to_email})`);
     return "skip";
   }
 
+  // All checks passed — mark as processed
   processedEmails.add(email.toLowerCase());
+  processedDomains.add(cleanDomain);
   if (emailDomain) processedDomains.add(emailDomain);
 
   // CRM
@@ -229,11 +246,31 @@ async function main() {
     process.exit(0);
   }
 
-  // Phase 1: Discover new brands
-  console.log("--- Phase 1: Discovering new Shopify brands ---\n");
-  const newDomains = await discoverBrands(processedDomains, remaining + 200); // extra buffer for skips
+  // Load all brand domains directly — no slow discovery phase
+  const newDomains = [];
+  const seen = new Set();
 
-  console.log(`--- Phase 2: Sending to ${newDomains.length} discovered brands ---\n`);
+  // Add from curated list (instant)
+  for (const d of CURATED_BRANDS) {
+    const clean = d.replace(/^www\./, "").toLowerCase();
+    if (!processedDomains.has(clean) && !seen.has(clean)) { newDomains.push(clean); seen.add(clean); }
+  }
+
+  // Add from batch 2 + 3 (instant)
+  for (const d of [...BRANDS_BATCH2, ...BRANDS_BATCH3]) {
+    const clean = d.replace(/^www\./, "").toLowerCase();
+    if (!processedDomains.has(clean) && !seen.has(clean)) { newDomains.push(clean); seen.add(clean); }
+  }
+
+  // Also discover live via search engines
+  console.log("--- Live discovery ---");
+  const liveDomains = await discoverLive(processedDomains, remaining);
+  for (const d of liveDomains) {
+    if (!seen.has(d)) { newDomains.push(d); seen.add(d); }
+  }
+
+  console.log(`Total: ${newDomains.length} brands to process\n`);
+  console.log(`--- Sending ---\n`);
 
   let index = 0;
   for (const domain of newDomains) {

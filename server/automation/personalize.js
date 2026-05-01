@@ -7,32 +7,33 @@ export async function generateObservation(brand, apiKey) {
   const name = brand.storeName || brand.name || brand.domain;
   const bi = brand.brandInfo || {};
 
-  // Build context from scraped brand data
+  // Build context from all available brand data
   let context = `Brand: ${name}
 Domain: ${brand.domain}
-Product types: ${(brand.sampleTypes || brand.matchedKeywords || []).join(", ")}
+Product types: ${(brand.sampleTypes || brand.matchedKeywords || []).join(", ") || "unknown"}
 Product count: ${brand.productCount || "unknown"}
 Country: ${brand.country || "unknown"}`;
 
-  if (bi.brandStory) context += `\nBrand story: ${bi.brandStory}`;
+  if (bi.brandStory) context += `\nDescription: ${bi.brandStory}`;
   if (bi.usp) context += `\nUSP: ${bi.usp}`;
   if (bi.founderName) context += `\nFounder: ${bi.founderName}`;
-  if (bi.hasCreators) context += `\nAlready mentions creators on their site.`;
-  if (bi.hasAffiliates) context += `\nAlready has an affiliate program.`;
+  if (bi.socialFollowing) context += `\nSocial following: ${bi.socialFollowing}`;
+  if (bi.hasCreators) context += `\nAlready works with creators.`;
+  if (bi.hasAffiliates) context += `\nHas an affiliate program.`;
   if (bi.hasInfluencers) context += `\nWorks with influencers.`;
 
-  const prompt = `You are writing a single opening line for a cold email to a beauty/wellness Shopify brand. We sell Linkable — a creator affiliate platform.
+  const prompt = `You are writing a 1-2 sentence opening observation for a cold email. We are Linkable — a Shopify app for creator affiliate tracking and payouts.
 
 ${context}
 
-Write 1-2 sentences that show you actually looked at their brand. Reference something specific — their products, brand story, positioning, founder, or the fact they already work with creators. Naturally connect it to why creator-driven sales could be relevant.
+Write something specific to this brand that shows you actually know who they are. Reference their products, description, social presence, or the fact they already work with creators. Keep it warm and genuine — this is a professional introduction, not a sales pitch.
 
 Rules:
-- Use the actual brand name, not placeholders
-- Do NOT mention revenue or financial data
-- Do NOT be salesy or over-the-top complimentary
-- Sound like a real person who browsed their site
-- Just the observation, nothing else`;
+- Use the actual brand name "${name}"
+- Do NOT mention revenue, sales figures, or financial data
+- Do NOT be over-the-top complimentary or salesy
+- Sound like a real person, not a template
+- 1-2 sentences only, nothing else`;
 
   try {
     const res = await fetch(ANTHROPIC_API_URL, {

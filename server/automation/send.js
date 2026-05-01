@@ -25,17 +25,23 @@ function checkRateLimit() {
 // Convert plain text body to minimal HTML, replacing raw URLs with anchor text
 function bodyToHtml(text) {
   // Replace URLs BEFORE escaping HTML entities
-  // Full line with lead-in text + URL
+  // Calendly demo link
   let html = text.replace(
-    /(?:Have a look if you're curious|If [^\n]* it might be worth a look|Worth a look|Free to try|You can try it free here|try it free here):\s*https?:\/\/www\.linkable\.link\S*/gi,
+    /[^\n]*:\s*(https?:\/\/calendly\.com\/[^\s]+)/gi,
+    'CALENDLY_CTA_PLACEHOLDER'
+  );
+  // Extract the actual calendly URL for the href
+  const calendlyUrl = text.match(/https?:\/\/calendly\.com\/[^\s]+/)?.[0] || "https://calendly.com/federico-linkable/linkable-demo?utm_source=outreach";
+
+  // Linkable link with lead-in text
+  html = html.replace(
+    /[^\n]*:\s*https?:\/\/www\.linkable\.link\S*/gi,
     'LINKABLE_CTA_PLACEHOLDER'
   );
 
-  // Catch any remaining raw linkable.link URLs
-  html = html.replace(
-    /https?:\/\/www\.linkable\.link\S*/g,
-    'LINKABLE_CTA_PLACEHOLDER'
-  );
+  // Catch any remaining raw URLs
+  html = html.replace(/https?:\/\/www\.linkable\.link\S*/g, 'LINKABLE_CTA_PLACEHOLDER');
+  html = html.replace(/https?:\/\/calendly\.com\/[^\s]+/g, 'CALENDLY_CTA_PLACEHOLDER');
 
   // Now escape HTML entities
   html = html
@@ -43,10 +49,14 @@ function bodyToHtml(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
-  // Insert the actual anchor tag
+  // Insert actual anchor tags
   html = html.replace(
     /LINKABLE_CTA_PLACEHOLDER/g,
-    '<a href="https://www.linkable.link" style="color:#0A0A0A;text-decoration:underline;">Try Linkable free</a>'
+    '<a href="https://linkable.link" style="color:#0A0A0A;text-decoration:underline;">Try Linkable free</a>'
+  );
+  html = html.replace(
+    /CALENDLY_CTA_PLACEHOLDER/g,
+    `<a href="${calendlyUrl.replace(/&/g, '&amp;')}" style="color:#0A0A0A;text-decoration:underline;">Book a quick demo</a>`
   );
 
   // Preserve line breaks

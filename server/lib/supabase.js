@@ -11,7 +11,11 @@ if (!process.env.SUPABASE_URL) {
     const envContent = readFileSync(envPath, "utf-8");
     for (const line of envContent.split("\n")) {
       const [key, ...rest] = line.split("=");
-      if (key && rest.length) process.env[key.trim()] = rest.join("=").trim();
+      const k = key?.trim();
+      // Shell-set env vars must win over .env (so `FOO=bar node ...` works).
+      if (k && rest.length && process.env[k] === undefined) {
+        process.env[k] = rest.join("=").trim();
+      }
     }
   } catch {}
 }

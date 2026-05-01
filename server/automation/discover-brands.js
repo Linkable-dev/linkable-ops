@@ -27,7 +27,7 @@ function extractDomain(url) {
 
 // Large curated list of known Shopify DTC brands across all categories
 // This gives us guaranteed Shopify brands without needing unreliable search
-const CURATED_BRANDS = [
+export const CURATED_BRANDS = [
   // Skincare
   "sundayriley.com", "drunk-elephant.com", "tatcha.com", "summerfridays.com",
   "tula.com", "peaceoutskincare.com", "starface.world", "versed.com",
