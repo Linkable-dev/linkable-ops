@@ -1,5 +1,5 @@
 import { useTheme } from "../../contexts/ThemeContext";
-export function Input({ value, onChange, placeholder, multiline, rows = 3, style = {} }) {
+export function Input({ value, onChange, placeholder, multiline, rows = 3, style = {}, ...rest }) {
   const { theme } = useTheme();
   const base = {
     width: "100%", boxSizing: "border-box", background: theme.bg,
@@ -9,6 +9,6 @@ export function Input({ value, onChange, placeholder, multiline, rows = 3, style
     transition: "background 0.2s, border-color 0.2s, color 0.2s", ...style,
   };
   return multiline
-    ? <textarea rows={rows} style={base} value={value} onChange={onChange} placeholder={placeholder} />
-    : <input style={base} value={value} onChange={onChange} placeholder={placeholder} />;
+    ? <textarea rows={rows} style={base} value={value} onChange={onChange} placeholder={placeholder} {...rest} />
+    : <input style={base} value={value} onChange={onChange} placeholder={placeholder} {...rest} />;
 }
