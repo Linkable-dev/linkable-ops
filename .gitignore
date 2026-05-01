@@ -20,6 +20,13 @@ linkable-*.json
 *-service-account*.json
 gcp-*.json
 
+# Local Claude Code harness config — may contain credentials in allow-list entries
+.claude/settings.json
+.claude/settings.local.json
+
+# Supabase CLI scratch state
+supabase/.temp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
