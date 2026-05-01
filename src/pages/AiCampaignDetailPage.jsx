@@ -421,11 +421,15 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
   const [generating, setGenerating] = useState(false);
   const [genErr, setGenErr] = useState(null);
   const [variantsPerSlot, setVariantsPerSlot] = useState(2);
+  const [refinementPrompt, setRefinementPrompt] = useState("");
 
   async function generate() {
     setGenerating(true); setGenErr(null);
     try {
-      await api.generateOutboundDrafts(campaign.id, { variants_per_slot: Number(variantsPerSlot) || 2 });
+      await api.generateOutboundDrafts(campaign.id, {
+        variants_per_slot: Number(variantsPerSlot) || 2,
+        refinement_prompt: refinementPrompt.trim() || undefined,
+      });
       onChange();
     } catch (e) { setGenErr(e.message); }
     finally { setGenerating(false); }
@@ -450,6 +454,21 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
           <Input type="number" value={variantsPerSlot} onChange={(e) => setVariantsPerSlot(e.target.value)} style={{ width: 60 }} min={1} max={3} />
           <Btn onClick={generate} disabled={generating}>{generating ? "Generating…" : "Generate AI drafts"}</Btn>
         </div>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 4 }}>
+          Steering prompt (optional) — applied to every variant the AI generates below
+        </div>
+        <textarea
+          value={refinementPrompt}
+          onChange={(e) => setRefinementPrompt(e.target.value)}
+          placeholder='e.g. "lead with the ROI math, drop the calendly link, keep tone confrontational, reference Black Friday case study"'
+          rows={2}
+          style={{
+            width: "100%", padding: "8px 12px", borderRadius: 8, fontFamily: "inherit", fontSize: 13,
+            border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text, resize: "vertical",
+          }}
+        />
       </div>
       {genErr && <div style={{ color: "#DC2626", fontSize: 12, marginBottom: 8 }}>{genErr}</div>}
 

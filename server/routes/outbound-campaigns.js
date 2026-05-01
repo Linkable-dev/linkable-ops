@@ -360,6 +360,7 @@ export function outboundCampaignsRoutes() {
         touches: req.body?.touches || [1, 2, 3],
         variantsPerSlot: Math.min(req.body?.variants_per_slot || 2, 3),
         briefOverride: req.body?.brief,
+        refinementPrompt: typeof req.body?.refinement_prompt === "string" ? req.body.refinement_prompt.trim() : "",
       };
 
       const drafts = await generateDraftsForCampaign({ teamId, campaign, apiKey, ...opts });
@@ -504,9 +505,12 @@ const TOUCH_DESCRIPTIONS = {
   3: "Final touch 7 days after touch 1. Short reply ask — yes/no, last note, soft close.",
 };
 
-export async function generateDraftsForCampaign({ teamId, campaign, apiKey, groups, touches, variantsPerSlot, briefOverride }) {
+export async function generateDraftsForCampaign({ teamId, campaign, apiKey, groups, touches, variantsPerSlot, briefOverride, refinementPrompt }) {
   const brief = briefOverride || campaign.brief ||
     "Linkable is a Shopify app for creator attribution and affiliate payouts. Cold outbound to D2C brand founders / heads of marketing.";
+  const refinementBlock = refinementPrompt
+    ? `\nADDITIONAL DIRECTION (highest priority — override the reference if it conflicts):\n${refinementPrompt}\n`
+    : "";
 
   // For each (group, touch), find the existing default to anchor on.
   const defaults = Object.fromEntries(
@@ -524,7 +528,7 @@ export async function generateDraftsForCampaign({ teamId, campaign, apiKey, grou
 
 CAMPAIGN BRIEF:
 ${brief}
-
+${refinementBlock}
 SLOT: ${group} touch ${touch} (key=${key})
 - Group: ${GROUP_DESCRIPTIONS[group] || group}
 - Position: ${TOUCH_DESCRIPTIONS[touch] || ""}
