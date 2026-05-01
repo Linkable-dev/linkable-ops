@@ -494,11 +494,36 @@ async function main() {
 
   if (remaining <= 0) { console.log("Target reached."); process.exit(0); }
 
-  // Create campaign
-  const { data: campaign } = await supabase.from("email_campaigns")
-    .insert({ team_id: TEAM_ID, name: `StoreLeads Outreach ${new Date().toISOString().split("T")[0]}`, status: "running", source: "storeleads", started_at: new Date().toISOString() })
-    .select().single();
-  campaignId = campaign.id;
+  // Self-heal: any storeleads campaigns left in 'running' from a prior invocation
+  // (process killed before the final update) become 'failed' so the dashboard
+  // doesn't accumulate ghost rows. We treat anything not started today as stale.
+  const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+  const { data: stale, error: staleErr } = await supabase.from("email_campaigns")
+    .update({ status: "failed", completed_at: new Date().toISOString() })
+    .eq("team_id", TEAM_ID).eq("source", "storeleads").eq("status", "running")
+    .lt("started_at", todayStart.toISOString())
+    .select("id");
+  if (staleErr) console.warn(`Stale cleanup warning: ${staleErr.message}`);
+  else if (stale?.length) console.log(`Marked ${stale.length} stale storeleads campaign(s) as failed.`);
+
+  // Find-or-create today's campaign so re-running on the same day reuses one row
+  // instead of inserting a fresh duplicate every time.
+  const todayName = `StoreLeads Outreach ${new Date().toISOString().split("T")[0]}`;
+  const { data: existing } = await supabase.from("email_campaigns")
+    .select("id").eq("team_id", TEAM_ID).eq("name", todayName).eq("source", "storeleads")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+  if (existing) {
+    campaignId = existing.id;
+    await supabase.from("email_campaigns").update({ status: "running" }).eq("id", campaignId);
+    console.log(`Reusing existing campaign ${campaignId} for today.`);
+  } else {
+    const { data: campaign } = await supabase.from("email_campaigns")
+      .insert({ team_id: TEAM_ID, name: todayName, status: "running", source: "storeleads", started_at: new Date().toISOString() })
+      .select().single();
+    campaignId = campaign.id;
+    console.log(`Created new campaign ${campaignId} for today.`);
+  }
 
   // Fetch from StoreLeads using cursor pagination
   let batch = 1;
