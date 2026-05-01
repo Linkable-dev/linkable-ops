@@ -2,11 +2,13 @@
 // Shows today's email_sends rows, lets you filter by group/touch/status,
 // and stop pending touches for any address (paste list or per-row button).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
+
+const GUIDE_HIDDEN_KEY = "linkable.aiOutbound.guideHidden";
 
 const STATUS_TINTS = {
   pending:   { bg: "#FEF3C7", fg: "#92400E" },
@@ -45,6 +47,37 @@ export default function AiOutboundPage() {
   const [stopReason, setStopReason] = useState("replied");
   const [stopBusy, setStopBusy] = useState(false);
   const [stopResult, setStopResult] = useState(null);
+
+  const [guideHidden, setGuideHidden] = useState(() => {
+    try { return localStorage.getItem(GUIDE_HIDDEN_KEY) === "1"; } catch { return false; }
+  });
+  const [activeStep, setActiveStep] = useState(null);
+  const [highlightSection, setHighlightSection] = useState(null);
+  const statsRef = useRef(null);
+  const stopRef = useRef(null);
+  const stopTextareaRef = useRef(null);
+  const tableRef = useRef(null);
+
+  function persistGuideHidden(hidden) {
+    setGuideHidden(hidden);
+    try { localStorage.setItem(GUIDE_HIDDEN_KEY, hidden ? "1" : "0"); } catch {}
+  }
+
+  function goToStep(stepKey) {
+    setActiveStep(stepKey);
+    setHighlightSection(stepKey);
+    const refMap = { health: statsRef, stop: stopRef, review: tableRef };
+    const node = refMap[stepKey]?.current;
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (stepKey === "stop") {
+      setTimeout(() => stopTextareaRef.current?.focus(), 350);
+    }
+    if (stepKey === "review") {
+      setStatus("pending");
+      setScope("today");
+    }
+    setTimeout(() => setHighlightSection(null), 1600);
+  }
 
   const reload = useCallback(() => {
     setLoading(true); setError(null);
@@ -87,12 +120,30 @@ export default function AiOutboundPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: 0 }}>AI Outbound</h1>
-        <p style={{ fontSize: 13, color: theme.textMuted, margin: "4px 0 0" }}>
-          Daily-200 sequencer: 3-touch sequences (T+0 / T+3 / T+7) across G1 creator-active, G2 summer-seasonal, G3 cold catch-all. Reply / opt-out cancellations land here.
-        </p>
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: 0 }}>AI Outbound</h1>
+          <p style={{ fontSize: 13, color: theme.textMuted, margin: "4px 0 0" }}>
+            Daily-200 sequencer: 3-touch sequences (T+0 / T+3 / T+7) across G1 creator-active, G2 summer-seasonal, G3 cold catch-all. Reply / opt-out cancellations land here.
+          </p>
+        </div>
+        {guideHidden && (
+          <button onClick={() => persistGuideHidden(false)} style={miniBtn(theme)} title="Show workflow guide">
+            Show guide
+          </button>
+        )}
       </div>
+
+      {!guideHidden && (
+        <WorkflowGuide
+          theme={theme}
+          stats={stats}
+          rows={rows}
+          activeStep={activeStep}
+          onStep={goToStep}
+          onHide={() => persistGuideHidden(true)}
+        />
+      )}
 
       {error && (
         <Card style={{ borderColor: "#DC2626", marginBottom: 12 }}>
@@ -101,7 +152,7 @@ export default function AiOutboundPage() {
       )}
 
       {/* Stats row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16 }}>
+      <div ref={statsRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
         <StatCard label="Today total" value={stats?.total ?? "—"} theme={theme} />
         <StatCard label="Sent" value={stats?.byStatus?.sent ?? 0} theme={theme} tint={STATUS_TINTS.sent} />
         <StatCard label="Scheduled" value={stats?.byStatus?.scheduled ?? 0} theme={theme} tint={STATUS_TINTS.scheduled} />
@@ -113,12 +164,14 @@ export default function AiOutboundPage() {
       </div>
 
       {/* Stop list */}
+      <div ref={stopRef} style={sectionHighlight(highlightSection === "stop", theme)}>
       <Card style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: theme.text }}>Stop list</div>
         <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
           Paste replied / opt-out addresses (any separators). Suppresses globally + cancels every pending touch.
         </div>
         <textarea
+          ref={stopTextareaRef}
           value={stopText}
           onChange={(e) => setStopText(e.target.value)}
           placeholder="sarah@glowserum.com&#10;mike@kombuchaco.com"
@@ -149,6 +202,7 @@ export default function AiOutboundPage() {
           )}
         </div>
       </Card>
+      </div>
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
@@ -168,6 +222,7 @@ export default function AiOutboundPage() {
       </div>
 
       {/* Sends table */}
+      <div ref={tableRef} style={sectionHighlight(highlightSection === "review", theme)}>
       {loading && rows.length === 0 ? (
         <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>
       ) : rows.length === 0 ? (
@@ -227,8 +282,101 @@ export default function AiOutboundPage() {
           </table>
         </Card>
       )}
+      </div>
     </div>
   );
+}
+
+function WorkflowGuide({ theme, stats, rows, activeStep, onStep, onHide }) {
+  const total = stats?.total ?? 0;
+  const failed = stats?.byStatus?.failed ?? 0;
+  const cancelled = stats?.byStatus?.cancelled ?? 0;
+  const pending = (stats?.byStatus?.pending ?? 0) + (stats?.byStatus?.scheduled ?? 0);
+  const pendingInRows = rows.filter((r) => r.status === "pending" || r.status === "scheduled").length;
+
+  const steps = [
+    {
+      key: "health",
+      title: "Check today's health",
+      hint: total === 0
+        ? "No sends yet today — open stats to confirm the sequencer ran."
+        : `${total} sends today · ${failed} failed · ${cancelled} cancelled. Glance at the totals.`,
+      cta: "Open stats",
+    },
+    {
+      key: "stop",
+      title: "Stop replies & opt-outs",
+      hint: "Paste any addresses that replied or asked to be removed. Cancels every pending touch + suppresses globally.",
+      cta: "Open stop list",
+    },
+    {
+      key: "review",
+      title: "Review pending sends",
+      hint: pendingInRows > 0
+        ? `${pendingInRows} pending in current view — spot-check before they fire, hit Stop on anything off.`
+        : pending > 0
+          ? `${pending} pending today — open the list filtered to pending/scheduled.`
+          : "Nothing pending right now. Optional: review what already went out.",
+      cta: "Open sends list",
+    },
+  ];
+
+  return (
+    <Card style={{ marginBottom: 16, background: theme.surfaceAlt || theme.surface, borderColor: theme.border }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 22, height: 22, borderRadius: 999,
+            background: theme.accent + "20", color: theme.accent,
+            fontSize: 12, fontWeight: 700,
+          }}>★</span>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Daily workflow</div>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>Three steps to clear AI Outbound for the day.</div>
+        </div>
+        <button onClick={onHide} style={miniBtn(theme)} title="Hide guide">Hide</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+        {steps.map((s, i) => (
+          <button key={s.key} onClick={() => onStep(s.key)} style={stepCardStyle(theme, activeStep === s.key)}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20, borderRadius: 999,
+                background: activeStep === s.key ? theme.accent : theme.border,
+                color: activeStep === s.key ? "#fff" : theme.textMuted,
+                fontSize: 11, fontWeight: 700,
+              }}>{i + 1}</span>
+              <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{s.title}</div>
+            </div>
+            <div style={{ fontSize: 12, color: theme.textMuted, lineHeight: 1.4, marginBottom: 8 }}>{s.hint}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: theme.accent }}>{s.cta} →</div>
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function stepCardStyle(theme, active) {
+  return {
+    textAlign: "left",
+    padding: "12px 14px",
+    borderRadius: 8,
+    border: `1.5px solid ${active ? theme.accent : theme.border}`,
+    background: active ? theme.accent + "10" : theme.bg,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "border-color 0.15s, background 0.15s",
+  };
+}
+
+function sectionHighlight(active, theme) {
+  return {
+    boxShadow: active ? `0 0 0 2px ${theme.accent}` : "none",
+    borderRadius: 10,
+    transition: "box-shadow 0.4s",
+  };
 }
 
 function StatCard({ label, value, theme, tint = {} }) {
