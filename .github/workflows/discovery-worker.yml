@@ -1,0 +1,43 @@
+name: Lead-discovery worker
+
+# Drains the ai_bulk_runs discovery queue. Runs every 5 minutes (the GitHub
+# Actions minimum) and on manual trigger. The worker invokes the same CLI
+# script that works locally — no Vercel involvement.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# Avoid two workers racing if a run takes longer than 5 minutes.
+concurrency:
+  group: discovery-worker
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install server deps
+        working-directory: server
+        run: npm ci --no-audit --no-fund
+
+      - name: Drain discovery queue
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STORELEADS_KEY: ${{ secrets.STORELEADS_KEY }}
+          APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
+          HUNTER_API_KEY: ${{ secrets.HUNTER_API_KEY }}
+        run: node server/automation/run-discovery-worker.js --drain
