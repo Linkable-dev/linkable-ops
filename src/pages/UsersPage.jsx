@@ -199,8 +199,8 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.4fr) 120px 130px"
-        : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 130px",
+        ? "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.4fr) 120px 120px 130px"
+        : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
       borderBottom: `1px solid ${theme.border}`,
