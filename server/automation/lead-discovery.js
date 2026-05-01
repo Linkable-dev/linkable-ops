@@ -147,6 +147,56 @@ async function processOneBrand({ teamId, brand }) {
   const cleanDomain = (brand.name || "").replace(/^www\./, "").toLowerCase();
   if (!cleanDomain) return { qualified: false, reason: "no domain" };
 
+  const emails = (brand.contact_info || []).filter((c) => c.type === "email").map((c) => c.value);
+  // Build the full StoreLeads-derived row up front. We persist this regardless
+  // of whether we end up qualifying the brand — even rejected brands are
+  // useful (skip-list, future requalification, audit trail).
+  const baseRow = {
+    team_id: teamId,
+    domain: cleanDomain,
+    merchant_name: brand.merchant_name || null,
+    title: brand.title || null,
+    description: brand.description || null,
+    platform: brand.platform || null,
+    plan: brand.plan || null,
+    country_code: brand.country_code || null,
+    currency_code: brand.currency_code || null,
+    city: brand.city || null,
+    state: brand.state || brand.region || null,
+    language_code: brand.language_code || null,
+    emails,
+    contact_info: brand.contact_info || [],
+    categories: brand.categories || [],
+    avg_price: brand.avg_price_formatted || null,
+    created_at_storeleads: brand.created_at || null,
+    last_updated_at: brand.last_updated_at || null,
+    trustpilot_rating: brand.trustpilot?.avg_rating || null,
+    trustpilot_reviews: brand.trustpilot?.review_count || null,
+    about_us: brand.about_us || null,
+    contact_page: brand.contact_page || null,
+    career_page: brand.career_page || null,
+    raw_data: brand,
+    imported_at: new Date().toISOString(),
+  };
+
+  async function persistAndReturn({ qualified, reason, person, hunterStatus }) {
+    const row = { ...baseRow };
+    if (person) {
+      row.email = person.email;
+      row.contact_first_name = person.firstName;
+      row.contact_last_name = person.lastName;
+      row.contact_position = person.position;
+      row.contact_source = person.source;
+    }
+    if (!qualified) {
+      // Stamp the reason inside raw_data so we can audit later without a
+      // migration. (raw_data is jsonb so this is cheap to query.)
+      row.raw_data = { ...brand, _disqualify_reason: reason || null, _hunter_status: hunterStatus || null };
+    }
+    await supabase.from("storeleads_brands").upsert(row, { onConflict: "domain" });
+    return { qualified, email: person?.email, name: person?.firstName, reason };
+  }
+
   // Best-effort person finder: Apollo first (richer org chart), Hunter as backup.
   let person = null;
   if (process.env.APOLLO_API_KEY) {
@@ -163,7 +213,7 @@ async function processOneBrand({ teamId, brand }) {
   }
 
   if (!person?.email) {
-    return { qualified: false, reason: "no email on brand" };
+    return persistAndReturn({ qualified: false, reason: "no email on brand" });
   }
 
   // Role filter only when we have a stated position. Apollo / Hunter return
@@ -175,53 +225,21 @@ async function processOneBrand({ teamId, brand }) {
     const fromOrgChart = person.source === "apollo-orgchart";
     const fromGenericLocal = person.source === "storeleads-personal" && !person.firstName;
     if (!isFounder && !isMarketing && !fromOrgChart && !fromGenericLocal) {
-      return { qualified: false, reason: `role ${person.position} not target` };
+      return persistAndReturn({ qualified: false, reason: `role ${person.position} not target`, person });
     }
   }
 
   // Verify only if Hunter is alive (skip when key missing or rate-limited).
+  let hunterStatus = null;
   if (person.source !== "apollo-orgchart" && process.env.HUNTER_API_KEY) {
-    const status = await hunterVerify(person.email).catch(() => "unknown");
-    if (status === "invalid") return { qualified: false, reason: "Hunter says invalid" };
+    hunterStatus = await hunterVerify(person.email).catch(() => "unknown");
+    if (hunterStatus === "invalid") {
+      return persistAndReturn({ qualified: false, reason: "Hunter says invalid", person, hunterStatus });
+    }
     // 429 etc. → "unknown" → we keep the lead, accepting the deliverability risk.
   }
 
-  // Write to storeleads_brands. The bulk runner reads from this table when
-  // source = "storeleads".
-  const emails = (brand.contact_info || []).filter((c) => c.type === "email").map((c) => c.value);
-  await supabase.from("storeleads_brands").upsert(
-    {
-      team_id: teamId,
-      domain: cleanDomain,
-      merchant_name: brand.merchant_name || null,
-      title: brand.title || null,
-      description: brand.description || null,
-      platform: brand.platform || null,
-      plan: brand.plan || null,
-      country_code: brand.country_code || null,
-      currency_code: brand.currency_code || null,
-      city: brand.city || null,
-      language_code: brand.language_code || null,
-      email: person.email,
-      contact_first_name: person.firstName,
-      contact_last_name: person.lastName,
-      contact_position: person.position,
-      emails,
-      contact_info: brand.contact_info || [],
-      avg_price: brand.avg_price_formatted || null,
-      created_at_storeleads: brand.created_at || null,
-      last_updated_at: brand.last_updated_at || null,
-      trustpilot_rating: brand.trustpilot?.avg_rating || null,
-      trustpilot_reviews: brand.trustpilot?.review_count || null,
-      about_us: brand.about_us || null,
-      contact_page: brand.contact_page || null,
-      raw_data: brand,
-      imported_at: new Date().toISOString(),
-    },
-    { onConflict: "domain" }
-  );
-
-  return { qualified: true, email: person.email, name: person.firstName };
+  return persistAndReturn({ qualified: true, person, hunterStatus });
 }
 
 // ---------- STORELEADS ----------
