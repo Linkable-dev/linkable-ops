@@ -430,9 +430,9 @@ function SettingsCard({ campaign, theme, onSaved }) {
           <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6, paddingLeft: 24 }}>
             {form.auto_reply
               ? (campaign.ai_campaign_id
-                  ? "Replies to this campaign's emails will be answered by the linked AI persona."
-                  : "When you save, an AI persona will be created automatically using the brief above. Tweak it later in AI Test Lab.")
-              : "Off — replies land in AI Inbox for manual handling."}
+                  ? <>Replies to this campaign's emails will be answered by the linked AI persona. <Link to={`/ai/test-lab?campaign=${campaign.ai_campaign_id}`} style={{ color: theme.accent, fontWeight: 600 }}>Tune persona →</Link></>
+                  : "When you save, an AI persona will be created automatically using the brief above. You can tune it later from this page.")
+              : "Off — replies land in Inbox for manual handling."}
           </div>
         </Field>
       </div>
