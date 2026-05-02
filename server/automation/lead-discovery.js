@@ -320,11 +320,16 @@ export async function processOneBrand({ teamId, brand }) {
   }
 
   // Final guard: regardless of source, reject generic shared-mailbox emails.
-  // (Apollo/Hunter usually filter these but the StoreLeads fallback or stale
-  // data can still surface them.)
+  // Uses the same helper as the StoreLeads picker so Hunter/Apollo can't
+  // sneak compound forms (customer.service@) through either.
   const local = person.email.split("@")[0]?.toLowerCase();
-  if (GENERIC_MAILBOX_LOCALS.has(local)) {
+  if (isGenericLocal(local)) {
     return persistAndReturn({ qualified: false, reason: `generic mailbox (${local}@)`, person });
+  }
+  // Hunter sometimes returns first_name="Customer" / "Care" / "Sales" when
+  // its source data was a shared mailbox signature. Reject those.
+  if (person.firstName && isGenericLocal(person.firstName.toLowerCase())) {
+    return persistAndReturn({ qualified: false, reason: `generic name (${person.firstName})`, person });
   }
 
   // Role filter only when we have a stated position. Apollo / Hunter return
@@ -606,30 +611,57 @@ function roleScore(positionRaw) {
 // decision maker. Anything matching these is rejected outright — we'd
 // rather skip a brand than email a shared inbox where the message disappears.
 export const GENERIC_MAILBOX_LOCALS = new Set([
-  // Generic catch-alls
-  "info", "hello", "hi", "contact", "enquiries", "enquiry", "general",
-  // Sales/biz dev (shared)
-  "sales", "biz", "business", "wholesale", "trade", "trades",
-  // Press/marketing (when shared, not a person)
-  "press", "pr", "media",
-  // Operations
-  "office", "studio", "shop", "store", "online", "web", "team", "service", "services",
-  // Support/CS
-  "support", "help", "cs", "customerservice", "customercare", "service-desk",
-  // Orders/transactional
-  "orders", "order", "returns", "shipping", "tracking",
+  // Generic catch-alls + greetings
+  "info", "infor", "information", "atinfo", "hello", "hey", "hi", "ciao",
+  "bonjour", "hola", "salut", "contact", "contactus", "contact-us",
+  "enquiries", "enquires", "enquiry", "general", "ask", "email", "mail",
+  "mailbox", "talk", "chat", "gcc", "applications", "agents",
+  // Sales / biz dev (shared)
+  "sales", "sale", "biz", "business", "wholesale", "trade", "trades",
+  "commercial", "b2b", "deals", "stockists",
+  // Press / marketing / brand (shared inboxes, not a person)
+  "press", "pr", "media", "marketing", "brand", "branding", "communications",
+  "comms", "social", "newsletter", "blog",
+  // Operations / brand catch-alls
+  "office", "studio", "shop", "store", "online", "web", "team", "theteam",
+  "service", "services", "events", "appointments", "bookings", "booking",
+  "reservations", "concierge", "clinic", "management", "mgmt", "operations",
+  "ops", "retail", "vip", "kontakt", "inquiries", "inquiry",
+  // Support / CS / care
+  "support", "suppport", "help", "helpme", "helpdesk", "cs", "care", "customer",
+  "customers", "customerservice", "customercare", "custserv", "service-desk",
+  "complaints", "complaint", "feedback", "refunds", "refund", "returns",
+  "return", "exchange", "exchanges", "eusupport", "emailcontact",
+  // Orders / transactional
+  "orders", "order", "shipping", "tracking", "fulfillment",
   // Partnerships (often goes to shared mailbox)
   "partners", "partnerships", "partnership", "collab", "collabs", "collaborations",
-  // Finance/legal/admin
+  "affiliates", "affiliate", "ambassadors", "ambassador", "creators", "creator",
+  "influencers", "influencer", "connect",
+  // Finance / legal / admin
   "billing", "accounts", "finance", "invoices", "ar", "ap", "legal", "compliance",
   "privacy", "gdpr", "dpo", "investor", "ir",
-  // HR/recruitment
+  // HR / recruitment
   "hr", "jobs", "careers", "recruitment", "recruiting", "talent",
   // System
   "noreply", "no-reply", "donotreply", "do-not-reply", "abuse", "spam",
   "postmaster", "mailer-daemon", "unsubscribe", "verify", "webmaster",
   "hostmaster", "security", "data", "admin",
 ]);
+
+function isGenericLocal(local) {
+  if (!local) return true;
+  const l = local.toLowerCase();
+  if (GENERIC_MAILBOX_LOCALS.has(l)) return true;
+  // Compound forms separated by . - _ (e.g. customer.service, the.team).
+  const parts = l.split(/[._-]+/);
+  if (parts.length > 1 && parts.every((p) => GENERIC_MAILBOX_LOCALS.has(p) || p.length <= 2)) return true;
+  // Substring match against high-confidence shared-mailbox tokens. Catches
+  // typos and compounds like 'eusupport', 'helpme', 'suppport', 'custserv'
+  // that won't ever be a person's name.
+  if (/(support|service|helpdesk|customercare|custserv|enquir|inquir|complaint|refund|return|booking|tracking|fulfillment|wholesale|partnership|affiliate|ambassador|influencer|marketing|newsletter|noreply|donotreply|webmaster|postmaster|unsubscribe)/i.test(l)) return true;
+  return false;
+}
 
 function pickPersonalFromStoreLeads(domain, contactInfo) {
   const emails = (contactInfo || [])
@@ -644,28 +676,24 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
     const local = e.split("@")[0];
     const dom = e.split("@")[1] || "";
     if (!dom.includes(root)) continue;
-    if (GENERIC_MAILBOX_LOCALS.has(local)) continue;   // never accept shared mailboxes
+    if (isGenericLocal(local)) continue; // catches shared mailboxes incl. compounds
 
     let score = 0;
     let firstName = null;
     let lastName = null;
-    let position = null;
 
-    // first.last@ pattern → highest signal, real person.
+    // first.last@ pattern → highest signal, real person — but only if neither
+    // half is a generic word (rejects customer.service@, customer.care@, etc).
     const dotMatch = local.match(/^([a-z]+)\.([a-z]+)$/);
-    if (dotMatch) {
+    if (dotMatch && !isGenericLocal(dotMatch[1]) && !isGenericLocal(dotMatch[2])) {
       score = 100;
       firstName = cap(dotMatch[1]);
       lastName = cap(dotMatch[2]);
-    } else if (/^(founder|ceo|owner)/i.test(local)) {
-      score = 90;
-      position = local;
-    } else if (/^(marketing|partnership|brand|growth|creator|influencer)/i.test(local)) {
-      // Only accept role-style locals when explicitly partnerships/marketing —
-      // even then we don't have a person, so we score lower.
-      score = 60;
-      position = local;
-    } else if (/^[a-z]{2,12}$/.test(local) && !GENERIC_MAILBOX_LOCALS.has(local)) {
+    } else if (/^(founder|ceo|owner|cofounder|coo|cmo)$/i.test(local)) {
+      // Role-only local with no person attached — accept but flag.
+      score = 80;
+      firstName = null;
+    } else if (/^[a-z]{2,12}$/.test(local)) {
       // Single-word personal name (sara@, tom@, marco@). Real person signal.
       score = 70;
       firstName = cap(local);
@@ -674,19 +702,18 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
       continue;
     }
 
-    scored.push({ email: e, score, firstName, lastName, position });
+    scored.push({ email: e, score, firstName, lastName });
   }
 
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0];
-  // Only return if we have an actual person signal (firstName) or a
-  // partnership-style role local. Generic mailboxes are out.
-  if (!best || (!best.firstName && !best.position)) return null;
+  // Require an actual personal signal (firstName) — no more generic role locals.
+  if (!best || !best.firstName) return null;
   return {
     email: best.email,
     firstName: best.firstName,
     lastName: best.lastName,
-    position: best.position,
+    position: null,
     source: "storeleads-personal",
   };
 }
