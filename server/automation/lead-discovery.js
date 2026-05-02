@@ -212,7 +212,7 @@ async function processDiscovery(runId, teamId, campaignId, filters, limit, opts 
 
 // ---------- ONE BRAND ----------
 
-async function processOneBrand({ teamId, brand }) {
+export async function processOneBrand({ teamId, brand }) {
   const cleanDomain = (brand.name || "").replace(/^www\./, "").toLowerCase();
   if (!cleanDomain) return { qualified: false, reason: "no domain" };
 
@@ -266,17 +266,22 @@ async function processOneBrand({ teamId, brand }) {
     return { qualified, email: person?.email, name: person?.firstName, reason };
   }
 
-  // Decision-maker finder, cheapest source first:
-  //  1. StoreLeads contact_info — free, already loaded with the brand.
-  //     pickPersonalFromStoreLeads now rejects shared mailboxes outright.
-  //  2. Hunter.io — role-prioritized search for the brand's domain.
-  //  3. Apollo — richer org chart, last resort because of rate-limit issues.
-  let person = pickPersonalFromStoreLeads(cleanDomain, brand.contact_info);
+  // Decision-maker finder, best signal first. Apollo's org chart gives the
+  // richest decision-maker mapping when it works — its 429 is now handled
+  // gracefully by apolloSearch (returns null and marks itself exhausted for
+  // an hour, so subsequent brands skip it without wasting requests).
+  //  1. Apollo — verified org-chart roots, returns null fast when 429'd.
+  //  2. Hunter — role-prioritized domain search.
+  //  3. StoreLeads contact_info — free, but only accepts named people.
+  let person = null;
+  if (process.env.APOLLO_API_KEY) {
+    person = await apolloSearch(cleanDomain).catch(() => null);
+  }
   if (!person && process.env.HUNTER_API_KEY) {
     person = await hunterSearch(cleanDomain).catch(() => null);
   }
-  if (!person && process.env.APOLLO_API_KEY) {
-    person = await apolloSearch(cleanDomain).catch(() => null);
+  if (!person) {
+    person = pickPersonalFromStoreLeads(cleanDomain, brand.contact_info);
   }
 
   if (!person?.email) {
@@ -422,13 +427,27 @@ function categoriesToBleveMatch(categories) {
 
 // ---------- APOLLO ----------
 
+// Apollo enforces a per-hour cap (200 on the free plan) and starts returning
+// 429 once it's burned. Once we see a 429, skip Apollo for the rest of the
+// hour — saves time, avoids spamming, and lets the run fall through to
+// Hunter / StoreLeads cleanly. Process-local state is fine because the
+// worker runs once per cron tick (or once per CLI invocation).
+let apolloExhaustedUntil = 0;
+function apolloIsExhausted() { return Date.now() < apolloExhaustedUntil; }
+function markApolloExhausted() {
+  // Hour-long cooldown by default — Apollo's 429 message says "200 per hour".
+  apolloExhaustedUntil = Date.now() + 60 * 60 * 1000;
+}
+
 async function apolloSearch(domain) {
   const apiKey = process.env.APOLLO_API_KEY;
   if (!apiKey) return null;
+  if (apolloIsExhausted()) return null;
   const orgRes = await fetch(`https://api.apollo.io/v1/organizations/enrich?domain=${domain}`, {
     headers: { "X-Api-Key": apiKey },
     signal: AbortSignal.timeout(10_000),
   });
+  if (orgRes.status === 429) { markApolloExhausted(); return null; }
   if (!orgRes.ok) return null;
   const orgData = await orgRes.json();
   const personIds = orgData.organization?.org_chart_root_people_ids || [];
@@ -440,6 +459,7 @@ async function apolloSearch(domain) {
       body: JSON.stringify({ id: personIds[0] }),
       signal: AbortSignal.timeout(10_000),
     });
+    if (personRes.status === 429) { markApolloExhausted(); return null; }
     if (personRes.ok) {
       const data = await personRes.json();
       const p = data.person;
@@ -458,12 +478,14 @@ async function apolloSearch(domain) {
   const orgName = orgData.organization?.name;
   if (orgName) {
     for (const title of ["CEO", "Founder", "CMO", "Marketing Director"]) {
+      if (apolloIsExhausted()) break;
       const res = await fetch("https://api.apollo.io/v1/people/match", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
         body: JSON.stringify({ organization_name: orgName, domain, title }),
         signal: AbortSignal.timeout(10_000),
       });
+      if (res.status === 429) { markApolloExhausted(); break; }
       if (!res.ok) continue;
       const data = await res.json();
       const p = data.person;
