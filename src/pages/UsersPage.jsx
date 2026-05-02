@@ -332,8 +332,8 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
       )}
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <Btn size="sm" variant="outline" onClick={onImpersonate} disabled={busy}>
-          {busy ? "Opening…" : "View as user ↗"}
+        <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
+          View as user ↗
         </Btn>
       </div>
     </div>

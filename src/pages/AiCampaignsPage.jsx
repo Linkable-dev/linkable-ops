@@ -11,6 +11,7 @@ import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { TabBar } from "../components/ui/TabBar";
 import { Pagination } from "../components/ui/Pagination";
+import { SkeletonTableRows } from "../components/ui/Skeleton";
 
 const STATUS_TINTS = {
   active:   { bg: "#D1FAE5", fg: "#065F46" },
@@ -103,7 +104,18 @@ export default function AiCampaignsPage() {
       />
 
       {loading && campaigns.length === 0 ? (
-        <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>
+        <Card style={{ padding: 0, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                <Th>Name</Th><Th>Status</Th><Th>Daily cap</Th><Th>Auto-reply</Th><Th>Targets</Th><Th>Created</Th>
+              </tr>
+            </thead>
+            <tbody>
+              <SkeletonTableRows rows={6} cols={6} theme={theme} />
+            </tbody>
+          </table>
+        </Card>
       ) : campaigns.length === 0 ? (
         <Card>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>
@@ -264,7 +276,7 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
       </div>
       {err && <div style={{ color: "#DC2626", fontSize: 12, marginBottom: 8 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <Btn onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create + seed 9 templates"}</Btn>
+        <Btn onClick={submit} loading={busy}>Create + seed 9 templates</Btn>
         <Btn onClick={onCancel} variant="secondary">Cancel</Btn>
       </div>
     </Card>

@@ -7,6 +7,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
+import { Skeleton, SkeletonCard, SkeletonTableRows } from "../components/ui/Skeleton";
 
 const GUIDE_HIDDEN_KEY = "linkable.aiOutbound.guideHidden";
 
@@ -153,14 +154,20 @@ export default function AiOutboundPage() {
 
       {/* Stats row */}
       <div ref={statsRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
-        <StatCard label="Today total" value={stats?.total ?? "—"} theme={theme} />
-        <StatCard label="Sent" value={stats?.byStatus?.sent ?? 0} theme={theme} tint={STATUS_TINTS.sent} />
-        <StatCard label="Scheduled" value={stats?.byStatus?.scheduled ?? 0} theme={theme} tint={STATUS_TINTS.scheduled} />
-        <StatCard label="Cancelled" value={stats?.byStatus?.cancelled ?? 0} theme={theme} tint={STATUS_TINTS.cancelled} />
-        <StatCard label="Failed" value={stats?.byStatus?.failed ?? 0} theme={theme} tint={STATUS_TINTS.failed} />
-        <StatCard label="G2 (summer)" value={stats?.byGroup?.G2 ?? 0} theme={theme} tint={GROUP_TINTS.G2} />
-        <StatCard label="G1 (creator)" value={stats?.byGroup?.G1 ?? 0} theme={theme} tint={GROUP_TINTS.G1} />
-        <StatCard label="G3 (cold)" value={stats?.byGroup?.G3 ?? 0} theme={theme} tint={GROUP_TINTS.G3} />
+        {!stats ? (
+          Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} height={64} />)
+        ) : (
+          <>
+            <StatCard label="Today total" value={stats.total ?? "—"} theme={theme} />
+            <StatCard label="Sent" value={stats.byStatus?.sent ?? 0} theme={theme} tint={STATUS_TINTS.sent} />
+            <StatCard label="Scheduled" value={stats.byStatus?.scheduled ?? 0} theme={theme} tint={STATUS_TINTS.scheduled} />
+            <StatCard label="Cancelled" value={stats.byStatus?.cancelled ?? 0} theme={theme} tint={STATUS_TINTS.cancelled} />
+            <StatCard label="Failed" value={stats.byStatus?.failed ?? 0} theme={theme} tint={STATUS_TINTS.failed} />
+            <StatCard label="G2 (summer)" value={stats.byGroup?.G2 ?? 0} theme={theme} tint={GROUP_TINTS.G2} />
+            <StatCard label="G1 (creator)" value={stats.byGroup?.G1 ?? 0} theme={theme} tint={GROUP_TINTS.G1} />
+            <StatCard label="G3 (cold)" value={stats.byGroup?.G3 ?? 0} theme={theme} tint={GROUP_TINTS.G3} />
+          </>
+        )}
       </div>
 
       {/* Stop list */}
@@ -189,8 +196,8 @@ export default function AiOutboundPage() {
             <option value="bounced">bounced</option>
             <option value="manual">manual</option>
           </select>
-          <Btn onClick={() => runStop(stopEmails, stopReason)} disabled={stopBusy || stopEmails.length === 0}>
-            {stopBusy ? "Stopping…" : `Stop ${stopEmails.length} address${stopEmails.length === 1 ? "" : "es"}`}
+          <Btn onClick={() => runStop(stopEmails, stopReason)} loading={stopBusy} disabled={stopEmails.length === 0}>
+            {`Stop ${stopEmails.length} address${stopEmails.length === 1 ? "" : "es"}`}
           </Btn>
           {stopResult?.ok && (
             <span style={{ fontSize: 12, color: "#065F46" }}>
@@ -224,7 +231,18 @@ export default function AiOutboundPage() {
       {/* Sends table */}
       <div ref={tableRef} style={sectionHighlight(highlightSection === "review", theme)}>
       {loading && rows.length === 0 ? (
-        <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>
+        <Card style={{ padding: 0, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                <Th>When</Th><Th>Group</Th><Th>Touch</Th><Th>To</Th><Th>Subject</Th><Th>Status</Th><Th>Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              <SkeletonTableRows rows={6} cols={7} theme={theme} />
+            </tbody>
+          </table>
+        </Card>
       ) : rows.length === 0 ? (
         <Card><div style={{ color: theme.textMuted, fontSize: 13 }}>No sends match these filters.</div></Card>
       ) : (

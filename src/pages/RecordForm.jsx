@@ -114,8 +114,8 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${theme.border}` }}>
         <Btn variant="outline" size="sm" onClick={onCancel}>Cancel</Btn>
-        <Btn size="sm" onClick={handleSubmit} disabled={saving}>
-          {saving ? "Saving..." : isNew ? "Create" : "Save Changes"}
+        <Btn size="sm" onClick={handleSubmit} loading={saving}>
+          {isNew ? "Create" : "Save Changes"}
         </Btn>
       </div>
     </form>

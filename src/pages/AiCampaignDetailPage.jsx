@@ -8,6 +8,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
+import { Skeleton, SkeletonRow, SkeletonCard } from "../components/ui/Skeleton";
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },
@@ -40,7 +41,19 @@ export default function AiCampaignDetailPage() {
   useEffect(() => { reload(); }, [reload]);
 
   if (loading && !data) {
-    return <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>;
+    return (
+      <div>
+        <div style={{ marginBottom: 16 }}>
+          <Skeleton width={260} height={22} />
+          <div style={{ height: 6 }} />
+          <Skeleton width={420} height={13} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16 }}>
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} height={70} />)}
+        </div>
+        <Card><SkeletonRow widths={["30%", "70%", "55%", "65%", "40%"]} /></Card>
+      </div>
+    );
   }
   if (error) {
     return <Card style={{ borderColor: "#DC2626" }}><div style={{ color: "#DC2626", fontSize: 13 }}>{error}</div></Card>;
@@ -285,7 +298,7 @@ function SettingsCard({ campaign, theme, onSaved }) {
         </Field>
       </div>
       {err && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 8 }}>{err}</div>}
-      <div style={{ marginTop: 12 }}><Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save settings"}</Btn></div>
+      <div style={{ marginTop: 12 }}><Btn onClick={save} loading={busy}>Save settings</Btn></div>
     </Card>
   );
 }
@@ -306,9 +319,9 @@ function CampaignActions({ campaign, onChange, navigate }) {
 
   return (
     <div style={{ display: "flex", gap: 8 }}>
-      {campaign.status === "active" && <Btn onClick={pause} disabled={busy} variant="secondary">Pause</Btn>}
-      {campaign.status === "paused" && <Btn onClick={resume} disabled={busy}>Resume</Btn>}
-      {campaign.status !== "archived" && <Btn onClick={archive} disabled={busy} variant="secondary" style={{ color: "#DC2626" }}>Archive</Btn>}
+      {campaign.status === "active" && <Btn onClick={pause} loading={busy} variant="secondary">Pause</Btn>}
+      {campaign.status === "paused" && <Btn onClick={resume} loading={busy}>Resume</Btn>}
+      {campaign.status !== "archived" && <Btn onClick={archive} loading={busy} variant="secondary" style={{ color: "#DC2626" }}>Archive</Btn>}
     </div>
   );
 }
@@ -339,7 +352,7 @@ function DiscoverCard({ campaign, theme, onStarted }) {
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <Input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} style={{ width: 120 }} />
-        <Btn onClick={run} disabled={busy}>{busy ? "Starting…" : "Run discovery"}</Btn>
+        <Btn onClick={run} loading={busy}>Run discovery</Btn>
         {result?.run_id && (
           <span style={{ fontSize: 12, color: "#065F46" }}>
             ✓ queued (target {result.target}) — picked up by the next worker run
@@ -391,7 +404,11 @@ function DiscoveryRunsPanel({ campaign, theme }) {
   }
 
   if (!loaded) {
-    return <Card style={{ marginBottom: 16 }}><div style={{ color: theme.textMuted, fontSize: 13 }}>Loading discovery runs…</div></Card>;
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <SkeletonRow widths={["35%", "70%", "55%"]} />
+      </Card>
+    );
   }
   if (runs.length === 0) {
     return null; // no clutter when there's nothing to show
@@ -638,7 +655,7 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>Templates ({templates?.length || 0})</div>
-        <Btn onClick={generate} disabled={generating}>{generating ? "Rewriting…" : "Rewrite with AI"}</Btn>
+        <Btn onClick={generate} loading={generating}>Rewrite with AI</Btn>
       </div>
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 4 }}>
@@ -770,7 +787,7 @@ function TemplateRow({ template, theme, onChange }) {
         </div>
         {err && <div style={{ color: "#DC2626", fontSize: 12 }}>{err}</div>}
         <div style={{ display: "flex", gap: 6 }}>
-          <Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Btn>
+          <Btn onClick={save} loading={busy}>Save</Btn>
           <Btn onClick={() => setEditing(false)} variant="secondary">Cancel</Btn>
         </div>
       </div>

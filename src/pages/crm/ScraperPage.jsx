@@ -311,8 +311,8 @@ export default function ScraperPage() {
               placeholder="e.g. Clean beauty brands in the UK doing $30-80k/mo, focused on skincare and wellness"
             />
             <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center" }}>
-              <Btn onClick={handleGenerateAndSearch} disabled={generatingQueries || !searchIntent.trim()}>
-                {generatingQueries ? "Generating searches..." : "Search for Brands"}
+              <Btn onClick={handleGenerateAndSearch} disabled={!searchIntent.trim()} loading={generatingQueries}>
+                Search for Brands
               </Btn>
             </div>
           </>

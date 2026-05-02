@@ -7,6 +7,7 @@ import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
+import { Skeleton, SkeletonRow } from "../components/ui/Skeleton";
 
 const STATUS_TINTS = {
   active: { bg: "#DBEAFE", fg: "#1E40AF" },
@@ -106,7 +107,13 @@ export default function AiInboxPage() {
             </div>
 
             {loading && threads.length === 0 ? (
-              <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>
+              <Card style={{ padding: 0 }}>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} style={{ padding: "14px 16px", borderBottom: `1px solid ${theme.border}` }}>
+                    <SkeletonRow widths={["40%", "75%", "55%"]} />
+                  </div>
+                ))}
+              </Card>
             ) : filteredThreads.length === 0 ? (
               <Card><div style={{ color: theme.textMuted, fontSize: 13 }}>No conversations yet. Start one from the bulk tab or the Test Lab.</div></Card>
             ) : (
@@ -340,9 +347,7 @@ function BulkPanel({ campaigns, theme }) {
           <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
           Dry run (no email sent)
         </label>
-        <Btn onClick={start} disabled={!campaignId || busy}>
-          {busy ? "Starting…" : "Start bulk run"}
-        </Btn>
+        <Btn onClick={start} disabled={!campaignId} loading={busy}>Start bulk run</Btn>
       </Card>
       </div>
 
@@ -460,8 +465,8 @@ function SingleSendCard({ campaigns, campaignId, setCampaignId, theme }) {
         <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
         Dry run (generate but do not send)
       </label>
-      <Btn onClick={send} disabled={!campaignId || !email || busy}>
-        {busy ? "Sending…" : dryRun ? "Generate (no send)" : "Send first message"}
+      <Btn onClick={send} disabled={!campaignId || !email} loading={busy}>
+        {dryRun ? "Generate (no send)" : "Send first message"}
       </Btn>
 
       {error && (
@@ -581,9 +586,7 @@ function LeadsPanel({ campaigns, theme }) {
           <Field label="Max prospects to find" theme={theme}>
             <Input value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="50" />
           </Field>
-          <Btn onClick={discover} disabled={!campaignId || busy}>
-            {busy ? "Running…" : "Find leads"}
-          </Btn>
+          <Btn onClick={discover} disabled={!campaignId} loading={busy}>Find leads</Btn>
           {error && <div style={{ marginTop: 12, color: "#DC2626", fontSize: 12 }}>{error}</div>}
         </Card>
 
@@ -694,7 +697,15 @@ function MetricsPanel({ theme }) {
   }
 
   if (loading && rows.length === 0) {
-    return <Card><div style={{ color: theme.textMuted }}>Loading…</div></Card>;
+    return (
+      <Card style={{ padding: 0 }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} style={{ padding: "14px 16px", borderBottom: `1px solid ${theme.border}` }}>
+            <SkeletonRow widths={["35%", "70%", "50%"]} />
+          </div>
+        ))}
+      </Card>
+    );
   }
   if (error) return <Card><div style={{ color: "#DC2626" }}>{error}</div></Card>;
   if (rows.length === 0) {

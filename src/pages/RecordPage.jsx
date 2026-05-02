@@ -169,8 +169,8 @@ export default function RecordPage() {
             <Link to={`/tables/${table}`} style={{ textDecoration: "none" }}>
               <Btn variant="outline" size="sm">Cancel</Btn>
             </Link>
-            <Btn size="sm" onClick={handleSubmit} disabled={saving}>
-              {saving ? "Saving..." : isNew ? "Create" : "Save Changes"}
+            <Btn size="sm" onClick={handleSubmit} loading={saving}>
+              {isNew ? "Create" : "Save Changes"}
             </Btn>
           </div>
         </Card>

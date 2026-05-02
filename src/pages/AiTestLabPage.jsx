@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
+import { Skeleton } from "../components/ui/Skeleton";
 
 export default function AiTestLabPage() {
   const { theme } = useTheme();
@@ -205,9 +206,7 @@ export default function AiTestLabPage() {
           {/* Composer */}
           <div style={{ borderTop: `1px solid ${theme.border}`, padding: 12, background: theme.surface }}>
             {history.length === 0 ? (
-              <Btn onClick={generateFirst} disabled={busy || !campaignId}>
-                {busy ? "Generating…" : "Generate first message"}
-              </Btn>
+              <Btn onClick={generateFirst} disabled={!campaignId} loading={busy}>Generate first message</Btn>
             ) : (
               <div>
                 <Input
@@ -218,9 +217,7 @@ export default function AiTestLabPage() {
                   placeholder="Reply as the prospect — try an objection, a question, or 'send me more info'"
                 />
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <Btn onClick={sendProspectReply} disabled={busy || !draftReply.trim()}>
-                    {busy ? "AI thinking…" : "Send as prospect"}
-                  </Btn>
+                  <Btn onClick={sendProspectReply} disabled={!draftReply.trim()} loading={busy}>Send as prospect</Btn>
                   <Btn variant="outline" onClick={reset} disabled={busy}>Reset</Btn>
                 </div>
               </div>
@@ -244,7 +241,7 @@ export default function AiTestLabPage() {
         <Card>
           <div style={labelStyle}>Campaign</div>
           {loadingCampaigns ? (
-            <div style={{ color: theme.textMuted, fontSize: 13 }}>Loading…</div>
+            <div><Skeleton width="60%" height={16} /></div>
           ) : campaigns.length === 0 ? (
             <div>
               <p style={{ fontSize: 13, color: theme.textMid, margin: "0 0 12px" }}>
@@ -258,9 +255,7 @@ export default function AiTestLabPage() {
                     placeholder="Campaign name"
                     style={{ marginBottom: 8 }}
                   />
-                  <Btn onClick={createDefaultCampaign} disabled={busy}>
-                    {busy ? "Creating…" : "Create"}
-                  </Btn>
+                  <Btn onClick={createDefaultCampaign} loading={busy}>Create</Btn>
                 </div>
               ) : (
                 <Btn onClick={() => setCreatingCampaign(true)}>+ New campaign</Btn>
@@ -291,7 +286,7 @@ export default function AiTestLabPage() {
                       style={{ marginBottom: 8 }}
                     />
                     <div style={{ display: "flex", gap: 8 }}>
-                      <Btn size="sm" onClick={createDefaultCampaign} disabled={busy}>Create</Btn>
+                      <Btn size="sm" onClick={createDefaultCampaign} loading={busy}>Create</Btn>
                       <Btn size="sm" variant="outline" onClick={() => setCreatingCampaign(false)}>Cancel</Btn>
                     </div>
                   </div>
