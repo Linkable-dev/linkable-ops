@@ -121,7 +121,7 @@ function CampaignTabs({ campaign, templates, metrics, theme, reload }) {
         <>
           <DiscoverCard campaign={campaign} theme={theme} onStarted={reload} />
           <DiscoveryRunsPanel campaign={campaign} theme={theme} />
-          <LeadPoolPanel theme={theme} />
+          <LeadPoolPanel theme={theme} campaign={campaign} />
         </>
       )}
       {tab === "templates" && (
@@ -145,11 +145,17 @@ function OverviewTab({ campaign, metrics, templates, theme, onJump }) {
   const [recentRun, setRecentRun] = useState(null);
 
   useEffect(() => {
-    api.getOutboundLeadCounts().then(setPoolCounts).catch(() => {});
+    const tf = campaign.target_filters || {};
+    const filterArgs = {
+      country: (tf.countries || []).join(","),
+      minRevenue: tf.min_revenue,
+      maxRevenue: tf.max_revenue,
+    };
+    api.getOutboundLeadCounts(filterArgs).then(setPoolCounts).catch(() => {});
     api.listOutboundDiscoveryRuns(campaign.id, { limit: 1 })
       .then((r) => setRecentRun(r.rows?.[0] || null))
       .catch(() => {});
-  }, [campaign.id]);
+  }, [campaign.id, campaign.target_filters]);
 
   const sched = campaign.config?.schedule;
   const scheduleSummary = !sched || sched.cadence === "off"
@@ -712,18 +718,29 @@ const runTd = { padding: "8px 16px", verticalAlign: "top" };
 
 // ---------- LEAD POOL PANEL ----------
 //
-// Team-wide pool of brands that any discovery run has surfaced. This isn't
-// per-campaign — every campaign shares the same pool, the daily-200 sender
-// just picks brands matching its own filters at send time.
+// Brands the discovery worker has surfaced. The pool is team-wide, but on a
+// campaign detail page we filter to leads matching THIS campaign's targeting
+// (country / revenue band) by default — there's a toggle to view the whole
+// team pool when needed.
 
-function LeadPoolPanel({ theme }) {
+function LeadPoolPanel({ theme, campaign }) {
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState(null);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [onlyQualified, setOnlyQualified] = useState(true);
+  const [scopeToCampaign, setScopeToCampaign] = useState(true);
   const pageSize = 10;
+
+  // Filters derived from the campaign's target_filters when scoped.
+  const tf = campaign?.target_filters || {};
+  const hasTargeting = (tf.countries?.length || tf.min_revenue || tf.max_revenue);
+  const filterArgs = scopeToCampaign && hasTargeting ? {
+    country: (tf.countries || []).join(","),
+    minRevenue: tf.min_revenue,
+    maxRevenue: tf.max_revenue,
+  } : {};
 
   const load = useCallback(() => {
     api.listOutboundLeads({
@@ -731,18 +748,19 @@ function LeadPoolPanel({ theme }) {
       qualified: onlyQualified ? undefined : "false",
       limit: pageSize,
       offset: (page - 1) * pageSize,
+      ...filterArgs,
     })
       .then((res) => { setRows(res.rows || []); setTotal(res.total || 0); })
       .catch(() => {});
-    api.getOutboundLeadCounts().then(setCounts).catch(() => {});
-  }, [q, page, onlyQualified]);
+    api.getOutboundLeadCounts(filterArgs).then(setCounts).catch(() => {});
+  }, [q, page, onlyQualified, scopeToCampaign, JSON.stringify(filterArgs)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = setTimeout(load, 200);
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [q, onlyQualified]);
+  useEffect(() => { setPage(1); }, [q, onlyQualified, scopeToCampaign]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -758,10 +776,18 @@ function LeadPoolPanel({ theme }) {
             )}
           </div>
           <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
-            Live state — this is the source of truth, not the run-time counters above.
+            {scopeToCampaign && hasTargeting
+              ? <>Filtered to this campaign's targeting{tf.countries?.length ? ` · ${tf.countries.join(", ")}` : ""}{tf.min_revenue || tf.max_revenue ? ` · ${tf.min_revenue ? "$" + (tf.min_revenue / 1000).toFixed(0) + "k" : ""}-${tf.max_revenue ? "$" + (tf.max_revenue / 1000).toFixed(0) + "k" : ""}/mo` : ""}.</>
+              : "Whole team pool — leads from all campaigns' discovery runs."}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {hasTargeting && (
+            <label style={{ fontSize: 11, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <input type="checkbox" checked={scopeToCampaign} onChange={(e) => setScopeToCampaign(e.target.checked)} style={{ margin: 0 }} />
+              this campaign only
+            </label>
+          )}
           <label style={{ fontSize: 11, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}>
             <input type="checkbox" checked={onlyQualified} onChange={(e) => setOnlyQualified(e.target.checked)} style={{ margin: 0 }} />
             with email only

@@ -307,6 +307,25 @@ export function outboundCampaignsRoutes() {
   // Team-wide pool of brands StoreLeads/Apollo/Hunter has discovered. Used by
   // the daily-200 sender as its inbox of available prospects, and now also by
   // the campaign-detail "Recent leads" panel.
+  // Helper: apply campaign-style targeting filters to a storeleads_brands query.
+  function applyLeadFilters(query, req) {
+    const countries = (req.query.country || "").toString().trim();
+    const minRevenue = parseInt(req.query.minRevenue, 10);
+    const maxRevenue = parseInt(req.query.maxRevenue, 10);
+    if (countries) {
+      const list = countries.split(/[,\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+      if (list.length) query = query.in("country_code", list);
+    }
+    // Revenue stored under raw_data.er (StoreLeads' estimated monthly USD).
+    if (Number.isFinite(minRevenue) && minRevenue > 0) {
+      query = query.gte("raw_data->>er", String(minRevenue));
+    }
+    if (Number.isFinite(maxRevenue) && maxRevenue > 0) {
+      query = query.lte("raw_data->>er", String(maxRevenue));
+    }
+    return query;
+  }
+
   router.get("/leads", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
@@ -320,6 +339,7 @@ export function outboundCampaignsRoutes() {
         .eq("team_id", teamId);
       if (onlyQualified) query = query.not("email", "is", null);
       if (q) query = query.or(`domain.ilike.%${q}%,email.ilike.%${q}%,contact_first_name.ilike.%${q}%,contact_last_name.ilike.%${q}%`);
+      query = applyLeadFilters(query, req);
       query = query.order("imported_at", { ascending: false }).range(offset, offset + limit - 1);
 
       const { data, error, count } = await query;
@@ -328,15 +348,14 @@ export function outboundCampaignsRoutes() {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  router.get("/leads/counts", async (_req, res) => {
+  router.get("/leads/counts", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const { count: total } = await supabase.from("storeleads_brands")
-        .select("id", { count: "exact", head: true }).eq("team_id", teamId);
-      const { count: qualified } = await supabase.from("storeleads_brands")
-        .select("id", { count: "exact", head: true }).eq("team_id", teamId).not("email", "is", null);
-      const { count: emailed } = await supabase.from("storeleads_brands")
-        .select("id", { count: "exact", head: true }).eq("team_id", teamId).eq("emailed", true);
+      const mk = () => applyLeadFilters(supabase.from("storeleads_brands")
+        .select("id", { count: "exact", head: true }).eq("team_id", teamId), req);
+      const { count: total }     = await mk();
+      const { count: qualified } = await mk().not("email", "is", null);
+      const { count: emailed }   = await mk().eq("emailed", true);
       res.json({ total: total || 0, qualified: qualified || 0, emailed: emailed || 0 });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });

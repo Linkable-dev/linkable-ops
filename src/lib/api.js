@@ -123,9 +123,10 @@ export const api = {
     request("/outbound/storeleads/category-presets"),
   getStoreLeadsCategories: ({ q } = {}) =>
     request(`/outbound/storeleads/categories?${buildQs({ q })}`),
-  listOutboundLeads: ({ q, qualified, limit, offset } = {}) =>
-    request(`/outbound/leads?${buildQs({ q, qualified, limit, offset })}`),
-  getOutboundLeadCounts: () => request("/outbound/leads/counts"),
+  listOutboundLeads: ({ q, qualified, limit, offset, country, minRevenue, maxRevenue } = {}) =>
+    request(`/outbound/leads?${buildQs({ q, qualified, limit, offset, country, minRevenue, maxRevenue })}`),
+  getOutboundLeadCounts: ({ country, minRevenue, maxRevenue } = {}) =>
+    request(`/outbound/leads/counts?${buildQs({ country, minRevenue, maxRevenue })}`),
 
   // Outbound templates
   listOutboundTemplates: (campaignId) =>
