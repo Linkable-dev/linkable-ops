@@ -10,6 +10,18 @@ import crypto from "node:crypto";
 import { supabase } from "../lib/supabase.js";
 import { sendEmail } from "./send.js";
 import { generateObservation, renderTemplate, validateRenderedEmail } from "./personalize.js";
+import { isGenericLocal } from "./lead-discovery.js";
+
+// Belt-and-suspenders: even if a junk first_name slips into the DB, never
+// inject it into a customer-facing email greeting. Falls back to "there"
+// when name is empty, generic, or suspiciously short.
+function safeFirstName(name) {
+  if (!name) return "there";
+  const first = name.trim().split(/\s+/)[0] || "";
+  if (first.length < 2) return "there";
+  if (isGenericLocal(first.toLowerCase())) return "there";
+  return first;
+}
 import { getSequenceTemplate, getPrimaryProductType } from "./templates.js";
 import { classifyBrand } from "./brand-groups.js";
 
@@ -147,7 +159,7 @@ export async function enrollProspect({
   const t1Date = nextWeekday(new Date(startAt));
   const variables = {
     brandName: brand?.storeName || brand?.name || brand?.merchant_name || brand?.domain || "your brand",
-    firstName: toName?.split(" ")[0] || "there",
+    firstName: safeFirstName(toName),
     productType,
     observation,
   };

@@ -662,7 +662,7 @@ export const GENERIC_MAILBOX_LOCALS = new Set([
   "hostmaster", "security", "data", "admin",
 ]);
 
-function isGenericLocal(local) {
+export function isGenericLocal(local) {
   if (!local) return true;
   const l = local.toLowerCase();
   if (GENERIC_MAILBOX_LOCALS.has(l)) return true;
