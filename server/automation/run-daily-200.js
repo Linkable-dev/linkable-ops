@@ -53,20 +53,34 @@ async function todaySentCount(teamId) {
 
 // Pick fresh prospects from storeleads_brands and split them into G1/G2/G3
 // buckets so the orchestrator can hit the 60/25/15 daily mix.
-async function fetchFreshProspectsByGroup({ teamId, perGroupQuota }) {
+//
+// IMPORTANT: applies the campaign's target_filters so a US campaign only
+// emails US brands (and within its revenue band). Without this guard, the
+// pool is team-wide and the sender will happily email any brand it finds —
+// which means US Beauty 200k-1.5M would email UK $50k brands. Bug discovered
+// 2026-05-02 after a Saturday test fired 50 emails to wrong-country leads.
+async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters = {} }) {
   const totalNeeded = perGroupQuota.G1 + perGroupQuota.G2 + perGroupQuota.G3;
   // Pull a bigger pool so we have enough of each group after classification.
   const fetchSize = Math.max(totalNeeded * 5, 100);
 
-  const { data, error } = await supabase
+  let q = supabase
     .from("storeleads_brands")
     .select("*")
     .eq("team_id", teamId)
     .eq("contact_used", false)
     .not("email", "is", null)
-    .not("contact_first_name", "is", null)
-    .order("imported_at", { ascending: false })
-    .limit(fetchSize);
+    .not("contact_first_name", "is", null);
+
+  const countries = (targetFilters.countries || []).map((c) => c?.toString().trim().toUpperCase()).filter(Boolean);
+  if (countries.length) q = q.in("country_code", countries);
+  const minRev = Number(targetFilters.min_revenue);
+  const maxRev = Number(targetFilters.max_revenue);
+  if (Number.isFinite(minRev) && minRev > 0) q = q.gte("raw_data->>er", String(minRev));
+  if (Number.isFinite(maxRev) && maxRev > 0) q = q.lte("raw_data->>er", String(maxRev));
+
+  q = q.order("imported_at", { ascending: false }).limit(fetchSize);
+  const { data, error } = await q;
 
   if (error) throw new Error(`fetchFreshProspects: ${error.message}`);
 
@@ -199,7 +213,11 @@ export async function runDailyOutbound({
     const quota = allocateDailyQuota(slotsLeft);
     log(`[daily-200] enrolling fresh: ${JSON.stringify(quota)}`);
 
-    const buckets = await fetchFreshProspectsByGroup({ teamId, perGroupQuota: quota });
+    const buckets = await fetchFreshProspectsByGroup({
+      teamId,
+      perGroupQuota: quota,
+      targetFilters: campaign.target_filters || {},
+    });
     log(`[daily-200] available pool: G1=${buckets.G1.length} G2=${buckets.G2.length} G3=${buckets.G3.length}`);
 
     // Round-robin across groups so the day's sends aren't 120 G2 emails in a
