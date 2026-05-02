@@ -138,6 +138,24 @@ async function processDiscovery(runId, teamId, campaignId, filters, limit, opts 
   let cursor = filters?._cursor || null;
   let cancelled = false;
 
+  // Build a Set of every domain we've already processed for this team so
+  // re-runs effectively continue from where the last left off — they page
+  // through StoreLeads but skip known domains without burning Apollo/Hunter
+  // calls. The cursor naturally advances through the result set.
+  const seenDomains = new Set();
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error } = await supabase
+        .from("storeleads_brands").select("domain")
+        .eq("team_id", teamId).range(from, from + PAGE - 1);
+      if (error || !page?.length) break;
+      for (const r of page) seenDomains.add(r.domain);
+      if (page.length < PAGE) break;
+    }
+  }
+  let alreadySeenInRun = 0;
+
   // Soft deadline lets the cron tick exit cleanly before Vercel kills it
   // (default 50s with 60s maxDuration). When unset (CLI runs), runs forever.
   const deadlineAt = opts.deadlineMs ? Date.now() + opts.deadlineMs : null;
@@ -166,15 +184,25 @@ async function processDiscovery(runId, teamId, campaignId, filters, limit, opts 
 
     for (const brand of batch.domains) {
       if (counters.sent >= limit || cancelled || deadlineHit()) break;
+      const cleanDomain = (brand.name || "").replace(/^www\./, "").toLowerCase();
+      if (seenDomains.has(cleanDomain)) {
+        // Already in the pool — skip without burning enrichment calls.
+        // Keeps the loop advancing through StoreLeads pages until we find
+        // `limit` brand-new qualified brands.
+        alreadySeenInRun++;
+        continue;
+      }
       try {
         const result = await processOneBrand({ teamId, brand });
         counters.processed++;
         if (result.qualified) counters.sent++;
         else counters.skipped++;
+        seenDomains.add(cleanDomain);
       } catch (err) {
         counters.processed++;
         counters.failed++;
         console.error(`brand ${brand.name} failed:`, err.message);
+        seenDomains.add(cleanDomain);
       }
       if (counters.processed % 5 === 0) {
         await updateBulkRun(runId, {
@@ -208,6 +236,9 @@ async function processDiscovery(runId, teamId, campaignId, filters, limit, opts 
     status: cancelled ? "stopped" : "complete",
     completed_at: new Date().toISOString(),
   });
+  if (alreadySeenInRun > 0) {
+    console.log(`Run ${runId}: skipped ${alreadySeenInRun} already-known domains during paging.`);
+  }
 }
 
 // ---------- ONE BRAND ----------
