@@ -611,14 +611,12 @@ const SLOTS = [
 function TemplatesCard({ campaign, templates, theme, onChange }) {
   const [generating, setGenerating] = useState(false);
   const [genErr, setGenErr] = useState(null);
-  const [variantsPerSlot, setVariantsPerSlot] = useState(2);
   const [refinementPrompt, setRefinementPrompt] = useState("");
 
   async function generate() {
     setGenerating(true); setGenErr(null);
     try {
       await api.generateOutboundDrafts(campaign.id, {
-        variants_per_slot: Number(variantsPerSlot) || 2,
         refinement_prompt: refinementPrompt.trim() || undefined,
       });
       onChange();
@@ -640,15 +638,11 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>Templates ({templates?.length || 0})</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: theme.textMuted }}>variants/slot</span>
-          <Input type="number" value={variantsPerSlot} onChange={(e) => setVariantsPerSlot(e.target.value)} style={{ width: 60 }} min={1} max={3} />
-          <Btn onClick={generate} disabled={generating}>{generating ? "Generating…" : "Generate AI drafts"}</Btn>
-        </div>
+        <Btn onClick={generate} disabled={generating}>{generating ? "Rewriting…" : "Rewrite with AI"}</Btn>
       </div>
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 4 }}>
-          Steering prompt (optional) — applied to every variant the AI generates below
+          Steering prompt (optional) — applied to every slot's rewrite
         </div>
         <textarea
           value={refinementPrompt}

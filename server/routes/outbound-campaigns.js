@@ -424,7 +424,6 @@ export function outboundCampaignsRoutes() {
       const opts = {
         groups: req.body?.groups || ["G1", "G2", "G3"],
         touches: req.body?.touches || [1, 2, 3],
-        variantsPerSlot: Math.min(req.body?.variants_per_slot || 2, 3),
         briefOverride: req.body?.brief,
         refinementPrompt: typeof req.body?.refinement_prompt === "string" ? req.body.refinement_prompt.trim() : "",
       };
@@ -571,40 +570,58 @@ const TOUCH_DESCRIPTIONS = {
   3: "Final touch 7 days after touch 1. Short reply ask — yes/no, last note, soft close.",
 };
 
-export async function generateDraftsForCampaign({ teamId, campaign, apiKey, groups, touches, variantsPerSlot, briefOverride, refinementPrompt }) {
+// Single source of truth per slot: each (group, touch) holds exactly one
+// active template. Regenerating with AI updates that template in place
+// instead of accumulating drafts. If the slot has multiple existing rows
+// (legacy state), we consolidate down to one before updating.
+export async function generateDraftsForCampaign({ teamId, campaign, apiKey, groups, touches, briefOverride, refinementPrompt }) {
   const brief = briefOverride || campaign.brief ||
     "Linkable is a Shopify app for creator attribution and affiliate payouts. Cold outbound to D2C brand founders / heads of marketing.";
   const refinementBlock = refinementPrompt
     ? `\nADDITIONAL DIRECTION (highest priority — override the reference if it conflicts):\n${refinementPrompt}\n`
     : "";
 
-  // Wipe stale AI drafts for the slots we're about to regenerate so each
-  // click replaces prior drafts instead of stacking on top. We only touch
-  // is_draft=true rows — active/accepted templates stay untouched.
-  const { error: delErr } = await supabase
-    .from("email_templates")
-    .delete()
-    .eq("team_id", teamId)
-    .eq("campaign_id", campaign.id)
-    .eq("is_draft", true)
-    .eq("generated_by_ai", true)
-    .in("brand_group", groups)
-    .in("touch_number", touches);
-  if (delErr) console.warn("draft cleanup warning:", delErr.message);
-
-  // For each (group, touch), find the existing default to anchor on.
   const defaults = Object.fromEntries(
     SEQUENCE_TEMPLATES.map((t) => [`${t.group}-T${t.touch}`, t])
   );
 
-  const drafts = [];
+  const updated = [];
   for (const group of groups) {
     for (const touch of touches) {
       const key = `${group}-T${touch}`;
       const def = defaults[key];
       if (!def) continue;
 
-      const prompt = `You are an expert in cold outbound for B2B SaaS. Write ${variantsPerSlot} alternative email variants for the slot below.
+      // Collapse any pre-existing rows for this slot down to one (prefer the
+      // active one; else most recent). Older duplicates are deleted so the
+      // slot ends with exactly one row to update or insert against.
+      const { data: existing } = await supabase
+        .from("email_templates")
+        .select("id,is_active,created_at")
+        .eq("team_id", teamId).eq("campaign_id", campaign.id)
+        .eq("brand_group", group).eq("touch_number", touch)
+        .order("is_active", { ascending: false })
+        .order("created_at", { ascending: false });
+      const keeper = existing?.[0] || null;
+      const dupes = (existing || []).slice(1).map((r) => r.id);
+      if (dupes.length) {
+        await supabase.from("email_templates").delete().in("id", dupes);
+      }
+
+      // Anchor on whatever's currently in the slot — if the user hand-edited
+      // the active template, the AI rewrite riffs on that instead of the
+      // factory default.
+      let anchorSubject = def.subject_template;
+      let anchorBody = def.body_template;
+      if (keeper) {
+        const { data: full } = await supabase
+          .from("email_templates")
+          .select("subject_template,body_template")
+          .eq("id", keeper.id).maybeSingle();
+        if (full) { anchorSubject = full.subject_template; anchorBody = full.body_template; }
+      }
+
+      const prompt = `You are an expert in cold outbound for B2B SaaS. Rewrite the email below for the slot.
 
 CAMPAIGN BRIEF:
 ${brief}
@@ -613,10 +630,10 @@ SLOT: ${group} touch ${touch} (key=${key})
 - Group: ${GROUP_DESCRIPTIONS[group] || group}
 - Position: ${TOUCH_DESCRIPTIONS[touch] || ""}
 
-REFERENCE VERSION (for context — write ALTERNATIVE angles, not paraphrases):
-Subject: ${def.subject_template}
+CURRENT VERSION (rewrite this — apply the additional direction above; if no direction was given, sharpen the angle while preserving intent):
+Subject: ${anchorSubject}
 Body:
-${def.body_template}
+${anchorBody}
 
 CONSTRAINTS:
 - Subject ≤ 80 chars, no spam triggers (no "guaranteed", "limited time", "!!!", "$$", etc.)
@@ -626,17 +643,17 @@ CONSTRAINTS:
 - Keep it bold and confrontational. No fluff. Federico signs off.
 
 Return STRICT JSON, no prose, exactly:
-[{"name":"...","subject_template":"...","body_template":"..."}]
+{"name":"...","subject_template":"...","body_template":"..."}
 `;
 
-      let parsed = [];
+      let parsed = null;
       try {
         const res = await fetch(ANTHROPIC_API_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
           body: JSON.stringify({
             model: "claude-sonnet-4-6",
-            max_tokens: 1500,
+            max_tokens: 1000,
             messages: [{ role: "user", content: prompt }],
           }),
         });
@@ -646,38 +663,42 @@ Return STRICT JSON, no prose, exactly:
         }
         const data = await res.json();
         const text = data.content?.[0]?.text?.trim() || "";
-        // Strip code fences if model wrapped output.
         const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();
         parsed = JSON.parse(cleaned);
+        if (Array.isArray(parsed)) parsed = parsed[0]; // tolerate model wrapping in array
       } catch (err) {
-        console.error(`draft gen ${key} failed:`, err.message);
+        console.error(`rewrite ${key} failed:`, err.message);
         continue;
       }
 
-      // Insert each variant as is_draft=true so user can review before activating.
-      for (let i = 0; i < parsed.length; i++) {
-        const v = parsed[i];
-        if (!v?.subject_template || !v?.body_template) continue;
-        const insertRow = {
-          team_id: teamId,
-          campaign_id: campaign.id,
-          name: v.name?.slice(0, 80) || `${key} AI variant ${i + 1}`,
-          variant: group.charAt(1) || "A",
-          brand_group: group,
-          touch_number: touch,
-          template_key: key,
-          subject_template: v.subject_template.slice(0, 200),
-          body_template: v.body_template.slice(0, 3000),
-          weight: 100,
-          is_active: false,         // off until accepted
-          is_draft: true,
-          generated_by_ai: true,
-        };
-        const { data: row, error } = await supabase.from("email_templates").insert(insertRow).select("*").single();
-        if (!error && row) drafts.push(row);
+      if (!parsed?.subject_template || !parsed?.body_template) continue;
+
+      const fields = {
+        name: parsed.name?.slice(0, 80) || `${key} (AI rewrite)`,
+        subject_template: parsed.subject_template.slice(0, 200),
+        body_template: parsed.body_template.slice(0, 3000),
+        generated_by_ai: true,
+      };
+
+      let row;
+      if (keeper) {
+        const { data, error } = await supabase.from("email_templates")
+          .update(fields).eq("id", keeper.id).select("*").single();
+        if (!error) row = data;
+      } else {
+        const { data, error } = await supabase.from("email_templates")
+          .insert({
+            team_id: teamId, campaign_id: campaign.id,
+            brand_group: group, touch_number: touch, template_key: key,
+            variant: group.charAt(1) || "A",
+            weight: 100, is_active: true, is_draft: false,
+            ...fields,
+          }).select("*").single();
+        if (!error) row = data;
       }
+      if (row) updated.push(row);
     }
   }
 
-  return drafts;
+  return updated;
 }
