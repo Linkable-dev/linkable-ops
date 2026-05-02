@@ -418,8 +418,13 @@ function DiscoveryRunsPanel({ campaign, theme }) {
   return (
     <Card style={{ marginBottom: 16, padding: 0 }}>
       <div style={{ padding: "16px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
-          Recent discovery runs {anyRunning && <span style={{ color: theme.accent, marginLeft: 6 }}>· live</span>}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+            Recent discovery runs {anyRunning && <span style={{ color: theme.accent, marginLeft: 6 }}>· live</span>}
+          </div>
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
+            Counts below are <strong>at-run-time</strong> snapshots. Some leads may be re-classified later (e.g. shared mailboxes demoted, brands re-checked). For the current truth, see <em>Lead pool</em> below.
+          </div>
         </div>
         <button onClick={reload} style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", fontWeight: 600, border: `1px solid ${theme.border}`, borderRadius: 4, background: theme.bg, color: theme.text, cursor: "pointer" }}>
           Refresh
@@ -431,7 +436,7 @@ function DiscoveryRunsPanel({ campaign, theme }) {
           <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
             <th style={runTh}>Status</th>
             <th style={runTh}>Progress</th>
-            <th style={runTh}>Qualified</th>
+            <th style={runTh} title="Brands counted as qualified at the moment this run completed. The current pool may differ — see Lead pool below.">Qualified (at run)</th>
             <th style={runTh}>Skipped</th>
             <th style={runTh}>Failed</th>
             <th style={runTh}>Started</th>
@@ -522,12 +527,17 @@ function LeadPoolPanel({ theme }) {
   return (
     <Card style={{ marginBottom: 16, padding: 0 }}>
       <div style={{ padding: "16px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
-          Lead pool {counts && (
-            <span style={{ marginLeft: 8, color: theme.textMuted, fontSize: 11, textTransform: "none", fontWeight: 400, letterSpacing: 0 }}>
-              {counts.qualified} with email · {counts.total - counts.qualified} skipped · {counts.emailed} contacted
-            </span>
-          )}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+            Lead pool {counts && (
+              <span style={{ marginLeft: 8, color: theme.textMuted, fontSize: 11, textTransform: "none", fontWeight: 400, letterSpacing: 0 }}>
+                {counts.qualified} with email · {counts.total - counts.qualified} skipped · {counts.emailed} contacted
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
+            Live state — this is the source of truth, not the run-time counters above.
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <label style={{ fontSize: 11, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}>
