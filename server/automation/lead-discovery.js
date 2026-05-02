@@ -15,6 +15,7 @@
 
 import { supabase } from "../lib/supabase.js";
 import { createBulkRun, updateBulkRun } from "./conversation-state.js";
+import { isLikelyFirstName } from "./first-names.js";
 
 const STORELEADS_BASE = "https://storeleads.app/json/api/v1/all/domain";
 
@@ -694,23 +695,25 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
     let firstName = null;
     let lastName = null;
 
-    // first.last@ pattern → highest signal, real person — but only if neither
-    // half is a generic word (rejects customer.service@, customer.care@, etc).
+    // first.last@ pattern → highest signal IF first half looks like a real
+    // first name (rejects customer.service@, partner.relations@, etc.).
     const dotMatch = local.match(/^([a-z]+)\.([a-z]+)$/);
-    if (dotMatch && !isGenericLocal(dotMatch[1]) && !isGenericLocal(dotMatch[2])) {
+    if (dotMatch && isLikelyFirstName(dotMatch[1]) && !isGenericLocal(dotMatch[2])) {
       score = 100;
       firstName = cap(dotMatch[1]);
       lastName = cap(dotMatch[2]);
     } else if (/^(founder|ceo|owner|cofounder|coo|cmo)$/i.test(local)) {
-      // Role-only local with no person attached — accept but flag.
+      // Role-only local — accept but flag (no firstName, generic greeting).
       score = 80;
       firstName = null;
-    } else if (/^[a-z]{2,12}$/.test(local)) {
-      // Single-word personal name (sara@, tom@, marco@). Real person signal.
+    } else if (isLikelyFirstName(local)) {
+      // Single-word local that matches a known first name (sara@, tom@,
+      // marco@). Whitelist-based — was previously a blacklist which let
+      // through custom@, consumercare@, gcc@, etc.
       score = 70;
       firstName = cap(local);
     } else {
-      // Anything else (numbers, weird patterns) — skip.
+      // Anything else (numbers, weird patterns, unknown words) — skip.
       continue;
     }
 
