@@ -10,6 +10,43 @@ import { sendDueScheduled } from "../automation/conversation-runner.js";
 import { processFollowUps } from "../automation/conversation-followup.js";
 import { runDailyOutbound } from "../automation/run-daily-200.js";
 import { processOneRunTick } from "../automation/lead-discovery.js";
+import { supabase } from "../lib/supabase.js";
+
+// Decides whether a campaign's per-campaign schedule says "fire now". Returns
+// null if not due, or { cap } for the per-invocation cap when due.
+//   schedule.cadence: "off" | "daily" | "hourly_business"
+//   schedule.timezone: IANA tz (e.g. "Europe/London")
+//   schedule.start_hour: 0-23 (for daily, the firing hour; for hourly, window start)
+//   schedule.end_hour: 0-23 (hourly only — inclusive window end)
+//   schedule.weekdays_only: boolean
+function scheduleDecision(schedule, dailyCap, now = new Date()) {
+  if (!schedule || schedule.cadence === "off") return null;
+  const tz = schedule.timezone || "UTC";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hour: "numeric", weekday: "short", hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === "hour").value);
+  const weekday = parts.find((p) => p.type === "weekday").value;
+  if (schedule.weekdays_only !== false && (weekday === "Sat" || weekday === "Sun")) return null;
+
+  const startHour = Number.isFinite(schedule.start_hour) ? schedule.start_hour : 9;
+  const endHour = Number.isFinite(schedule.end_hour) ? schedule.end_hour : 17;
+
+  if (schedule.cadence === "daily") {
+    // Fire once per day at the configured hour. The orchestrator's own
+    // todaySentCount check stops further sends if the cap was already hit.
+    if (hour === startHour) return { cap: dailyCap || null };
+    return null;
+  }
+  if (schedule.cadence === "hourly_business") {
+    if (hour >= startHour && hour <= endHour) {
+      const windowHours = Math.max(1, endHour - startHour + 1);
+      return { cap: Math.max(1, Math.ceil((dailyCap || 0) / windowHours)) };
+    }
+    return null;
+  }
+  return null;
+}
 
 function checkCronAuth(req) {
   const expected = process.env.CRON_SECRET;
@@ -72,13 +109,42 @@ export function cronRoutes() {
   router.get("/run-daily-outbound", async (req, res) => {
     if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {
-      const cap = Math.min(parseInt(req.query.cap) || 30, 200);
-      const campaignId = req.query.campaign || null;
       const dryRun = req.query.dry === "1" || req.query.dry === "true";
       const lines = [];
       const log = (s) => lines.push(s);
-      const result = await runDailyOutbound({ cap, campaignId, dryRun, log });
-      res.json({ ...result, log: lines });
+
+      // Explicit-campaign mode: caller knows what to run. Used by the CLI and
+      // for one-off triggers from the UI.
+      if (req.query.campaign) {
+        const cap = Math.min(parseInt(req.query.cap) || 30, 200);
+        const result = await runDailyOutbound({ cap, campaignId: req.query.campaign, dryRun, log });
+        return res.json({ ...result, log: lines });
+      }
+
+      // Auto mode (default for the cron tick): walk every active campaign,
+      // ask its schedule whether it should fire right now, and run the ones
+      // that say yes. Returns a per-campaign breakdown.
+      const { data: campaigns, error } = await supabase
+        .from("email_campaigns")
+        .select("id,name,daily_cap,config,status")
+        .eq("status", "active");
+      if (error) throw new Error(error.message);
+
+      const now = new Date();
+      const results = [];
+      for (const c of campaigns || []) {
+        const decision = scheduleDecision(c.config?.schedule, c.daily_cap || 200, now);
+        if (!decision) continue;
+        log(`[scheduler] firing ${c.name} (${c.id}) cap=${decision.cap}`);
+        try {
+          const r = await runDailyOutbound({ cap: decision.cap, campaignId: c.id, dryRun, log });
+          results.push({ campaign_id: c.id, name: c.name, ...r });
+        } catch (e) {
+          results.push({ campaign_id: c.id, name: c.name, error: e.message });
+        }
+      }
+      if (results.length === 0) log("[scheduler] no campaigns due to fire this tick");
+      res.json({ tick: now.toISOString(), fired: results.length, results, log: lines });
     } catch (err) {
       console.error("/cron/run-daily-outbound error:", err);
       res.status(500).json({ error: err.message });

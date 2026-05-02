@@ -1,0 +1,45 @@
+name: Daily-outbound scheduler
+
+# Ticks every 30 minutes, hits the cron endpoint with the CRON_SECRET. The
+# endpoint walks every active email_campaign, looks at its
+# config.schedule (cadence / timezone / start_hour / end_hour /
+# weekdays_only), and only fires the campaigns that are due "now". Per-
+# campaign control lives in the campaign Settings UI, not in this YAML.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: daily-outbound-scheduler
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hit /api/cron/run-daily-outbound
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::APP_URL and CRON_SECRET must be set as repo secrets"
+            exit 1
+          fi
+          # Strip trailing slash for clean URL composition.
+          BASE="${APP_URL%/}"
+          echo "Calling $BASE/api/cron/run-daily-outbound"
+          response=$(curl -sS -w "\nHTTP %{http_code}\n" --max-time 120 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$BASE/api/cron/run-daily-outbound")
+          echo "$response"
+          # Fail the job if the endpoint didn't return 2xx so we get a
+          # red Action and an alert email.
+          code=$(printf "%s" "$response" | tail -n1 | awk '{print $2}')
+          if ! echo "$code" | grep -qE "^2"; then
+            echo "::error::Endpoint returned $code"
+            exit 1
+          fi

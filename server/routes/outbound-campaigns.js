@@ -137,7 +137,7 @@ export function outboundCampaignsRoutes() {
   router.put("/campaigns/:id", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const allowed = ["name", "status", "target_filters", "daily_cap", "sender_from", "reply_to", "auto_reply", "ai_campaign_id", "brief"];
+      const allowed = ["name", "status", "target_filters", "daily_cap", "sender_from", "reply_to", "auto_reply", "ai_campaign_id", "brief", "config"];
       const patch = {};
       for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
       if (Object.keys(patch).length === 0) {

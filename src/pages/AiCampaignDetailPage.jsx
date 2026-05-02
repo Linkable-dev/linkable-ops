@@ -127,6 +127,7 @@ function pct(x) { return x ? `${(x * 100).toFixed(1)}%` : "0%"; }
 // ---------- SETTINGS ----------
 
 function SettingsCard({ campaign, theme, onSaved }) {
+  const sched = campaign.config?.schedule || {};
   const [form, setForm] = useState({
     name: campaign.name,
     daily_cap: campaign.daily_cap,
@@ -138,6 +139,11 @@ function SettingsCard({ campaign, theme, onSaved }) {
     categories: campaign.target_filters?.categories || [],
     min_revenue: campaign.target_filters?.min_revenue || "",
     max_revenue: campaign.target_filters?.max_revenue || "",
+    schedule_cadence: sched.cadence || "off",
+    schedule_timezone: sched.timezone || (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC"),
+    schedule_start_hour: Number.isFinite(sched.start_hour) ? sched.start_hour : 9,
+    schedule_end_hour: Number.isFinite(sched.end_hour) ? sched.end_hour : 17,
+    schedule_weekdays_only: sched.weekdays_only !== false,
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -179,6 +185,13 @@ function SettingsCard({ campaign, theme, onSaved }) {
         min_revenue: Number(form.min_revenue) || undefined,
         max_revenue: Number(form.max_revenue) || undefined,
       };
+      const schedule = {
+        cadence: form.schedule_cadence,
+        timezone: form.schedule_timezone,
+        start_hour: Number(form.schedule_start_hour) || 9,
+        end_hour: Number(form.schedule_end_hour) || 17,
+        weekdays_only: !!form.schedule_weekdays_only,
+      };
       await api.updateOutboundCampaign(campaign.id, {
         name: form.name,
         daily_cap: Number(form.daily_cap) || 200,
@@ -187,6 +200,7 @@ function SettingsCard({ campaign, theme, onSaved }) {
         auto_reply: !!form.auto_reply,
         brief: form.brief || null,
         target_filters,
+        config: { ...(campaign.config || {}), schedule },
       });
       onSaved();
     } catch (e) { setErr(e.message); }
@@ -284,6 +298,9 @@ function SettingsCard({ campaign, theme, onSaved }) {
             }}
           />
         </Field>
+        <Field label="Send schedule" theme={theme} colSpan={2}>
+          <ScheduleEditor form={form} setForm={setForm} theme={theme} />
+        </Field>
         <Field label="Reply mode" theme={theme} colSpan={2}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.text }}>
             <input type="checkbox" checked={!!form.auto_reply} onChange={set("auto_reply")} />
@@ -302,6 +319,90 @@ function SettingsCard({ campaign, theme, onSaved }) {
       <div style={{ marginTop: 12 }}><Btn onClick={save} loading={busy}>Save settings</Btn></div>
     </Card>
   );
+}
+
+// ---------- SCHEDULE EDITOR ----------
+
+const COMMON_TIMEZONES = [
+  "Europe/London", "Europe/Berlin", "Europe/Paris", "Europe/Madrid", "Europe/Rome",
+  "Europe/Amsterdam", "Europe/Stockholm", "Europe/Athens",
+  "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto",
+  "Asia/Singapore", "Asia/Tokyo", "Asia/Hong_Kong", "Asia/Dubai", "Asia/Kolkata",
+  "Australia/Sydney", "Pacific/Auckland", "UTC",
+];
+
+function ScheduleEditor({ form, setForm, theme }) {
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const guess = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
+  const tzOptions = guess && !COMMON_TIMEZONES.includes(guess) ? [guess, ...COMMON_TIMEZONES] : COMMON_TIMEZONES;
+
+  // Live "next fire" preview so users can sanity-check what they picked.
+  const preview = (() => {
+    if (form.schedule_cadence === "off") return "Auto-send is off. The campaign won't run until you turn it on.";
+    const tz = form.schedule_timezone;
+    const start = `${String(form.schedule_start_hour).padStart(2, "0")}:00`;
+    const end = `${String(form.schedule_end_hour).padStart(2, "0")}:00`;
+    const days = form.schedule_weekdays_only ? "Mon-Fri" : "every day";
+    if (form.schedule_cadence === "daily") return `Sends once a day at ${start} ${tz}, ${days}, up to ${form.daily_cap || 200} emails.`;
+    return `Sends hourly between ${start}–${end} ${tz}, ${days}, ~${Math.ceil((form.daily_cap || 200) / Math.max(1, form.schedule_end_hour - form.schedule_start_hour + 1))} per hour (cap ${form.daily_cap || 200}/day).`;
+  })();
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <label style={{ fontSize: 12, color: theme.textMid }}>
+          Cadence
+          <select value={form.schedule_cadence} onChange={(e) => set("schedule_cadence", e.target.value)}
+            style={selStyle(theme)}>
+            <option value="off">Off — manual only</option>
+            <option value="daily">Once a day</option>
+            <option value="hourly_business">Hourly during business hours</option>
+          </select>
+        </label>
+        <label style={{ fontSize: 12, color: theme.textMid }}>
+          Timezone
+          <select value={form.schedule_timezone} onChange={(e) => set("schedule_timezone", e.target.value)}
+            disabled={form.schedule_cadence === "off"} style={selStyle(theme)}>
+            {tzOptions.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 12, color: theme.textMid }}>
+          {form.schedule_cadence === "hourly_business" ? "Window start (hour)" : "Send at (hour)"}
+          <select value={form.schedule_start_hour} onChange={(e) => set("schedule_start_hour", Number(e.target.value))}
+            disabled={form.schedule_cadence === "off"} style={selStyle(theme)}>
+            {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+          </select>
+        </label>
+        {form.schedule_cadence === "hourly_business" && (
+          <label style={{ fontSize: 12, color: theme.textMid }}>
+            Window end (hour, inclusive)
+            <select value={form.schedule_end_hour} onChange={(e) => set("schedule_end_hour", Number(e.target.value))}
+              style={selStyle(theme)}>
+              {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.text, marginTop: 10 }}>
+        <input type="checkbox" checked={!!form.schedule_weekdays_only}
+          onChange={(e) => set("schedule_weekdays_only", e.target.checked)}
+          disabled={form.schedule_cadence === "off"} />
+        Weekdays only (Mon-Fri)
+      </label>
+      <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 8, padding: "8px 10px", background: theme.surfaceAlt, borderRadius: 6 }}>
+        {preview}
+      </div>
+    </div>
+  );
+}
+
+function selStyle(theme) {
+  return {
+    display: "block", width: "100%", marginTop: 4, padding: "8px 10px",
+    border: `1.5px solid ${theme.border}`, borderRadius: 8, fontSize: 13,
+    background: theme.bg, color: theme.text, fontFamily: "inherit",
+  };
 }
 
 // ---------- ACTIONS ----------
