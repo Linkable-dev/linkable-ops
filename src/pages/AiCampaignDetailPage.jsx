@@ -65,31 +65,152 @@ export default function AiCampaignDetailPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <Link to="/ai/campaigns" style={{ color: theme.textMuted, fontSize: 12, textDecoration: "none" }}>← All campaigns</Link>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: "4px 0 0", display: "flex", alignItems: "center", gap: 12 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: "4px 0 4px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {campaign.name}
             <Pill tint={STATUS_TINTS[campaign.status] || {}}>{campaign.status}</Pill>
             {campaign.auto_reply && <Pill tint={{ bg: "#E0E7FF", fg: "#3730A3" }}>auto-reply</Pill>}
+            <ScheduleBadge schedule={campaign.config?.schedule} theme={theme} />
           </h1>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>
+            Daily cap {campaign.daily_cap || 200} · Sender {campaign.sender_from} · Reply-to {campaign.reply_to}
+          </div>
         </div>
         <CampaignActions campaign={campaign} onChange={reload} navigate={navigate} />
       </div>
 
-      <MetricsCard metrics={metrics} theme={theme} />
-      <SettingsCard campaign={campaign} theme={theme} onSaved={reload} />
-      <DiscoverCard campaign={campaign} theme={theme} onStarted={reload} />
-      <DiscoveryRunsPanel campaign={campaign} theme={theme} />
-      <LeadPoolPanel theme={theme} />
-      <TemplatesCard
+      <CampaignTabs
         campaign={campaign}
         templates={templates}
+        metrics={metrics}
         theme={theme}
-        onChange={reload}
+        reload={reload}
       />
     </div>
   );
+}
+
+// ---------- TABS ----------
+
+const TABS = [
+  ["overview",  "Overview"],
+  ["leads",     "Leads"],
+  ["templates", "Templates"],
+  ["settings",  "Settings"],
+];
+
+function CampaignTabs({ campaign, templates, metrics, theme, reload }) {
+  // URL hash drives the active tab so refreshes / shared links land correctly.
+  const initial = (typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "") || "overview";
+  const [tab, setTab] = useState(TABS.some(([k]) => k === initial) ? initial : "overview");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const target = `#${tab}`;
+    if (window.location.hash !== target) window.history.replaceState(null, "", target);
+  }, [tab]);
+
+  return (
+    <div>
+      <TabBar tabs={TABS} active={tab} onSelect={setTab} />
+      {tab === "overview" && (
+        <OverviewTab campaign={campaign} metrics={metrics} templates={templates} theme={theme} onJump={setTab} />
+      )}
+      {tab === "leads" && (
+        <>
+          <DiscoverCard campaign={campaign} theme={theme} onStarted={reload} />
+          <DiscoveryRunsPanel campaign={campaign} theme={theme} />
+          <LeadPoolPanel theme={theme} />
+        </>
+      )}
+      {tab === "templates" && (
+        <TemplatesCard
+          campaign={campaign}
+          templates={templates}
+          theme={theme}
+          onChange={reload}
+        />
+      )}
+      {tab === "settings" && (
+        <SettingsCard campaign={campaign} theme={theme} onSaved={reload} />
+      )}
+    </div>
+  );
+}
+
+// Compact, click-to-jump status row above the metrics card.
+function OverviewTab({ campaign, metrics, templates, theme, onJump }) {
+  const [poolCounts, setPoolCounts] = useState(null);
+  const [recentRun, setRecentRun] = useState(null);
+
+  useEffect(() => {
+    api.getOutboundLeadCounts().then(setPoolCounts).catch(() => {});
+    api.listOutboundDiscoveryRuns(campaign.id, { limit: 1 })
+      .then((r) => setRecentRun(r.rows?.[0] || null))
+      .catch(() => {});
+  }, [campaign.id]);
+
+  const sched = campaign.config?.schedule;
+  const scheduleSummary = !sched || sched.cadence === "off"
+    ? "Auto-send is off — campaign won't run automatically"
+    : sched.cadence === "daily"
+      ? `Sends once a day at ${String(sched.start_hour ?? 9).padStart(2, "0")}:00 ${sched.timezone || "UTC"}${sched.weekdays_only !== false ? " (Mon–Fri)" : ""}`
+      : `Sends hourly ${String(sched.start_hour ?? 9).padStart(2, "0")}:00–${String(sched.end_hour ?? 17).padStart(2, "0")}:00 ${sched.timezone || "UTC"}${sched.weekdays_only !== false ? " (Mon–Fri)" : ""}`;
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+        <ClickStat label="Lead pool" value={poolCounts?.qualified ?? "—"}
+          sub={poolCounts ? `${poolCounts.emailed} contacted · ${poolCounts.total - poolCounts.qualified} skipped` : "loading"}
+          onClick={() => onJump("leads")} theme={theme} />
+        <ClickStat label="Templates" value={templates?.length || 0}
+          sub={templates?.length === 9 ? "all 9 slots filled" : `${9 - (templates?.length || 0)} slots empty`}
+          onClick={() => onJump("templates")} theme={theme} />
+        <ClickStat label="Auto-reply" value={campaign.auto_reply ? "On" : "Off"}
+          sub={campaign.auto_reply ? "AI persona linked" : "Manual triage in AI Inbox"}
+          onClick={() => onJump("settings")} theme={theme} />
+        <ClickStat label="Last discovery" value={recentRun ? recentRun.status : "—"}
+          sub={recentRun ? `${recentRun.sent} qualified · ${recentRun.processed} inspected` : "no runs yet"}
+          onClick={() => onJump("leads")} theme={theme} />
+      </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Schedule</div>
+        <div style={{ fontSize: 14, color: theme.text, marginBottom: 4 }}>{scheduleSummary}</div>
+        <button onClick={() => onJump("settings")} style={{ background: "transparent", border: "none", color: theme.accent, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>
+          Edit schedule →
+        </button>
+      </Card>
+
+      <MetricsCard metrics={metrics} theme={theme} />
+    </>
+  );
+}
+
+function ClickStat({ label, value, sub, onClick, theme }) {
+  return (
+    <button onClick={onClick} style={{
+      textAlign: "left", padding: "14px 16px", borderRadius: 10,
+      background: theme.surface, border: `1px solid ${theme.border}`,
+      cursor: "pointer", fontFamily: "inherit",
+      transition: "border-color 0.15s, transform 0.05s",
+    }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = theme.accent; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = theme.border; }}>
+      <div style={{ fontSize: 11, color: theme.textMuted, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: theme.text, marginTop: 4 }}>{value}</div>
+      <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{sub}</div>
+    </button>
+  );
+}
+
+function ScheduleBadge({ schedule, theme }) {
+  if (!schedule || schedule.cadence === "off") {
+    return <Pill tint={{ bg: "#FEE2E2", fg: "#991B1B" }} title="Auto-send is off — set a schedule in Settings">manual</Pill>;
+  }
+  const label = schedule.cadence === "daily" ? "daily" : "hourly";
+  return <Pill tint={{ bg: "#DCFCE7", fg: "#166534" }} title={`${schedule.cadence} · ${schedule.timezone}`}>{label}</Pill>;
 }
 
 // ---------- METRICS ----------
