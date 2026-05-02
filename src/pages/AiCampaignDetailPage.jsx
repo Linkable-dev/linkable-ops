@@ -10,6 +10,7 @@ import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonCard } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
+import { suggestCampaignName } from "../lib/campaign-name";
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },

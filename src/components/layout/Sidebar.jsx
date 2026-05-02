@@ -156,6 +156,12 @@ export default function Sidebar() {
     </svg>
   );
 
+  const liveIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  );
+
   const usersIcon = (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -229,8 +235,8 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {navItem("/ai/campaigns", "Campaigns", path.startsWith("/ai/campaigns"), aiIcon)}
-            {navItem("/ai/outbound", "Live sends", path.startsWith("/ai/outbound"), aiIcon)}
+            {navItem("/ai/campaigns", "Campaigns", path.startsWith("/ai/campaigns"), campaignsIcon)}
+            {navItem("/ai/outbound", "Live sends", path.startsWith("/ai/outbound"), liveIcon)}
             {navItem("/ai/inbox", "Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
           </div>
         )}
