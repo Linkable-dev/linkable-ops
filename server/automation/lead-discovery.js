@@ -266,19 +266,17 @@ async function processOneBrand({ teamId, brand }) {
     return { qualified, email: person?.email, name: person?.firstName, reason };
   }
 
-  // Best-effort person finder: Apollo first (richer org chart), Hunter as backup.
-  let person = null;
-  if (process.env.APOLLO_API_KEY) {
-    person = await apolloSearch(cleanDomain).catch(() => null);
-  }
+  // Decision-maker finder, cheapest source first:
+  //  1. StoreLeads contact_info — free, already loaded with the brand.
+  //     pickPersonalFromStoreLeads now rejects shared mailboxes outright.
+  //  2. Hunter.io — role-prioritized search for the brand's domain.
+  //  3. Apollo — richer org chart, last resort because of rate-limit issues.
+  let person = pickPersonalFromStoreLeads(cleanDomain, brand.contact_info);
   if (!person && process.env.HUNTER_API_KEY) {
     person = await hunterSearch(cleanDomain).catch(() => null);
   }
-
-  // StoreLeads contact_info often has personal emails too — last fallback.
-  if (!person) {
-    const fromStoreleads = pickPersonalFromStoreLeads(cleanDomain, brand.contact_info);
-    if (fromStoreleads) person = fromStoreleads;
+  if (!person && process.env.APOLLO_API_KEY) {
+    person = await apolloSearch(cleanDomain).catch(() => null);
   }
 
   if (!person?.email) {
