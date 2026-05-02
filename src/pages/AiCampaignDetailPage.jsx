@@ -9,6 +9,7 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonCard } from "../components/ui/Skeleton";
+import { TabBar } from "../components/ui/TabBar";
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },
@@ -625,16 +626,25 @@ const SLOTS = [
   ["G3", 1], ["G3", 2], ["G3", 3],
 ];
 
+const GROUP_LABELS = {
+  G1: "G1 · Creator-active",
+  G2: "G2 · Summer-seasonal",
+  G3: "G3 · Cold catch-all",
+};
+
 function TemplatesCard({ campaign, templates, theme, onChange }) {
   const [generating, setGenerating] = useState(false);
   const [genErr, setGenErr] = useState(null);
   const [refinementPrompt, setRefinementPrompt] = useState("");
+  const [activeGroup, setActiveGroup] = useState("G1");
 
   async function generate() {
     setGenerating(true); setGenErr(null);
     try {
+      // Steering rewrite scoped to the active group only.
       await api.generateOutboundDrafts(campaign.id, {
         refinement_prompt: refinementPrompt.trim() || undefined,
+        groups: [activeGroup],
       });
       onChange();
     } catch (e) { setGenErr(e.message); }
@@ -651,15 +661,33 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
     return m;
   }, [templates]);
 
+  // Per-group counts feed the tab badges.
+  const countsByGroup = useMemo(() => {
+    const c = { G1: 0, G2: 0, G3: 0 };
+    for (const t of templates || []) {
+      if (c[t.brand_group] != null) c[t.brand_group]++;
+    }
+    return c;
+  }, [templates]);
+
+  const visibleSlots = SLOTS.filter(([g]) => g === activeGroup);
+
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>Templates ({templates?.length || 0})</div>
-        <Btn onClick={generate} loading={generating}>Rewrite with AI</Btn>
+        <Btn onClick={generate} loading={generating}>Rewrite {activeGroup} with AI</Btn>
       </div>
+
+      <TabBar
+        tabs={["G1", "G2", "G3"].map((g) => [g, `${GROUP_LABELS[g]} (${countsByGroup[g]})`])}
+        active={activeGroup}
+        onSelect={setActiveGroup}
+      />
+
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 4 }}>
-          Steering prompt (optional) — applied to every slot's rewrite
+          Steering prompt (optional) — applied to every {activeGroup} slot's rewrite
         </div>
         <textarea
           value={refinementPrompt}
@@ -675,7 +703,7 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
       {genErr && <div style={{ color: "#DC2626", fontSize: 12, marginBottom: 8 }}>{genErr}</div>}
 
       <div style={{ display: "grid", gap: 12 }}>
-        {SLOTS.map(([g, t]) => {
+        {visibleSlots.map(([g, t]) => {
           const key = `${g}-T${t}`;
           const list = grouped[key] || [];
           return (
