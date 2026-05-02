@@ -33,24 +33,6 @@ jobs:
         working-directory: server
         run: npm ci --no-audit --no-fund
 
-      - name: Debug env shape
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          STORELEADS_KEY: ${{ secrets.STORELEADS_KEY }}
-          APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
-          HUNTER_API_KEY: ${{ secrets.HUNTER_API_KEY }}
-        run: |
-          node -e '
-            for (const k of ["SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","STORELEADS_KEY","APOLLO_API_KEY","HUNTER_API_KEY"]) {
-              const v = process.env[k] ?? "";
-              const startsWithHttps = v.startsWith("https://");
-              const trimmed = v.trim();
-              const matchesRegex = /^https?:\/\//i.test(trimmed);
-              console.log(`${k}: len=${v.length} trimLen=${trimmed.length} startsHttps=${startsWithHttps} regexOk=${matchesRegex} firstChar=${v.charCodeAt(0) || "n/a"} lastChar=${v.charCodeAt(v.length-1) || "n/a"}`);
-            }
-          '
-
       - name: Drain discovery queue
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
