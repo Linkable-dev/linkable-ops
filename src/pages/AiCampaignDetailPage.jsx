@@ -422,8 +422,11 @@ function DiscoveryRunsPanel({ campaign, theme }) {
         </thead>
         <tbody>
           {runs.map((r) => {
+            // Target is qualified leads, not brands inspected — the loop exits
+            // at sent === total. Showing processed / total made progress
+            // overshoot 100% whenever any brands got skipped/failed.
             const target = r.total || 1;
-            const pct = Math.min(100, Math.round((r.processed / target) * 100));
+            const pct = Math.min(100, Math.round((r.sent / target) * 100));
             return (
               <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
                 <td style={runTd}>
@@ -431,7 +434,8 @@ function DiscoveryRunsPanel({ campaign, theme }) {
                   {r.error && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.error}>{r.error}</div>}
                 </td>
                 <td style={runTd}>
-                  <div style={{ color: theme.text }}>{r.processed} / {r.total || "?"}</div>
+                  <div style={{ color: theme.text }}>{r.sent} / {r.total || "?"}</div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 1 }}>{r.processed} inspected</div>
                   <div style={{ width: 120, height: 4, background: theme.surfaceAlt, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
                     <div style={{ width: `${pct}%`, height: "100%", background: r.status === "failed" ? "#DC2626" : theme.accent }} />
                   </div>
