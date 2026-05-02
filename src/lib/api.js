@@ -123,6 +123,9 @@ export const api = {
     request("/outbound/storeleads/category-presets"),
   getStoreLeadsCategories: ({ q } = {}) =>
     request(`/outbound/storeleads/categories?${buildQs({ q })}`),
+  listOutboundLeads: ({ q, qualified, limit, offset } = {}) =>
+    request(`/outbound/leads?${buildQs({ q, qualified, limit, offset })}`),
+  getOutboundLeadCounts: () => request("/outbound/leads/counts"),
 
   // Outbound templates
   listOutboundTemplates: (campaignId) =>

@@ -67,6 +67,7 @@ export default function AiCampaignDetailPage() {
       <SettingsCard campaign={campaign} theme={theme} onSaved={reload} />
       <DiscoverCard campaign={campaign} theme={theme} onStarted={reload} />
       <DiscoveryRunsPanel campaign={campaign} theme={theme} />
+      <LeadPoolPanel theme={theme} />
       <TemplatesCard
         campaign={campaign}
         templates={templates}
@@ -463,6 +464,132 @@ function DiscoveryRunsPanel({ campaign, theme }) {
 
 const runTh = { padding: "8px 16px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 };
 const runTd = { padding: "8px 16px", verticalAlign: "top" };
+
+// ---------- LEAD POOL PANEL ----------
+//
+// Team-wide pool of brands that any discovery run has surfaced. This isn't
+// per-campaign — every campaign shares the same pool, the daily-200 sender
+// just picks brands matching its own filters at send time.
+
+function LeadPoolPanel({ theme }) {
+  const [rows, setRows] = useState([]);
+  const [counts, setCounts] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [onlyQualified, setOnlyQualified] = useState(true);
+  const pageSize = 10;
+
+  const load = useCallback(() => {
+    api.listOutboundLeads({
+      q: q || undefined,
+      qualified: onlyQualified ? undefined : "false",
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+    })
+      .then((res) => { setRows(res.rows || []); setTotal(res.total || 0); })
+      .catch(() => {});
+    api.getOutboundLeadCounts().then(setCounts).catch(() => {});
+  }, [q, page, onlyQualified]);
+
+  useEffect(() => {
+    const t = setTimeout(load, 200);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  useEffect(() => { setPage(1); }, [q, onlyQualified]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <Card style={{ marginBottom: 16, padding: 0 }}>
+      <div style={{ padding: "16px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Lead pool {counts && (
+            <span style={{ marginLeft: 8, color: theme.textMuted, fontSize: 11, textTransform: "none", fontWeight: 400, letterSpacing: 0 }}>
+              {counts.qualified} with email · {counts.total - counts.qualified} skipped · {counts.emailed} contacted
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <label style={{ fontSize: 11, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <input type="checkbox" checked={onlyQualified} onChange={(e) => setOnlyQualified(e.target.checked)} style={{ margin: 0 }} />
+            with email only
+          </label>
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search domain or contact"
+            style={{ padding: "6px 10px", borderRadius: 6, fontSize: 12, fontFamily: "inherit",
+              border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, minWidth: 200 }}
+          />
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: "20px", color: theme.textMuted, fontSize: 13 }}>
+          {q ? "No leads match this search." : "No leads in the pool yet — run discovery first."}
+        </div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+              <th style={runTh}>Domain</th>
+              <th style={runTh}>Contact</th>
+              <th style={runTh}>Email</th>
+              <th style={runTh}>Country</th>
+              <th style={runTh}>Categories</th>
+              <th style={runTh}>Status</th>
+              <th style={runTh}>Added</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const skipReason = r.raw_data?._disqualify_reason;
+              const fullName = [r.contact_first_name, r.contact_last_name].filter(Boolean).join(" ");
+              return (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                  <td style={runTd}>
+                    <a href={`https://${r.domain}`} target="_blank" rel="noreferrer" style={{ color: theme.text, fontWeight: 500, textDecoration: "none" }}>{r.domain}</a>
+                  </td>
+                  <td style={runTd}>
+                    <div style={{ color: theme.text }}>{fullName || "—"}</div>
+                    {r.contact_position && <div style={{ fontSize: 11, color: theme.textMuted }}>{r.contact_position}</div>}
+                  </td>
+                  <td style={{ ...runTd, color: r.email ? theme.text : theme.textMuted }}>{r.email || "—"}</td>
+                  <td style={{ ...runTd, color: theme.textMuted }}>{r.country_code || "—"}</td>
+                  <td style={{ ...runTd, color: theme.textMuted, fontSize: 11, maxWidth: 180 }}>
+                    {(r.categories || []).slice(0, 2).map((c) => c.split("/").pop()).join(", ") || "—"}
+                  </td>
+                  <td style={runTd}>
+                    {r.emailed
+                      ? <Pill tint={{ bg: "#D1FAE5", fg: "#065F46" }}>contacted</Pill>
+                      : skipReason
+                        ? <Pill tint={{ bg: "#FEE2E2", fg: "#991B1B" }} title={skipReason}>skipped</Pill>
+                        : <Pill tint={{ bg: "#DBEAFE", fg: "#1E40AF" }}>queued</Pill>}
+                  </td>
+                  <td style={{ ...runTd, color: theme.textMuted, whiteSpace: "nowrap" }}>{shortDate(r.imported_at)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {total > pageSize && (
+        <div style={{ padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: theme.textMuted }}>
+          <span>Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+              style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: 12, cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1 }}>Prev</button>
+            <span style={{ padding: "4px 8px" }}>{page} / {totalPages}</span>
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+              style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: 12, cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function shortDate(iso) {
   if (!iso) return "—";

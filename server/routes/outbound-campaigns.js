@@ -304,6 +304,43 @@ export function outboundCampaignsRoutes() {
     res.json({ categories: matches.slice(0, 200) });
   });
 
+  // Team-wide pool of brands StoreLeads/Apollo/Hunter has discovered. Used by
+  // the daily-200 sender as its inbox of available prospects, and now also by
+  // the campaign-detail "Recent leads" panel.
+  router.get("/leads", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const q = (req.query.q || "").toString().trim();
+      const onlyQualified = req.query.qualified !== "false"; // default true
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 200);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+      let query = supabase.from("storeleads_brands")
+        .select("id,domain,email,contact_first_name,contact_last_name,contact_position,contact_source,country_code,categories,imported_at,emailed,emailed_at,raw_data", { count: "exact" })
+        .eq("team_id", teamId);
+      if (onlyQualified) query = query.not("email", "is", null);
+      if (q) query = query.or(`domain.ilike.%${q}%,email.ilike.%${q}%,contact_first_name.ilike.%${q}%,contact_last_name.ilike.%${q}%`);
+      query = query.order("imported_at", { ascending: false }).range(offset, offset + limit - 1);
+
+      const { data, error, count } = await query;
+      if (error) throw new Error(error.message);
+      res.json({ rows: data || [], total: count || 0 });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get("/leads/counts", async (_req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { count: total } = await supabase.from("storeleads_brands")
+        .select("id", { count: "exact", head: true }).eq("team_id", teamId);
+      const { count: qualified } = await supabase.from("storeleads_brands")
+        .select("id", { count: "exact", head: true }).eq("team_id", teamId).not("email", "is", null);
+      const { count: emailed } = await supabase.from("storeleads_brands")
+        .select("id", { count: "exact", head: true }).eq("team_id", teamId).eq("emailed", true);
+      res.json({ total: total || 0, qualified: qualified || 0, emailed: emailed || 0 });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Cooperative cancel — the discovery worker polls for status='stopped'.
   router.post("/discovery-runs/:id/stop", async (req, res) => {
     try {
