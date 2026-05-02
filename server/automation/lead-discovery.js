@@ -297,39 +297,48 @@ export async function processOneBrand({ teamId, brand }) {
     return { qualified, email: person?.email, name: person?.firstName, reason };
   }
 
-  // Decision-maker finder, best signal first. Apollo's org chart gives the
-  // richest decision-maker mapping when it works — its 429 is now handled
-  // gracefully by apolloSearch (returns null and marks itself exhausted for
-  // an hour, so subsequent brands skip it without wasting requests).
-  //  1. Apollo — verified org-chart roots, returns null fast when 429'd.
-  //  2. Hunter — role-prioritized domain search.
-  //  3. StoreLeads contact_info — free, but only accepts named people.
+  // Decision-maker finder. Try sources in order; if a source returns a
+  // result we can't use (generic mailbox, generic name), fall through to the
+  // next source instead of giving up. Apollo's 429 is handled gracefully
+  // (apolloSearch returns null fast when exhausted).
+  //   1. Apollo — verified org-chart roots, returns null fast when 429'd.
+  //   2. Hunter — role-prioritized domain search.
+  //   3. StoreLeads contact_info — free, only accepts clearly-named people.
+  function isUsable(p) {
+    if (!p?.email) return false;
+    const local = p.email.split("@")[0]?.toLowerCase();
+    if (isGenericLocal(local)) return false;
+    if (p.firstName && isGenericLocal(p.firstName.toLowerCase())) return false;
+    return true;
+  }
+
   let person = null;
+  let lastRejected = null;
   if (process.env.APOLLO_API_KEY) {
-    person = await apolloSearch(cleanDomain).catch(() => null);
+    const p = await apolloSearch(cleanDomain).catch(() => null);
+    if (isUsable(p)) person = p;
+    else if (p) lastRejected = p;
   }
   if (!person && process.env.HUNTER_API_KEY) {
-    person = await hunterSearch(cleanDomain).catch(() => null);
+    const p = await hunterSearch(cleanDomain).catch(() => null);
+    if (isUsable(p)) person = p;
+    else if (p) lastRejected = lastRejected || p;
   }
   if (!person) {
-    person = pickPersonalFromStoreLeads(cleanDomain, brand.contact_info);
+    const p = pickPersonalFromStoreLeads(cleanDomain, brand.contact_info);
+    if (isUsable(p)) person = p;
+    else if (p) lastRejected = lastRejected || p;
   }
 
-  if (!person?.email) {
+  if (!person) {
+    if (lastRejected) {
+      const local = lastRejected.email?.split("@")[0]?.toLowerCase();
+      const reason = local && isGenericLocal(local)
+        ? `generic mailbox (${local}@) — no usable contact across sources`
+        : `generic name (${lastRejected.firstName}) — no usable contact across sources`;
+      return persistAndReturn({ qualified: false, reason, person: lastRejected });
+    }
     return persistAndReturn({ qualified: false, reason: "no email on brand" });
-  }
-
-  // Final guard: regardless of source, reject generic shared-mailbox emails.
-  // Uses the same helper as the StoreLeads picker so Hunter/Apollo can't
-  // sneak compound forms (customer.service@) through either.
-  const local = person.email.split("@")[0]?.toLowerCase();
-  if (isGenericLocal(local)) {
-    return persistAndReturn({ qualified: false, reason: `generic mailbox (${local}@)`, person });
-  }
-  // Hunter sometimes returns first_name="Customer" / "Care" / "Sales" when
-  // its source data was a shared mailbox signature. Reject those.
-  if (person.firstName && isGenericLocal(person.firstName.toLowerCase())) {
-    return persistAndReturn({ qualified: false, reason: `generic name (${person.firstName})`, person });
   }
 
   // Role filter only when we have a stated position. Apollo / Hunter return
@@ -541,43 +550,46 @@ async function apolloSearch(domain) {
 
 // ---------- HUNTER ----------
 
+let hunterExhaustedUntil = 0;
+function hunterIsExhausted() { return Date.now() < hunterExhaustedUntil; }
+function markHunterExhausted() {
+  // Hunter's plans are typically per-month, but a 429 still means stop for now.
+  // 1-hour cooldown matches our Apollo handling — long enough to be useful,
+  // short enough that the next cron tick can recover.
+  hunterExhaustedUntil = Date.now() + 60 * 60 * 1000;
+}
+
 async function hunterSearch(domain) {
   const apiKey = process.env.HUNTER_API_KEY;
   if (!apiKey) return null;
+  if (hunterIsExhausted()) return null;
   const res = await fetch(
-    `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${apiKey}&limit=5`,
+    `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${apiKey}&limit=10`,
     { signal: AbortSignal.timeout(10_000) }
   );
+  if (res.status === 429) { markHunterExhausted(); return null; }
   if (!res.ok) return null;
   const data = await res.json();
+  // Take all emails with a real first_name, ranked by role. We'll then walk
+  // through them and return the first one whose local part isn't generic —
+  // this catches cases where Hunter has 'CEO' Sarah but only via marketing@.
   const emails = (data.data?.emails || [])
     .filter((e) => e.confidence >= 70 && e.first_name)
     .sort((a, b) => roleScore(b.position) - roleScore(a.position));
-  if (emails.length === 0) return null;
-
-  const GENERIC = ["hello", "info", "contact", "hi", "team", "support", "help", "cs", "admin", "sales", "press", "pr", "media", "service", "noreply", "wholesale", "billing", "legal", "privacy", "hr", "careers"];
-  const best = emails[0];
-  const local = best.value.split("@")[0].toLowerCase();
-  if (GENERIC.includes(local)) {
-    const alt = emails.find((e) => !GENERIC.includes(e.value.split("@")[0].toLowerCase()));
-    if (!alt) return null;
+  for (const e of emails) {
+    const local = e.value.split("@")[0]?.toLowerCase();
+    if (isGenericLocal(local)) continue;
+    if (isGenericLocal(e.first_name?.toLowerCase())) continue;
     return {
-      email: alt.value,
-      firstName: alt.first_name,
-      lastName: alt.last_name,
-      position: alt.position,
-      confidence: alt.confidence,
+      email: e.value,
+      firstName: e.first_name,
+      lastName: e.last_name,
+      position: e.position,
+      confidence: e.confidence,
       source: "hunter",
     };
   }
-  return {
-    email: best.value,
-    firstName: best.first_name,
-    lastName: best.last_name,
-    position: best.position,
-    confidence: best.confidence,
-    source: "hunter",
-  };
+  return null;
 }
 
 async function hunterVerify(email) {
