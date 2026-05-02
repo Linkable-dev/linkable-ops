@@ -285,6 +285,14 @@ async function processOneBrand({ teamId, brand }) {
     return persistAndReturn({ qualified: false, reason: "no email on brand" });
   }
 
+  // Final guard: regardless of source, reject generic shared-mailbox emails.
+  // (Apollo/Hunter usually filter these but the StoreLeads fallback or stale
+  // data can still surface them.)
+  const local = person.email.split("@")[0]?.toLowerCase();
+  if (GENERIC_MAILBOX_LOCALS.has(local)) {
+    return persistAndReturn({ qualified: false, reason: `generic mailbox (${local}@)`, person });
+  }
+
   // Role filter only when we have a stated position. Apollo / Hunter return
   // titles; StoreLeads-personal usually doesn't, so we don't gate on it.
   const pos = (person.position || "").toLowerCase();
@@ -292,8 +300,7 @@ async function processOneBrand({ teamId, brand }) {
     const isFounder = /founder|ceo|owner|co-founder|coo|cto|president/.test(pos);
     const isMarketing = /marketing|cmo|growth|brand|ecommerce|e-commerce|digital|creator|influencer|partnership/.test(pos);
     const fromOrgChart = person.source === "apollo-orgchart";
-    const fromGenericLocal = person.source === "storeleads-personal" && !person.firstName;
-    if (!isFounder && !isMarketing && !fromOrgChart && !fromGenericLocal) {
+    if (!isFounder && !isMarketing && !fromOrgChart) {
       return persistAndReturn({ qualified: false, reason: `role ${person.position} not target`, person });
     }
   }
@@ -544,6 +551,35 @@ function roleScore(positionRaw) {
 // Accept any non-generic email on the brand's domain, ranked by likelihood
 // of being a real person. Returns first name when extractable from the
 // local part, otherwise leaves it null and we'll greet generically.
+// Comprehensive list of shared-mailbox prefixes that are NOT a single
+// decision maker. Anything matching these is rejected outright — we'd
+// rather skip a brand than email a shared inbox where the message disappears.
+export const GENERIC_MAILBOX_LOCALS = new Set([
+  // Generic catch-alls
+  "info", "hello", "hi", "contact", "enquiries", "enquiry", "general",
+  // Sales/biz dev (shared)
+  "sales", "biz", "business", "wholesale", "trade", "trades",
+  // Press/marketing (when shared, not a person)
+  "press", "pr", "media",
+  // Operations
+  "office", "studio", "shop", "store", "online", "web", "team", "service", "services",
+  // Support/CS
+  "support", "help", "cs", "customerservice", "customercare", "service-desk",
+  // Orders/transactional
+  "orders", "order", "returns", "shipping", "tracking",
+  // Partnerships (often goes to shared mailbox)
+  "partners", "partnerships", "partnership", "collab", "collabs", "collaborations",
+  // Finance/legal/admin
+  "billing", "accounts", "finance", "invoices", "ar", "ap", "legal", "compliance",
+  "privacy", "gdpr", "dpo", "investor", "ir",
+  // HR/recruitment
+  "hr", "jobs", "careers", "recruitment", "recruiting", "talent",
+  // System
+  "noreply", "no-reply", "donotreply", "do-not-reply", "abuse", "spam",
+  "postmaster", "mailer-daemon", "unsubscribe", "verify", "webmaster",
+  "hostmaster", "security", "data", "admin",
+]);
+
 function pickPersonalFromStoreLeads(domain, contactInfo) {
   const emails = (contactInfo || [])
     .filter((c) => c.type === "email" && c.value)
@@ -551,15 +587,13 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
   if (emails.length === 0) return null;
 
   const root = domain.replace(/^www\./, "").split(".")[0];
-  const HARD_REJECT = new Set(["support", "help", "orders", "returns", "billing", "legal", "jobs", "careers", "wholesale", "privacy", "noreply", "no-reply", "abuse", "spam", "postmaster", "mailer-daemon", "unsubscribe", "donotreply", "customerservice", "customercare", "cs", "compliance", "verify", "webmaster", "admin", "hostmaster", "security", "recruitment", "hr", "finance", "accounts", "investor", "ir", "gdpr", "dpo", "data"]);
-  const SOFT_REJECT = new Set(["hello", "hi", "info", "contact", "team", "press", "pr", "media", "service"]);
 
   let scored = [];
   for (const e of emails) {
     const local = e.split("@")[0];
     const dom = e.split("@")[1] || "";
     if (!dom.includes(root)) continue;
-    if (HARD_REJECT.has(local)) continue;
+    if (GENERIC_MAILBOX_LOCALS.has(local)) continue;   // never accept shared mailboxes
 
     let score = 0;
     let firstName = null;
@@ -572,22 +606,21 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
       score = 100;
       firstName = cap(dotMatch[1]);
       lastName = cap(dotMatch[2]);
-    } else if (/^founder|ceo|owner/i.test(local)) {
+    } else if (/^(founder|ceo|owner)/i.test(local)) {
       score = 90;
       position = local;
-    } else if (/^marketing|partnerships?|brand|growth|creators?|influencers?/i.test(local)) {
-      score = 80;
+    } else if (/^(marketing|partnership|brand|growth|creator|influencer)/i.test(local)) {
+      // Only accept role-style locals when explicitly partnerships/marketing —
+      // even then we don't have a person, so we score lower.
+      score = 60;
       position = local;
-    } else if (/^[a-z]{2,12}$/.test(local) && !SOFT_REJECT.has(local)) {
-      // Single-word personal name (sara@, tom@, marco@). Likely a real person.
+    } else if (/^[a-z]{2,12}$/.test(local) && !GENERIC_MAILBOX_LOCALS.has(local)) {
+      // Single-word personal name (sara@, tom@, marco@). Real person signal.
       score = 70;
       firstName = cap(local);
-    } else if (SOFT_REJECT.has(local)) {
-      // Fallback: hello@, info@ — accept but mark generic, no first name.
-      score = 30;
     } else {
-      // Other patterns: accept conservatively.
-      score = 40;
+      // Anything else (numbers, weird patterns) — skip.
+      continue;
     }
 
     scored.push({ email: e, score, firstName, lastName, position });
@@ -595,7 +628,9 @@ function pickPersonalFromStoreLeads(domain, contactInfo) {
 
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0];
-  if (!best || best.score === 0) return null;
+  // Only return if we have an actual person signal (firstName) or a
+  // partnership-style role local. Generic mailboxes are out.
+  if (!best || (!best.firstName && !best.position)) return null;
   return {
     email: best.email,
     firstName: best.firstName,
