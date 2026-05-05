@@ -1,12 +1,12 @@
 name: Lead-discovery worker
 
-# Drains the ai_bulk_runs discovery queue. Runs every 5 minutes (the GitHub
-# Actions minimum) and on manual trigger. The worker invokes the same CLI
-# script that works locally — no Vercel involvement.
+# Manual fallback only. The 5-minute cron now runs on Cloud Run Jobs +
+# Cloud Scheduler in linkable-418310 (job: discovery-worker, scheduler:
+# discovery-worker-cron). Hosted-runner queue starvation made the GitHub
+# schedule unreliable. Kept here so the worker can still be triggered
+# from the Actions UI if Cloud Run is unavailable.
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 # Avoid two workers racing if a run takes longer than 5 minutes.

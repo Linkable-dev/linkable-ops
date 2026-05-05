@@ -1,14 +1,10 @@
 name: Daily-outbound scheduler
 
-# Ticks every 30 minutes, hits the cron endpoint with the CRON_SECRET. The
-# endpoint walks every active email_campaign, looks at its
-# config.schedule (cadence / timezone / start_hour / end_hour /
-# weekdays_only), and only fires the campaigns that are due "now". Per-
-# campaign control lives in the campaign Settings UI, not in this YAML.
+# Manual fallback only. The 30-minute cron now runs on Cloud Scheduler in
+# linkable-418310 (job: daily-outbound-cron). Kept here so the endpoint can
+# still be hit from the Actions UI if Cloud Scheduler is unavailable.
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 concurrency:
