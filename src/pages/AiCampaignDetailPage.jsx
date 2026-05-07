@@ -225,7 +225,7 @@ function ScheduleBadge({ schedule, theme }) {
 function MetricsCard({ metrics, theme }) {
   if (!metrics) return null;
   const cells = [
-    { label: "Total in flight", value: metrics.total },
+    { label: "Total", value: metrics.total },
     { label: "Sent", value: metrics.sent || 0 },
     { label: "Delivered", value: `${metrics.delivered || 0} (${pct(metrics.rates?.delivered)})` },
     { label: "Opened", value: `${metrics.opened || 0} (${pct(metrics.rates?.opened)})` },

@@ -542,6 +542,10 @@ async function rollupCampaignMetrics(teamId, campaignId) {
     .limit(50000);
   if (error) throw new Error(`rollupCampaignMetrics: ${error.message}`);
 
+  // Counters split by source:
+  //   - lifecycle counts come from *_at timestamps (set once by Resend webhooks)
+  //   - lobby counts come from `status` for rows that never left the queue
+  // Mixing the two double-counts (e.g. status='bounced' + bounced_at set).
   const m = {
     total: 0,
     sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0,
@@ -552,24 +556,32 @@ async function rollupCampaignMetrics(teamId, campaignId) {
   };
   for (const r of data || []) {
     m.total++;
-    if (r.status) m[r.status] = (m[r.status] || 0) + 1;
-    if (r.opened_at) m.opened++;
-    if (r.clicked_at) m.clicked++;
+    const left_lobby = !!(r.delivered_at || r.bounced_at) || r.status === "sent" || r.status === "bounced";
+    if (left_lobby) m.sent++;
     if (r.delivered_at) m.delivered++;
     if (r.bounced_at) m.bounced++;
+    if (r.opened_at) m.opened++;
+    if (r.clicked_at) m.clicked++;
     if (r.replied_at) m.replied++;
     if (r.complained_at) m.complained++;
+    if (r.status === "cancelled") m.cancelled++;
+    else if (r.status === "scheduled") m.scheduled++;
+    else if (r.status === "pending") m.pending++;
+    else if (r.status === "failed") m.failed++;
     if (r.brand_group) m.byGroup[r.brand_group] = (m.byGroup[r.brand_group] || 0) + 1;
     if (r.touch_number) m.byTouch[`T${r.touch_number}`] = (m.byTouch[`T${r.touch_number}`] || 0) + 1;
   }
-  const sent = m.sent || 1;   // avoid div-by-zero
+  const sent = m.sent || 1;
+  const delivered = m.delivered || 1;
   m.rates = {
     delivered: m.delivered / sent,
-    opened: m.opened / sent,
-    clicked: m.clicked / sent,
-    replied: m.replied / sent,
     bounced: m.bounced / sent,
     complained: m.complained / sent,
+    // engagement rates use delivered as the denominator (industry convention —
+    // a bounced email can't be opened, so it shouldn't drag the open rate down)
+    opened: m.opened / delivered,
+    clicked: m.clicked / delivered,
+    replied: m.replied / delivered,
   };
   return m;
 }
