@@ -307,23 +307,38 @@ export function outboundCampaignsRoutes() {
   // Team-wide pool of brands StoreLeads/Apollo/Hunter has discovered. Used by
   // the daily-200 sender as its inbox of available prospects, and now also by
   // the campaign-detail "Recent leads" panel.
-  // Helper: apply campaign-style targeting filters to a storeleads_brands query.
-  function applyLeadFilters(query, req) {
+  //
+  // Country goes to the DB. Revenue is filtered in JS — raw_data is jsonb and
+  // jsonb->>'key' returns text, so `.gte("raw_data->>...", "1000000")` does
+  // a *string* compare that silently drops anything outside lex order. The
+  // payload key is also `estimated_sales_yearly`, not `er` (the latter is only
+  // a search-time alias inside the StoreLeads BQ).
+  function parseLeadFilters(req) {
     const countries = (req.query.country || "").toString().trim();
-    const minRevenue = parseInt(req.query.minRevenue, 10);
-    const maxRevenue = parseInt(req.query.maxRevenue, 10);
-    if (countries) {
-      const list = countries.split(/[,\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
-      if (list.length) query = query.in("country_code", list);
-    }
-    // Revenue stored under raw_data.er (StoreLeads' estimated monthly USD).
-    if (Number.isFinite(minRevenue) && minRevenue > 0) {
-      query = query.gte("raw_data->>er", String(minRevenue));
-    }
-    if (Number.isFinite(maxRevenue) && maxRevenue > 0) {
-      query = query.lte("raw_data->>er", String(maxRevenue));
-    }
+    const minRev = parseInt(req.query.minRevenue, 10);
+    const maxRev = parseInt(req.query.maxRevenue, 10);
+    const list = countries
+      ? countries.split(/[,\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean)
+      : [];
+    return {
+      countries: list,
+      minRev: Number.isFinite(minRev) && minRev > 0 ? minRev : null,
+      maxRev: Number.isFinite(maxRev) && maxRev > 0 ? maxRev : null,
+    };
+  }
+
+  function applyDbFilters(query, { countries }) {
+    if (countries.length) query = query.in("country_code", countries);
     return query;
+  }
+
+  function inRevenueBand(row, { minRev, maxRev }) {
+    if (minRev == null && maxRev == null) return true;
+    const rev = Number(row?.raw_data?.estimated_sales_yearly);
+    if (!Number.isFinite(rev)) return false;
+    if (minRev != null && rev < minRev) return false;
+    if (maxRev != null && rev > maxRev) return false;
+    return true;
   }
 
   router.get("/leads", async (req, res) => {
@@ -333,30 +348,43 @@ export function outboundCampaignsRoutes() {
       const onlyQualified = req.query.qualified !== "false"; // default true
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 200);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const filters = parseLeadFilters(req);
 
       let query = supabase.from("storeleads_brands")
-        .select("id,domain,email,contact_first_name,contact_last_name,contact_position,contact_source,country_code,categories,imported_at,emailed,emailed_at,raw_data", { count: "exact" })
+        .select("id,domain,email,contact_first_name,contact_last_name,contact_position,contact_source,country_code,categories,imported_at,emailed,emailed_at,raw_data")
         .eq("team_id", teamId);
       if (onlyQualified) query = query.not("email", "is", null);
       if (q) query = query.or(`domain.ilike.%${q}%,email.ilike.%${q}%,contact_first_name.ilike.%${q}%,contact_last_name.ilike.%${q}%`);
-      query = applyLeadFilters(query, req);
-      query = query.order("imported_at", { ascending: false }).range(offset, offset + limit - 1);
+      query = applyDbFilters(query, filters);
+      // Pull a wide window, JS-filter by revenue, then paginate. Per-country
+      // pools are hundreds of rows max, so this is cheap and stays correct
+      // (DB-side jsonb numeric comparison is impossible without a typed column).
+      query = query.order("imported_at", { ascending: false }).limit(2000);
 
-      const { data, error, count } = await query;
+      const { data, error } = await query;
       if (error) throw new Error(error.message);
-      res.json({ rows: data || [], total: count || 0 });
+      const filtered = (data || []).filter((r) => inRevenueBand(r, filters));
+      const page = filtered.slice(offset, offset + limit);
+      res.json({ rows: page, total: filtered.length });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   router.get("/leads/counts", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const mk = () => applyLeadFilters(supabase.from("storeleads_brands")
-        .select("id", { count: "exact", head: true }).eq("team_id", teamId), req);
-      const { count: total }     = await mk();
-      const { count: qualified } = await mk().not("email", "is", null);
-      const { count: emailed }   = await mk().eq("emailed", true);
-      res.json({ total: total || 0, qualified: qualified || 0, emailed: emailed || 0 });
+      const filters = parseLeadFilters(req);
+      // Same JS-side strategy as /leads — pull a window, count post-filter.
+      let query = supabase.from("storeleads_brands")
+        .select("email, emailed, raw_data")
+        .eq("team_id", teamId);
+      query = applyDbFilters(query, filters).limit(5000);
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      const inBand = (data || []).filter((r) => inRevenueBand(r, filters));
+      const total     = inBand.length;
+      const qualified = inBand.filter((r) => r.email).length;
+      const emailed   = inBand.filter((r) => r.emailed).length;
+      res.json({ total, qualified, emailed });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

@@ -61,8 +61,6 @@ async function todaySentCount(teamId) {
 // 2026-05-02 after a Saturday test fired 50 emails to wrong-country leads.
 async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters = {} }) {
   const totalNeeded = perGroupQuota.G1 + perGroupQuota.G2 + perGroupQuota.G3;
-  // Pull a bigger pool so we have enough of each group after classification.
-  const fetchSize = Math.max(totalNeeded * 5, 100);
 
   let q = supabase
     .from("storeleads_brands")
@@ -74,18 +72,36 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
 
   const countries = (targetFilters.countries || []).map((c) => c?.toString().trim().toUpperCase()).filter(Boolean);
   if (countries.length) q = q.in("country_code", countries);
+
+  // Revenue is filtered in JS, not at the DB layer. raw_data is jsonb and
+  // jsonb->>'key' returns text — `.gte("raw_data->>er", "1000000")` does
+  // a *string* compare and silently drops everything outside lex order.
+  // It also reads the wrong key: StoreLeads payloads expose
+  // estimated_sales_yearly, not `er` (which is only the search-time alias).
   const minRev = Number(targetFilters.min_revenue);
   const maxRev = Number(targetFilters.max_revenue);
-  if (Number.isFinite(minRev) && minRev > 0) q = q.gte("raw_data->>er", String(minRev));
-  if (Number.isFinite(maxRev) && maxRev > 0) q = q.lte("raw_data->>er", String(maxRev));
+  const hasRevFilter = (Number.isFinite(minRev) && minRev > 0) || (Number.isFinite(maxRev) && maxRev > 0);
+  // Pull wide so post-filtering doesn't starve the run. Revenue gate can drop
+  // 80%+ of the pool, so when a band is set we 10x; otherwise 5x is enough
+  // for the group classifier to balance G1/G2/G3.
+  const fetchSize = Math.max(totalNeeded * (hasRevFilter ? 10 : 5), 200);
 
   q = q.order("imported_at", { ascending: false }).limit(fetchSize);
   const { data, error } = await q;
 
   if (error) throw new Error(`fetchFreshProspects: ${error.message}`);
 
+  const inBand = (row) => {
+    if (!hasRevFilter) return true;
+    const rev = Number(row?.raw_data?.estimated_sales_yearly);
+    if (!Number.isFinite(rev)) return false;
+    if (Number.isFinite(minRev) && minRev > 0 && rev < minRev) return false;
+    if (Number.isFinite(maxRev) && maxRev > 0 && rev > maxRev) return false;
+    return true;
+  };
+
   const buckets = { G1: [], G2: [], G3: [] };
-  for (const row of data || []) {
+  for (const row of (data || []).filter(inBand)) {
     // Adapt storeleads_brands row → classifier input shape.
     const brand = {
       storeName: row.merchant_name || row.title || row.domain,

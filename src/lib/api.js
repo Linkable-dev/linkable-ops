@@ -163,11 +163,21 @@ export function friendlyDate(val) {
   if (!val) return "";
   const d = new Date(val);
   if (isNaN(d)) return String(val);
-  const now = new Date();
-  const diff = now - d;
-  if (diff < 60000) return "Just now";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  const diff = new Date() - d;
+  // Future timestamp (scheduled_at for not-yet-due rows). Without this branch
+  // any future date renders as "Just now" because diff < 60000 also matches
+  // small negative diffs.
+  if (diff < 0) {
+    const ahead = -diff;
+    if (ahead < 60000)    return "in <1m";
+    if (ahead < 3600000)  return `in ${Math.floor(ahead / 60000)}m`;
+    if (ahead < 86400000) return `in ${Math.floor(ahead / 3600000)}h`;
+    if (ahead < 604800000) return `in ${Math.floor(ahead / 86400000)}d`;
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+  if (diff < 60000)     return "Just now";
+  if (diff < 3600000)   return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000)  return `${Math.floor(diff / 3600000)}h ago`;
   if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }

@@ -263,7 +263,11 @@ export default function AiOutboundPage() {
               {rows.map((r) => (
                 <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
                   <Td style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>
-                    {friendlyDate(r.sent_at || r.scheduled_at)}
+                    {friendlyDate(
+                      r.status === "sent" ? r.sent_at
+                        : r.status === "cancelled" ? (r.cancelled_at || r.scheduled_at)
+                        : r.scheduled_at
+                    )}
                   </Td>
                   <Td><Pill tint={GROUP_TINTS[r.brand_group] || {}}>{r.brand_group || "—"}</Pill></Td>
                   <Td>T+{r.touch_number === 1 ? "0" : r.touch_number === 2 ? "3" : r.touch_number === 3 ? "7" : "?"}</Td>

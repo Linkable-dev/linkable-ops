@@ -38,8 +38,17 @@ export function outboundRoutes() {
       if (touch) q = q.eq("touch_number", Number(touch));
       if (status) q = q.eq("status", status);
       if (scope === "today") {
+        // "Today" = anything that actually happened or is due today, picking
+        // the relevant timestamp per state. Keying on scheduled_at alone
+        // pulls in historical cancellations whose original scheduled_at
+        // happens to fall today (e.g. T+7 followups bulk-cancelled days ago).
         const start = new Date(); start.setUTCHours(0, 0, 0, 0);
-        q = q.gte("scheduled_at", start.toISOString());
+        const iso = start.toISOString();
+        q = q.or([
+          `and(status.eq.sent,sent_at.gte.${iso})`,
+          `and(status.eq.cancelled,cancelled_at.gte.${iso})`,
+          `and(status.in.(pending,scheduled,failed,bounced),scheduled_at.gte.${iso})`,
+        ].join(","));
       }
 
       const { data, error } = await q;
@@ -58,12 +67,20 @@ export function outboundRoutes() {
       const teamId = await getDefaultTeamId();
       const start = new Date(); start.setUTCHours(0, 0, 0, 0);
 
+      // Mirror the /sends scope filter so headline numbers don't disagree
+      // with the row list (would otherwise count 5-day-old cancellations
+      // whose original scheduled_at is today).
+      const iso = start.toISOString();
       const { data, error } = await supabase
         .from("email_sends")
         .select("brand_group, status, touch_number")
         .eq("team_id", teamId)
         .not("sequence_id", "is", null)
-        .gte("scheduled_at", start.toISOString())
+        .or([
+          `and(status.eq.sent,sent_at.gte.${iso})`,
+          `and(status.eq.cancelled,cancelled_at.gte.${iso})`,
+          `and(status.in.(pending,scheduled,failed,bounced),scheduled_at.gte.${iso})`,
+        ].join(","))
         .limit(5000);
 
       if (error) throw new Error(error.message);
