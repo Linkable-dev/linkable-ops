@@ -155,7 +155,7 @@ export default function AiOutboundPage() {
       {/* Stats row */}
       <div ref={statsRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
         {!stats ? (
-          Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} height={64} />)
+          Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} theme={theme} />)
         ) : (
           <>
             <StatCard label="Today total" value={stats.total ?? "—"} theme={theme} />
@@ -403,9 +403,21 @@ function sectionHighlight(active, theme) {
 
 function StatCard({ label, value, theme, tint = {} }) {
   return (
-    <Card style={{ padding: "12px 14px" }}>
+    <Card style={{ padding: "12px 14px", marginBottom: 0 }}>
       <div style={{ fontSize: 11, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 600, color: tint.fg || theme.text, marginTop: 2 }}>{value}</div>
+    </Card>
+  );
+}
+
+// Mirror StatCard's layout exactly so loading → loaded doesn't reflow
+// (same padding, same internal spacing, same container).
+function StatCardSkeleton({ theme }) {
+  return (
+    <Card style={{ padding: "12px 14px", marginBottom: 0 }}>
+      <Skeleton width="60%" height={11} />
+      <div style={{ height: 2 }} />
+      <Skeleton width="40%" height={22} />
     </Card>
   );
 }
