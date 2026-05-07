@@ -93,7 +93,7 @@ export const api = {
   // Outbound — daily-200 email sequencer dashboard
   listOutboundSends: ({ group, touch, status, scope, limit } = {}) =>
     request(`/outbound/sends?${buildQs({ group, touch, status, scope, limit })}`),
-  getOutboundStats: () => request("/outbound/stats"),
+  getOutboundStats: ({ scope } = {}) => request(`/outbound/stats?${buildQs({ scope })}`),
   stopOutbound: ({ emails, reason }) =>
     request("/outbound/stop", { method: "POST", body: JSON.stringify({ emails, reason }) }),
 

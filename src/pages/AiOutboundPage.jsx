@@ -56,6 +56,9 @@ export default function AiOutboundPage() {
   const [touch, setTouch] = useState("all");
   const [status, setStatus] = useState("all");
   const [scope, setScope] = useState("today");
+  // Stats can be scoped independently from the row list — you often want to
+  // see lifetime engagement while still spot-checking today's pending sends.
+  const [statsScope, setStatsScope] = useState("today");
 
   const [stopText, setStopText] = useState("");
   const [stopReason, setStopReason] = useState("replied");
@@ -96,7 +99,7 @@ export default function AiOutboundPage() {
   const reload = useCallback(() => {
     setLoading(true); setError(null);
     Promise.all([
-      api.getOutboundStats(),
+      api.getOutboundStats({ scope: statsScope }),
       api.listOutboundSends({
         group: group === "all" ? undefined : group,
         touch: touch === "all" ? undefined : touch,
@@ -108,7 +111,7 @@ export default function AiOutboundPage() {
       .then(([s, r]) => { setStats(s); setRows(r.rows || []); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [group, touch, status, scope]);
+  }, [group, touch, status, scope, statsScope]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -165,21 +168,30 @@ export default function AiOutboundPage() {
         </Card>
       )}
 
-      {/* Stats row — campaign metrics for today (Resend webhooks stamp opens/
-          clicks/replies async, so rates climb as the day progresses). */}
-      <div ref={statsRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
-        {!stats ? (
-          Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} theme={theme} />)
-        ) : (
-          <>
-            <StatCard label="Sent" value={stats.sent ?? 0} sub={`${stats.total ?? 0} queued`} theme={theme} tint={STATUS_TINTS.sent} />
-            <StatCard label="Delivered" value={stats.delivered ?? 0} sub={pct(stats.rates?.delivered)} theme={theme} tint={STATUS_TINTS.sent} />
-            <StatCard label="Opened" value={stats.opened ?? 0} sub={pct(stats.rates?.opened)} theme={theme} tint={STATUS_TINTS.opened} />
-            <StatCard label="Clicked" value={stats.clicked ?? 0} sub={pct(stats.rates?.clicked)} theme={theme} tint={STATUS_TINTS.clicked} />
-            <StatCard label="Replied" value={stats.replied ?? 0} sub={pct(stats.rates?.replied)} theme={theme} tint={STATUS_TINTS.replied} />
-            <StatCard label="Bounced" value={stats.bounced ?? 0} sub={pct(stats.rates?.bounced)} theme={theme} tint={STATUS_TINTS.bounced} />
-          </>
-        )}
+      {/* Stats row — campaign metrics. Toggle scopes between today and overall
+          (Resend webhooks stamp opens/clicks/replies async, so today's rates
+          climb through the day; overall is the steady-state read). */}
+      <div ref={statsRef} style={{ marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>
+            Campaign metrics · {statsScope === "today" ? "today" : "overall"}
+          </div>
+          <ScopeToggle value={statsScope} onChange={setStatsScope} theme={theme} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+          {!stats ? (
+            Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} theme={theme} />)
+          ) : (
+            <>
+              <StatCard label="Sent" value={stats.sent ?? 0} sub={`${stats.total ?? 0} queued`} theme={theme} tint={STATUS_TINTS.sent} />
+              <StatCard label="Delivered" value={stats.delivered ?? 0} sub={pct(stats.rates?.delivered)} theme={theme} tint={STATUS_TINTS.sent} />
+              <StatCard label="Opened" value={stats.opened ?? 0} sub={pct(stats.rates?.opened)} theme={theme} tint={STATUS_TINTS.opened} />
+              <StatCard label="Clicked" value={stats.clicked ?? 0} sub={pct(stats.rates?.clicked)} theme={theme} tint={STATUS_TINTS.clicked} />
+              <StatCard label="Replied" value={stats.replied ?? 0} sub={pct(stats.rates?.replied)} theme={theme} tint={STATUS_TINTS.replied} />
+              <StatCard label="Bounced" value={stats.bounced ?? 0} sub={pct(stats.rates?.bounced)} theme={theme} tint={STATUS_TINTS.bounced} />
+            </>
+          )}
+        </div>
       </div>
 
       {/* Stop list */}
@@ -431,6 +443,39 @@ function StatCard({ label, value, sub, theme, tint = {} }) {
 function pct(rate) {
   if (rate == null || !isFinite(rate)) return "—";
   return `${(rate * 100).toFixed(1)}%`;
+}
+
+function ScopeToggle({ value, onChange, theme }) {
+  const opts = [
+    { key: "today", label: "Today" },
+    { key: "all", label: "Overall" },
+  ];
+  return (
+    <div style={{ display: "inline-flex", border: `1.5px solid ${theme.border}`, borderRadius: 8, overflow: "hidden", background: theme.bg }}>
+      {opts.map((o, i) => {
+        const active = value === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            style={{
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 600,
+              border: "none",
+              borderLeft: i === 0 ? "none" : `1px solid ${theme.border}`,
+              background: active ? theme.text : "transparent",
+              color: active ? theme.bg : theme.textMuted,
+              cursor: "pointer",
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // Mirror StatCard's layout exactly so loading → loaded doesn't reflow

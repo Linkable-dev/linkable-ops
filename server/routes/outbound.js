@@ -62,28 +62,34 @@ export function outboundRoutes() {
   });
 
   // ---------- STATS ----------
-  // Returns aggregate counts for today (UTC) keyed by status × brand_group.
-  // Lightweight rollup so the UI can show the headline numbers at a glance.
+  // Returns aggregate counts keyed by status × brand_group.
+  // ?scope=today (default) bounds to today (UTC); ?scope=all is lifetime.
   router.get("/stats", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+      const scope = req.query.scope === "all" ? "all" : "today";
 
-      // Mirror the /sends scope filter (both bounds, per-status timestamp)
-      // so headline numbers don't disagree with the row list.
-      const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
-      const sIso = start.toISOString(), eIso = end.toISOString();
-      const { data, error } = await supabase
+      let q = supabase
         .from("email_sends")
         .select("brand_group, status, touch_number, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at")
         .eq("team_id", teamId)
         .not("sequence_id", "is", null)
-        .or([
+        .limit(scope === "all" ? 50000 : 5000);
+
+      if (scope === "today") {
+        // Mirror the /sends scope filter (both bounds, per-status timestamp)
+        // so headline numbers don't disagree with the row list.
+        const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+        const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+        const sIso = start.toISOString(), eIso = end.toISOString();
+        q = q.or([
           `and(status.eq.sent,sent_at.gte.${sIso},sent_at.lt.${eIso})`,
           `and(status.eq.cancelled,cancelled_at.gte.${sIso},cancelled_at.lt.${eIso})`,
           `and(status.in.(pending,scheduled,failed,bounced),scheduled_at.gte.${sIso},scheduled_at.lt.${eIso})`,
-        ].join(","))
-        .limit(5000);
+        ].join(","));
+      }
+
+      const { data, error } = await q;
 
       if (error) throw new Error(error.message);
 
