@@ -75,7 +75,7 @@ export function outboundRoutes() {
       const sIso = start.toISOString(), eIso = end.toISOString();
       const { data, error } = await supabase
         .from("email_sends")
-        .select("brand_group, status, touch_number")
+        .select("brand_group, status, touch_number, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at")
         .eq("team_id", teamId)
         .not("sequence_id", "is", null)
         .or([
@@ -89,13 +89,41 @@ export function outboundRoutes() {
 
       // Roll up in JS — Supabase JS client doesn't expose group-by, and at
       // 200/day × 3 touches max we're well under 1k rows so this is fine.
-      const stats = { total: 0, byStatus: {}, byGroup: {}, byTouch: {} };
+      // Engagement counters key off *_at columns (Resend webhooks stamp these
+      // and leave row.status='sent'); operational counters key off status.
+      const stats = {
+        total: 0,
+        byStatus: {},
+        byGroup: {},
+        byTouch: {},
+        sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, complained: 0,
+        rates: {},
+      };
       for (const r of data || []) {
         stats.total++;
         stats.byStatus[r.status] = (stats.byStatus[r.status] || 0) + 1;
         if (r.brand_group) stats.byGroup[r.brand_group] = (stats.byGroup[r.brand_group] || 0) + 1;
         if (r.touch_number) stats.byTouch[`T${r.touch_number}`] = (stats.byTouch[`T${r.touch_number}`] || 0) + 1;
+        const leftLobby = !!(r.delivered_at || r.bounced_at) || r.status === "sent" || r.status === "bounced";
+        if (leftLobby) stats.sent++;
+        if (r.delivered_at) stats.delivered++;
+        if (r.opened_at) stats.opened++;
+        if (r.clicked_at) stats.clicked++;
+        if (r.replied_at) stats.replied++;
+        if (r.bounced_at) stats.bounced++;
+        if (r.complained_at) stats.complained++;
       }
+      // Engagement rates use delivered as denominator (industry convention —
+      // a bounced email can't be opened). Bounce rate uses sent. Guard div-by-0.
+      const sent = stats.sent || 1;
+      const delivered = stats.delivered || 1;
+      stats.rates = {
+        delivered: stats.delivered / sent,
+        bounced: stats.bounced / sent,
+        opened: stats.opened / delivered,
+        clicked: stats.clicked / delivered,
+        replied: stats.replied / delivered,
+      };
       res.json(stats);
     } catch (err) {
       res.status(500).json({ error: err.message });

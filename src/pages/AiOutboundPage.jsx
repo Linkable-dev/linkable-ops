@@ -165,20 +165,19 @@ export default function AiOutboundPage() {
         </Card>
       )}
 
-      {/* Stats row */}
+      {/* Stats row — campaign metrics for today (Resend webhooks stamp opens/
+          clicks/replies async, so rates climb as the day progresses). */}
       <div ref={statsRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
         {!stats ? (
-          Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} theme={theme} />)
+          Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} theme={theme} />)
         ) : (
           <>
-            <StatCard label="Today total" value={stats.total ?? "—"} theme={theme} />
-            <StatCard label="Sent" value={stats.byStatus?.sent ?? 0} theme={theme} tint={STATUS_TINTS.sent} />
-            <StatCard label="Scheduled" value={stats.byStatus?.scheduled ?? 0} theme={theme} tint={STATUS_TINTS.scheduled} />
-            <StatCard label="Cancelled" value={stats.byStatus?.cancelled ?? 0} theme={theme} tint={STATUS_TINTS.cancelled} />
-            <StatCard label="Failed" value={stats.byStatus?.failed ?? 0} theme={theme} tint={STATUS_TINTS.failed} />
-            <StatCard label="G2 (summer)" value={stats.byGroup?.G2 ?? 0} theme={theme} tint={GROUP_TINTS.G2} />
-            <StatCard label="G1 (creator)" value={stats.byGroup?.G1 ?? 0} theme={theme} tint={GROUP_TINTS.G1} />
-            <StatCard label="G3 (cold)" value={stats.byGroup?.G3 ?? 0} theme={theme} tint={GROUP_TINTS.G3} />
+            <StatCard label="Sent" value={stats.sent ?? 0} sub={`${stats.total ?? 0} queued`} theme={theme} tint={STATUS_TINTS.sent} />
+            <StatCard label="Delivered" value={stats.delivered ?? 0} sub={pct(stats.rates?.delivered)} theme={theme} tint={STATUS_TINTS.sent} />
+            <StatCard label="Opened" value={stats.opened ?? 0} sub={pct(stats.rates?.opened)} theme={theme} tint={STATUS_TINTS.opened} />
+            <StatCard label="Clicked" value={stats.clicked ?? 0} sub={pct(stats.rates?.clicked)} theme={theme} tint={STATUS_TINTS.clicked} />
+            <StatCard label="Replied" value={stats.replied ?? 0} sub={pct(stats.rates?.replied)} theme={theme} tint={STATUS_TINTS.replied} />
+            <StatCard label="Bounced" value={stats.bounced ?? 0} sub={pct(stats.rates?.bounced)} theme={theme} tint={STATUS_TINTS.bounced} />
           </>
         )}
       </div>
@@ -417,13 +416,21 @@ function sectionHighlight(active, theme) {
   };
 }
 
-function StatCard({ label, value, theme, tint = {} }) {
+function StatCard({ label, value, sub, theme, tint = {} }) {
   return (
     <Card style={{ padding: "12px 14px", marginBottom: 0 }}>
       <div style={{ fontSize: 11, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 600, color: tint.fg || theme.text, marginTop: 2 }}>{value}</div>
+      {sub != null && (
+        <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{sub}</div>
+      )}
     </Card>
   );
+}
+
+function pct(rate) {
+  if (rate == null || !isFinite(rate)) return "—";
+  return `${(rate * 100).toFixed(1)}%`;
 }
 
 // Mirror StatCard's layout exactly so loading → loaded doesn't reflow
@@ -434,6 +441,8 @@ function StatCardSkeleton({ theme }) {
       <Skeleton width="60%" height={11} />
       <div style={{ height: 2 }} />
       <Skeleton width="40%" height={22} />
+      <div style={{ height: 2 }} />
+      <Skeleton width="30%" height={11} />
     </Card>
   );
 }
