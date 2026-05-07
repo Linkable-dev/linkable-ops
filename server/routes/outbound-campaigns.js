@@ -310,9 +310,10 @@ export function outboundCampaignsRoutes() {
   //
   // Country goes to the DB. Revenue is filtered in JS — raw_data is jsonb and
   // jsonb->>'key' returns text, so `.gte("raw_data->>...", "1000000")` does
-  // a *string* compare that silently drops anything outside lex order. The
-  // payload key is also `estimated_sales_yearly`, not `er` (the latter is only
-  // a search-time alias inside the StoreLeads BQ).
+  // a *string* compare that silently drops anything outside lex order.
+  // The right key is `estimated_sales` (monthly USD) — `er` is only the
+  // StoreLeads search-time alias. Campaign target_filters are also $/mo
+  // (form labels say so) so we compare directly without unit conversion.
   function parseLeadFilters(req) {
     const countries = (req.query.country || "").toString().trim();
     const minRev = parseInt(req.query.minRevenue, 10);
@@ -334,7 +335,7 @@ export function outboundCampaignsRoutes() {
 
   function inRevenueBand(row, { minRev, maxRev }) {
     if (minRev == null && maxRev == null) return true;
-    const rev = Number(row?.raw_data?.estimated_sales_yearly);
+    const rev = Number(row?.raw_data?.estimated_sales);   // monthly USD
     if (!Number.isFinite(rev)) return false;
     if (minRev != null && rev < minRev) return false;
     if (maxRev != null && rev > maxRev) return false;

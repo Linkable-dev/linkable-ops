@@ -77,7 +77,9 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
   // jsonb->>'key' returns text — `.gte("raw_data->>er", "1000000")` does
   // a *string* compare and silently drops everything outside lex order.
   // It also reads the wrong key: StoreLeads payloads expose
-  // estimated_sales_yearly, not `er` (which is only the search-time alias).
+  // estimated_sales (monthly USD) — `er` is only the search-time alias.
+  // Campaign target_filters are also in $/mo (the form labels say so), so
+  // we compare directly against estimated_sales without unit conversion.
   const minRev = Number(targetFilters.min_revenue);
   const maxRev = Number(targetFilters.max_revenue);
   const hasRevFilter = (Number.isFinite(minRev) && minRev > 0) || (Number.isFinite(maxRev) && maxRev > 0);
@@ -93,7 +95,7 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
 
   const inBand = (row) => {
     if (!hasRevFilter) return true;
-    const rev = Number(row?.raw_data?.estimated_sales_yearly);
+    const rev = Number(row?.raw_data?.estimated_sales);   // monthly USD
     if (!Number.isFinite(rev)) return false;
     if (Number.isFinite(minRev) && minRev > 0 && rev < minRev) return false;
     if (Number.isFinite(maxRev) && maxRev > 0 && rev > maxRev) return false;
