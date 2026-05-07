@@ -354,9 +354,14 @@ export async function processOneBrand({ teamId, brand }) {
     }
   }
 
-  // Verify only if Hunter is alive (skip when key missing or rate-limited).
+  // Verify only what we can't already trust:
+  //   - apollo-orgchart: Apollo already returned email_status='verified', skip.
+  //   - hunter: domain-search returned with confidence>=70, which is the same
+  //     deliverability signal as the verifier — skip to save credits.
+  //   - storeleads-personal: address scraped from a public page; could be a
+  //     guess or stale. This is the case worth spending a verification credit on.
   let hunterStatus = null;
-  if (person.source !== "apollo-orgchart" && process.env.HUNTER_API_KEY) {
+  if (person.source === "storeleads-personal" && process.env.HUNTER_API_KEY) {
     hunterStatus = await hunterVerify(person.email).catch(() => "unknown");
     if (hunterStatus === "invalid") {
       return persistAndReturn({ qualified: false, reason: "Hunter says invalid", person, hunterStatus });
@@ -564,8 +569,19 @@ async function hunterSearch(domain) {
   const apiKey = process.env.HUNTER_API_KEY;
   if (!apiKey) return null;
   if (hunterIsExhausted()) return null;
+  // seniority + department filter Hunter's results server-side at no extra
+  // cost. Without these we'd get 10 random hits and reject most as junior /
+  // wrong-team, burning the credit. With them, the 10 we get back are the
+  // ones we actually want — better usable-result rate per credit.
+  const params = new URLSearchParams({
+    domain,
+    api_key: apiKey,
+    limit: "10",
+    seniority: "executive,senior",
+    department: "executive,marketing",
+  });
   const res = await fetch(
-    `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${apiKey}&limit=10`,
+    `https://api.hunter.io/v2/domain-search?${params.toString()}`,
     { signal: AbortSignal.timeout(10_000) }
   );
   if (res.status === 429) { markHunterExhausted(); return null; }
