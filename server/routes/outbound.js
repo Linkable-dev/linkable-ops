@@ -28,7 +28,7 @@ export function outboundRoutes() {
 
       let q = supabase
         .from("email_sends")
-        .select("id, sequence_id, touch_number, brand_group, template_variant, to_email, to_name, subject, status, sender_domain, scheduled_at, sent_at, cancelled_at, cancel_reason, error, resend_id, created_at")
+        .select("id, sequence_id, touch_number, brand_group, template_variant, to_email, to_name, subject, status, sender_domain, scheduled_at, sent_at, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, cancelled_at, cancel_reason, error, resend_id, created_at")
         .eq("team_id", teamId)
         .not("sequence_id", "is", null)         // only daily-200 rows, never legacy A-F
         .order("scheduled_at", { ascending: false })

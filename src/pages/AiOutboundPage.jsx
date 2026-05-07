@@ -15,10 +15,23 @@ const STATUS_TINTS = {
   pending:   { bg: "#FEF3C7", fg: "#92400E" },
   scheduled: { bg: "#DBEAFE", fg: "#1E40AF" },
   sent:      { bg: "#D1FAE5", fg: "#065F46" },
+  opened:    { bg: "#A7F3D0", fg: "#065F46" },
+  clicked:   { bg: "#6EE7B7", fg: "#064E3B" },
+  replied:   { bg: "#C7D2FE", fg: "#3730A3" },
   failed:    { bg: "#FEE2E2", fg: "#991B1B" },
   cancelled: { bg: "#F3F4F6", fg: "#374151" },
   bounced:   { bg: "#FED7AA", fg: "#9A3412" },
 };
+
+// Engagement (replied > clicked > opened) overrides the raw "sent" status so
+// the dashboard reflects what's happened post-delivery. Resend webhooks stamp
+// these *_at columns; the row status stays "sent".
+function displayStatus(r) {
+  if (r.replied_at) return "replied";
+  if (r.clicked_at) return "clicked";
+  if (r.opened_at) return "opened";
+  return r.status;
+}
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },   // creator-active
@@ -279,7 +292,10 @@ export default function AiOutboundPage() {
                     {r.subject}
                   </Td>
                   <Td>
-                    <Pill tint={STATUS_TINTS[r.status] || {}}>{r.status}</Pill>
+                    {(() => {
+                      const ds = displayStatus(r);
+                      return <Pill tint={STATUS_TINTS[ds] || {}}>{ds}</Pill>;
+                    })()}
                     {r.cancel_reason && (
                       <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{r.cancel_reason}</div>
                     )}
