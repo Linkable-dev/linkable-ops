@@ -2,13 +2,39 @@
 //
 // Endpoints (all under /api/outbound, requireOpsAdmin):
 //   GET  /sends           — list email_sends rows with filters
-//   GET  /stats           — today's counts grouped by status × brand_group
+//   GET  /stats           — counts grouped by status × brand_group
+//   GET  /runs            — distinct daily-run dates (for the run picker)
 //   POST /stop            — cancel pending touches + add to ai_suppressions
 
 import express from "express";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { cancelPendingTouches } from "../automation/sequencer.js";
+
+// Shared scope-window builder. Returns null when scope/run_date imply lifetime.
+// Callers apply the returned .or(...) clause to a Supabase query.
+function buildScopeOr({ scope, runDate }) {
+  let start, end;
+  if (runDate) {
+    // Single-day window keyed off the UTC date (YYYY-MM-DD).
+    start = new Date(`${runDate}T00:00:00.000Z`);
+    if (Number.isNaN(start.getTime())) return null;
+    end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+  } else if (scope === "today") {
+    start = new Date(); start.setUTCHours(0, 0, 0, 0);
+    end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+  } else {
+    return null; // scope=all + no run_date → no window
+  }
+  const sIso = start.toISOString(), eIso = end.toISOString();
+  // Keying on per-status timestamps avoids historical cancellations whose
+  // scheduled_at lands today leaking into "today" rollups.
+  return [
+    `and(status.eq.sent,sent_at.gte.${sIso},sent_at.lt.${eIso})`,
+    `and(status.eq.cancelled,cancelled_at.gte.${sIso},cancelled_at.lt.${eIso})`,
+    `and(status.in.(pending,scheduled,failed,bounced),scheduled_at.gte.${sIso},scheduled_at.lt.${eIso})`,
+  ].join(",");
+}
 
 export function outboundRoutes() {
   const router = express.Router();
@@ -18,40 +44,34 @@ export function outboundRoutes() {
   //   group=G1|G2|G3
   //   touch=1|2|3
   //   status=pending|scheduled|sent|failed|cancelled|bounced
-  //   scope=today|all      (default: today)
-  //   limit=number         (default: 200)
+  //   scope=today|all       (default: today; ignored when run_date is set)
+  //   campaign_id=<uuid>    (filter to one campaign; otherwise all sequencer runs)
+  //   run_date=YYYY-MM-DD   (filter to one daily run; overrides scope)
+  //   limit=number          (default: 200)
   router.get("/sends", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const { group, touch, status, scope = "today" } = req.query;
+      const { group, touch, status, scope = "today", campaign_id: campaignId, run_date: runDate } = req.query;
       const limit = Math.min(Number(req.query.limit) || 200, 1000);
 
       let q = supabase
         .from("email_sends")
-        .select("id, sequence_id, touch_number, brand_group, template_variant, to_email, to_name, subject, status, sender_domain, scheduled_at, sent_at, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, cancelled_at, cancel_reason, error, resend_id, created_at")
+        .select("id, sequence_id, campaign_id, touch_number, brand_group, template_variant, to_email, to_name, subject, status, sender_domain, scheduled_at, sent_at, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, cancelled_at, cancel_reason, error, resend_id, created_at")
         .eq("team_id", teamId)
-        .not("sequence_id", "is", null)         // only daily-200 rows, never legacy A-F
         .order("scheduled_at", { ascending: false })
         .limit(limit);
+
+      // When a campaign is specified, trust the campaign_id filter on its own.
+      // Otherwise restrict to daily-200 sequencer rows (never legacy A-F).
+      if (campaignId) q = q.eq("campaign_id", campaignId);
+      else q = q.not("sequence_id", "is", null);
 
       if (group) q = q.eq("brand_group", group);
       if (touch) q = q.eq("touch_number", Number(touch));
       if (status) q = q.eq("status", status);
-      if (scope === "today") {
-        // "Today" = anything that actually happened or is due *today*, with
-        // both ends of the window bounded. Keying on scheduled_at alone
-        // pulls in historical cancellations whose scheduled_at lands today
-        // (e.g. bulk-cancelled T+7 followups), and a one-sided gte() lets
-        // future T+7 enrollments leak in too.
-        const start = new Date(); start.setUTCHours(0, 0, 0, 0);
-        const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
-        const sIso = start.toISOString(), eIso = end.toISOString();
-        q = q.or([
-          `and(status.eq.sent,sent_at.gte.${sIso},sent_at.lt.${eIso})`,
-          `and(status.eq.cancelled,cancelled_at.gte.${sIso},cancelled_at.lt.${eIso})`,
-          `and(status.in.(pending,scheduled,failed,bounced),scheduled_at.gte.${sIso},scheduled_at.lt.${eIso})`,
-        ].join(","));
-      }
+
+      const orClause = buildScopeOr({ scope, runDate });
+      if (orClause) q = q.or(orClause);
 
       const { data, error } = await q;
       if (error) throw new Error(error.message);
@@ -63,31 +83,27 @@ export function outboundRoutes() {
 
   // ---------- STATS ----------
   // Returns aggregate counts keyed by status × brand_group.
-  // ?scope=today (default) bounds to today (UTC); ?scope=all is lifetime.
+  //   scope=today (default) | all     — lifetime when "all"
+  //   campaign_id=<uuid>              — filter to one campaign
+  //   run_date=YYYY-MM-DD             — filter to one run; overrides scope
   router.get("/stats", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
       const scope = req.query.scope === "all" ? "all" : "today";
+      const { campaign_id: campaignId, run_date: runDate } = req.query;
+      const windowed = !!(scope === "today" || runDate);
 
       let q = supabase
         .from("email_sends")
         .select("brand_group, status, touch_number, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at")
         .eq("team_id", teamId)
-        .not("sequence_id", "is", null)
-        .limit(scope === "all" ? 50000 : 5000);
+        .limit(windowed ? 5000 : 50000);
 
-      if (scope === "today") {
-        // Mirror the /sends scope filter (both bounds, per-status timestamp)
-        // so headline numbers don't disagree with the row list.
-        const start = new Date(); start.setUTCHours(0, 0, 0, 0);
-        const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
-        const sIso = start.toISOString(), eIso = end.toISOString();
-        q = q.or([
-          `and(status.eq.sent,sent_at.gte.${sIso},sent_at.lt.${eIso})`,
-          `and(status.eq.cancelled,cancelled_at.gte.${sIso},cancelled_at.lt.${eIso})`,
-          `and(status.in.(pending,scheduled,failed,bounced),scheduled_at.gte.${sIso},scheduled_at.lt.${eIso})`,
-        ].join(","));
-      }
+      if (campaignId) q = q.eq("campaign_id", campaignId);
+      else q = q.not("sequence_id", "is", null);
+
+      const orClause = buildScopeOr({ scope, runDate });
+      if (orClause) q = q.or(orClause);
 
       const { data, error } = await q;
 
@@ -131,6 +147,45 @@ export function outboundRoutes() {
         replied: stats.replied / delivered,
       };
       res.json(stats);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---------- RUNS ----------
+  // Distinct daily-run dates derived from T+0 scheduled_at (UTC). One row per
+  // date with the cohort size (sequences enrolled that day). Used by the UI
+  // run picker.
+  //   campaign_id=<uuid>  (optional — restrict to one campaign)
+  router.get("/runs", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { campaign_id: campaignId } = req.query;
+
+      let q = supabase
+        .from("email_sends")
+        .select("scheduled_at")
+        .eq("team_id", teamId)
+        .eq("touch_number", 1)
+        .order("scheduled_at", { ascending: false })
+        .limit(50000);
+      if (campaignId) q = q.eq("campaign_id", campaignId);
+      else q = q.not("sequence_id", "is", null);
+
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+
+      // Group by UTC date in JS — Supabase JS has no DISTINCT/GROUP BY.
+      const counts = new Map();
+      for (const r of data || []) {
+        if (!r.scheduled_at) continue;
+        const date = r.scheduled_at.slice(0, 10); // YYYY-MM-DD (already ISO/UTC)
+        counts.set(date, (counts.get(date) || 0) + 1);
+      }
+      const runs = [...counts.entries()]
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => (a.date < b.date ? 1 : -1));
+      res.json({ runs });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

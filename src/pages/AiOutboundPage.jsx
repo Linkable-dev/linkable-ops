@@ -3,6 +3,7 @@
 // and stop pending touches for any address (paste list or per-row button).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -42,10 +43,18 @@ const GROUP_TINTS = {
 const STATUS_FILTERS = ["all", "pending", "scheduled", "sent", "failed", "cancelled", "bounced"];
 const GROUP_FILTERS = ["all", "G1", "G2", "G3"];
 const TOUCH_FILTERS = ["all", "1", "2", "3"];
-const SCOPE_FILTERS = ["today", "all"];
+
+function runLabel(runSel) {
+  if (runSel === "today") return "today";
+  if (runSel === "all") return "all runs";
+  return `run ${runSel}`;
+}
 
 export default function AiOutboundPage() {
   const { theme } = useTheme();
+  // URL-driven so the campaign-detail page (or anywhere else) can deep-link
+  // straight into a campaign + run combination: ?campaign=<id>&run=<date|all>.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [stats, setStats] = useState(null);
   const [rows, setRows] = useState([]);
@@ -55,10 +64,26 @@ export default function AiOutboundPage() {
   const [group, setGroup] = useState("all");
   const [touch, setTouch] = useState("all");
   const [status, setStatus] = useState("all");
-  const [scope, setScope] = useState("today");
-  // Stats can be scoped independently from the row list — you often want to
-  // see lifetime engagement while still spot-checking today's pending sends.
-  const [statsScope, setStatsScope] = useState("today");
+
+  // Campaign + run drive both the row list and the stat cards.
+  //   campaignId === ""    → all sequencer runs (sequence_id IS NOT NULL)
+  //   runSel    === "today" | "all" | "YYYY-MM-DD"  (today is default)
+  const campaignId = searchParams.get("campaign") || "";
+  const runSel = searchParams.get("run") || "today";
+
+  const [campaigns, setCampaigns] = useState([]);
+  const [runs, setRuns] = useState([]);
+
+  function updateParams(patch) {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v == null || v === "") next.delete(k);
+      else next.set(k, v);
+    }
+    setSearchParams(next, { replace: true });
+  }
+  const setCampaignId = (id) => updateParams({ campaign: id, run: "today" });
+  const setRunSel = (sel) => updateParams({ run: sel });
 
   const [stopText, setStopText] = useState("");
   const [stopReason, setStopReason] = useState("replied");
@@ -91,29 +116,57 @@ export default function AiOutboundPage() {
     }
     if (stepKey === "review") {
       setStatus("pending");
-      setScope("today");
+      setRunSel("today");
     }
     setTimeout(() => setHighlightSection(null), 1600);
   }
 
+  // Translate the run selector into the API params expected by /sends and /stats.
+  //   "today"            → scope=today, no run_date
+  //   "all"              → scope=all,   no run_date  (aggregated)
+  //   "YYYY-MM-DD"       → scope ignored, run_date=YYYY-MM-DD
+  const runParams = useMemo(() => {
+    if (runSel === "all") return { scope: "all" };
+    if (runSel === "today") return { scope: "today" };
+    return { runDate: runSel };
+  }, [runSel]);
+
   const reload = useCallback(() => {
     setLoading(true); setError(null);
+    const cid = campaignId || undefined;
     Promise.all([
-      api.getOutboundStats({ scope: statsScope }),
+      api.getOutboundStats({ ...runParams, campaignId: cid }),
       api.listOutboundSends({
         group: group === "all" ? undefined : group,
         touch: touch === "all" ? undefined : touch,
         status: status === "all" ? undefined : status,
-        scope,
+        ...runParams,
+        campaignId: cid,
         limit: 500,
       }),
     ])
       .then(([s, r]) => { setStats(s); setRows(r.rows || []); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [group, touch, status, scope, statsScope]);
+  }, [group, touch, status, runParams, campaignId]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Campaigns list (one fetch — populates the dropdown). Limit is plenty for
+  // any realistic ops workload; the API caps at 200.
+  useEffect(() => {
+    api.listOutboundCampaigns({ limit: 200 })
+      .then((res) => setCampaigns(res.rows || []))
+      .catch(() => setCampaigns([]));
+  }, []);
+
+  // Run dates are scoped to the selected campaign so the picker reflects only
+  // the runs that exist for that campaign.
+  useEffect(() => {
+    api.listOutboundRuns({ campaignId: campaignId || undefined })
+      .then((res) => setRuns(res.runs || []))
+      .catch(() => setRuns([]));
+  }, [campaignId]);
 
   async function runStop(emails, reason) {
     if (emails.length === 0) return;
@@ -168,15 +221,45 @@ export default function AiOutboundPage() {
         </Card>
       )}
 
-      {/* Stats row — campaign metrics. Toggle scopes between today and overall
-          (Resend webhooks stamp opens/clicks/replies async, so today's rates
-          climb through the day; overall is the steady-state read). */}
+      {/* Stats row — campaign metrics. Pickers above scope the cards (and the
+          row list) by campaign and daily run. Today's rates climb as Resend
+          webhooks land; pick "All runs" for the steady-state read. */}
       <div ref={statsRef} style={{ marginBottom: 16, ...sectionHighlight(highlightSection === "health", theme) }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>
-            Campaign metrics · {statsScope === "today" ? "today" : "overall"}
+            Campaign metrics · {runLabel(runSel)}
+            {campaignId && campaigns.length > 0 && (
+              <span style={{ color: theme.textMuted, fontWeight: 400 }}>
+                {" "}· {campaigns.find((c) => c.id === campaignId)?.name || "selected campaign"}
+              </span>
+            )}
           </div>
-          <ScopeToggle value={statsScope} onChange={setStatsScope} theme={theme} />
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select
+              value={campaignId}
+              onChange={(e) => setCampaignId(e.target.value)}
+              style={selectStyle(theme)}
+              title="Filter by campaign"
+            >
+              <option value="">All sequencer runs</option>
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}{c.status && c.status !== "active" ? ` (${c.status})` : ""}</option>
+              ))}
+            </select>
+            <select
+              value={runSel}
+              onChange={(e) => setRunSel(e.target.value)}
+              style={selectStyle(theme)}
+              title="Filter by daily run"
+            >
+              <option value="today">Today</option>
+              <option value="all">All runs (aggregated)</option>
+              {runs.length > 0 && <option disabled>──────────</option>}
+              {runs.map((r) => (
+                <option key={r.date} value={r.date}>{r.date} · {r.count} enrolled</option>
+              ))}
+            </select>
+          </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
           {!stats ? (
@@ -235,11 +318,8 @@ export default function AiOutboundPage() {
       </Card>
       </div>
 
-      {/* Filters */}
+      {/* Filters — campaign/run live up next to the stat cards. */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <select value={scope} onChange={(e) => setScope(e.target.value)} style={selectStyle(theme)}>
-          {SCOPE_FILTERS.map((s) => <option key={s} value={s}>{s === "today" ? "Today" : "All time"}</option>)}
-        </select>
         <select value={group} onChange={(e) => setGroup(e.target.value)} style={selectStyle(theme)}>
           {GROUP_FILTERS.map((g) => <option key={g} value={g}>{g === "all" ? "Any group" : g}</option>)}
         </select>
@@ -443,39 +523,6 @@ function StatCard({ label, value, sub, theme, tint = {} }) {
 function pct(rate) {
   if (rate == null || !isFinite(rate)) return "—";
   return `${(rate * 100).toFixed(1)}%`;
-}
-
-function ScopeToggle({ value, onChange, theme }) {
-  const opts = [
-    { key: "today", label: "Today" },
-    { key: "all", label: "Overall" },
-  ];
-  return (
-    <div style={{ display: "inline-flex", border: `1.5px solid ${theme.border}`, borderRadius: 8, overflow: "hidden", background: theme.bg }}>
-      {opts.map((o, i) => {
-        const active = value === o.key;
-        return (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => onChange(o.key)}
-            style={{
-              padding: "6px 12px",
-              fontSize: 12,
-              fontWeight: 600,
-              border: "none",
-              borderLeft: i === 0 ? "none" : `1px solid ${theme.border}`,
-              background: active ? theme.text : "transparent",
-              color: active ? theme.bg : theme.textMuted,
-              cursor: "pointer",
-            }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 // Mirror StatCard's layout exactly so loading → loaded doesn't reflow
