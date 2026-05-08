@@ -215,6 +215,16 @@ export async function enrollProspect({
     return { skipped: `insert error: ${error.message}` };
   }
 
+  // Flip the lead-pool flag so the Leads tab counters and the auto-discovery
+  // scheduler don't count this brand as uncontacted. The dedupe in
+  // email_sends above is what actually prevents double-enrolment; this is
+  // for accurate downstream signals.
+  await supabase
+    .from("storeleads_brands")
+    .update({ emailed: true, emailed_at: new Date().toISOString() })
+    .eq("team_id", teamId)
+    .ilike("email", toEmail.toLowerCase());
+
   return {
     sequence_id: sequenceId,
     group: grp,
