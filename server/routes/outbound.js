@@ -47,19 +47,28 @@ export function outboundRoutes() {
   //   scope=today|all       (default: today; ignored when run_date is set)
   //   campaign_id=<uuid>    (filter to one campaign; otherwise all sequencer runs)
   //   run_date=YYYY-MM-DD   (filter to one daily run; overrides scope)
-  //   limit=number          (default: 200)
+  //   q=text                (ilike across to_email, to_name, subject)
+  //   limit=number          (default: 50, max 200)
+  //   offset=number         (default: 0)
   router.get("/sends", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
       const { group, touch, status, scope = "today", campaign_id: campaignId, run_date: runDate } = req.query;
-      const limit = Math.min(Number(req.query.limit) || 200, 1000);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const search = (req.query.q || "").toString().trim();
 
+      // count: 'exact' makes Supabase issue a HEAD-style count query alongside
+      // the SELECT — one round trip, returns total post-filter for pagination.
       let q = supabase
         .from("email_sends")
-        .select("id, sequence_id, campaign_id, touch_number, brand_group, template_variant, to_email, to_name, subject, status, sender_domain, scheduled_at, sent_at, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, cancelled_at, cancel_reason, error, resend_id, created_at")
+        .select(
+          "id, sequence_id, campaign_id, touch_number, brand_group, template_variant, to_email, to_name, subject, status, sender_domain, scheduled_at, sent_at, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, cancelled_at, cancel_reason, error, resend_id, created_at",
+          { count: "exact" }
+        )
         .eq("team_id", teamId)
         .order("scheduled_at", { ascending: false })
-        .limit(limit);
+        .range(offset, offset + limit - 1);
 
       // When a campaign is specified, trust the campaign_id filter on its own.
       // Otherwise restrict to daily-200 sequencer rows (never legacy A-F).
@@ -70,12 +79,19 @@ export function outboundRoutes() {
       if (touch) q = q.eq("touch_number", Number(touch));
       if (status) q = q.eq("status", status);
 
+      if (search) {
+        // PostgREST .or() requires comma-escape on user input — strip the few
+        // chars that would break the filter string. ilike + % gives substring.
+        const safe = search.replace(/[,()%*]/g, " ").trim();
+        if (safe) q = q.or(`to_email.ilike.%${safe}%,to_name.ilike.%${safe}%,subject.ilike.%${safe}%`);
+      }
+
       const orClause = buildScopeOr({ scope, runDate });
       if (orClause) q = q.or(orClause);
 
-      const { data, error } = await q;
+      const { data, error, count } = await q;
       if (error) throw new Error(error.message);
-      res.json({ rows: data || [], count: data?.length || 0 });
+      res.json({ rows: data || [], total: count ?? data?.length ?? 0, limit, offset });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

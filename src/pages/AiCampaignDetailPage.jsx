@@ -10,6 +10,7 @@ import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonCard, SkeletonTableRows } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
+import { Pagination } from "../components/ui/Pagination";
 import { suggestCampaignName } from "../lib/campaign-name";
 
 const GROUP_TINTS = {
@@ -299,6 +300,7 @@ function pct(x) { return x ? `${(x * 100).toFixed(1)}%` : "0%"; }
 function SendsTab({ campaign, theme }) {
   const [stats, setStats] = useState(null);
   const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -307,6 +309,13 @@ function SendsTab({ campaign, theme }) {
   const [status, setStatus] = useState("all");
   const [runSel, setRunSel] = useState("today");
   const [runs, setRuns] = useState([]);
+
+  // Search input is debounced into `q` so the user can type freely without a
+  // request per keystroke; the actual API call uses `q`.
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const [stopText, setStopText] = useState("");
   const [stopReason, setStopReason] = useState("replied");
@@ -321,6 +330,16 @@ function SendsTab({ campaign, theme }) {
     return { runDate: runSel };
   }, [runSel]);
 
+  // Snap back to page 1 whenever any filter narrows or widens the result set —
+  // staying on page 7 of an empty list would be confusing.
+  useEffect(() => { setPage(1); }, [group, touch, status, runSel, q, pageSize, campaign.id]);
+
+  // Debounce the search box → `q` so we don't spam the API.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const reload = useCallback(() => {
     setLoading(true); setError(null);
     Promise.all([
@@ -329,15 +348,21 @@ function SendsTab({ campaign, theme }) {
         group: group === "all" ? undefined : group,
         touch: touch === "all" ? undefined : touch,
         status: status === "all" ? undefined : status,
+        q: q || undefined,
         ...runParams,
         campaignId: campaign.id,
-        limit: 500,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
       }),
     ])
-      .then(([s, r]) => { setStats(s); setRows(r.rows || []); })
+      .then(([s, r]) => {
+        setStats(s);
+        setRows(r.rows || []);
+        setTotal(r.total ?? r.count ?? (r.rows || []).length);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [group, touch, status, runParams, campaign.id]);
+  }, [group, touch, status, q, runParams, campaign.id, page, pageSize]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -450,7 +475,7 @@ function SendsTab({ campaign, theme }) {
       </Card>
 
       {/* Filters */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select value={group} onChange={(e) => setGroup(e.target.value)} style={sendSelectStyle(theme)}>
           {SEND_GROUP_FILTERS.map((g) => <option key={g} value={g}>{g === "all" ? "Any group" : g}</option>)}
         </select>
@@ -460,6 +485,17 @@ function SendsTab({ campaign, theme }) {
         <select value={status} onChange={(e) => setStatus(e.target.value)} style={sendSelectStyle(theme)}>
           {SEND_STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "all" ? "Any status" : s}</option>)}
         </select>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search to-email, name, subject"
+          style={{
+            padding: "8px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit",
+            border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text,
+            minWidth: 240, flex: "1 1 240px", maxWidth: 360,
+          }}
+        />
         <Btn onClick={reload} variant="secondary">Reload</Btn>
       </div>
 
@@ -549,6 +585,16 @@ function SendsTab({ campaign, theme }) {
             </tbody>
           </table>
         </Card>
+      )}
+
+      {total > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       )}
 
       {previewId && (
@@ -1244,9 +1290,9 @@ function LeadPoolPanel({ theme, campaign }) {
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [onlyQualified, setOnlyQualified] = useState(true);
   const [scopeToCampaign, setScopeToCampaign] = useState(true);
-  const pageSize = 10;
 
   // Filters derived from the campaign's target_filters when scoped.
   const tf = campaign?.target_filters || {};
@@ -1275,9 +1321,7 @@ function LeadPoolPanel({ theme, campaign }) {
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [q, onlyQualified, scopeToCampaign]);
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  useEffect(() => { setPage(1); }, [q, onlyQualified, scopeToCampaign, pageSize]);
 
   return (
     <Card style={{ marginBottom: 16, padding: 0 }}>
@@ -1366,16 +1410,15 @@ function LeadPoolPanel({ theme, campaign }) {
           </tbody>
         </table>
       )}
-      {total > pageSize && (
-        <div style={{ padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: theme.textMuted }}>
-          <span>Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}</span>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
-              style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: 12, cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1 }}>Prev</button>
-            <span style={{ padding: "4px 8px" }}>{page} / {totalPages}</span>
-            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
-              style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: 12, cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
-          </div>
+      {total > 0 && (
+        <div style={{ padding: "0 20px" }}>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       )}
     </Card>

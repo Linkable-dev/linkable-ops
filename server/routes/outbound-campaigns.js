@@ -350,17 +350,43 @@ export function outboundCampaignsRoutes() {
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 200);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
       const filters = parseLeadFilters(req);
+      const hasRevenueFilter = filters.minRev != null || filters.maxRev != null;
+
+      // PostgREST .or() takes a comma-separated filter string; user input has
+      // to be sanitised so it can't break the parser. ilike+% gives substring.
+      const safeQ = q ? q.replace(/[,()%*]/g, " ").trim() : "";
+
+      // Without a revenue filter we paginate purely in SQL and pull `count:
+      // 'exact'` for total — scales past the 2000-row cap. With a revenue
+      // filter we still have to JS-filter (raw_data->>estimated_sales is text
+      // in jsonb, so DB-side numeric compare is unsafe), so we pull a wider
+      // window and slice. Per-country pools are still small enough that this
+      // stays under a few hundred ms even at 5000.
+      if (!hasRevenueFilter) {
+        let query = supabase.from("storeleads_brands")
+          .select(
+            "id,domain,email,contact_first_name,contact_last_name,contact_position,contact_source,country_code,categories,imported_at,emailed,emailed_at,raw_data",
+            { count: "exact" }
+          )
+          .eq("team_id", teamId);
+        if (onlyQualified) query = query.not("email", "is", null);
+        if (safeQ) query = query.or(`domain.ilike.%${safeQ}%,email.ilike.%${safeQ}%,contact_first_name.ilike.%${safeQ}%,contact_last_name.ilike.%${safeQ}%`);
+        query = applyDbFilters(query, filters)
+          .order("imported_at", { ascending: false })
+          .range(offset, offset + limit - 1);
+        const { data, error, count } = await query;
+        if (error) throw new Error(error.message);
+        return res.json({ rows: data || [], total: count ?? data?.length ?? 0 });
+      }
 
       let query = supabase.from("storeleads_brands")
         .select("id,domain,email,contact_first_name,contact_last_name,contact_position,contact_source,country_code,categories,imported_at,emailed,emailed_at,raw_data")
         .eq("team_id", teamId);
       if (onlyQualified) query = query.not("email", "is", null);
-      if (q) query = query.or(`domain.ilike.%${q}%,email.ilike.%${q}%,contact_first_name.ilike.%${q}%,contact_last_name.ilike.%${q}%`);
-      query = applyDbFilters(query, filters);
-      // Pull a wide window, JS-filter by revenue, then paginate. Per-country
-      // pools are hundreds of rows max, so this is cheap and stays correct
-      // (DB-side jsonb numeric comparison is impossible without a typed column).
-      query = query.order("imported_at", { ascending: false }).limit(2000);
+      if (safeQ) query = query.or(`domain.ilike.%${safeQ}%,email.ilike.%${safeQ}%,contact_first_name.ilike.%${safeQ}%,contact_last_name.ilike.%${safeQ}%`);
+      query = applyDbFilters(query, filters)
+        .order("imported_at", { ascending: false })
+        .limit(5000);
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);

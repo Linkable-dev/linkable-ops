@@ -91,8 +91,8 @@ export const api = {
     request(`/conversations/leads?${buildQs({ country, unused, limit })}`),
 
   // Outbound — daily-200 email sequencer dashboard
-  listOutboundSends: ({ group, touch, status, scope, limit, campaignId, runDate } = {}) =>
-    request(`/outbound/sends?${buildQs({ group, touch, status, scope, limit, campaign_id: campaignId, run_date: runDate })}`),
+  listOutboundSends: ({ group, touch, status, scope, limit, offset, q, campaignId, runDate } = {}) =>
+    request(`/outbound/sends?${buildQs({ group, touch, status, scope, limit, offset, q, campaign_id: campaignId, run_date: runDate })}`),
   getOutboundSend: (id) => request(`/outbound/sends/${id}`),
   getOutboundStats: ({ scope, campaignId, runDate } = {}) =>
     request(`/outbound/stats?${buildQs({ scope, campaign_id: campaignId, run_date: runDate })}`),
