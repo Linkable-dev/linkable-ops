@@ -12,5 +12,8 @@
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api" },
     { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/auto-discover", "schedule": "0 6 * * *" }
   ]
 }
