@@ -4,11 +4,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
-import { api } from "../lib/api";
+import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { Skeleton, SkeletonRow, SkeletonCard } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonRow, SkeletonCard, SkeletonTableRows } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
 import { suggestCampaignName } from "../lib/campaign-name";
 
@@ -22,6 +22,40 @@ const STATUS_TINTS = {
   paused:   { bg: "#FEF3C7", fg: "#92400E" },
   archived: { bg: "#F3F4F6", fg: "#374151" },
 };
+
+// Per-row send status tints — distinct from the campaign-lifecycle STATUS_TINTS
+// above. Engagement (replied > clicked > opened) overrides the raw "sent"
+// status so the table reflects post-delivery state.
+const SEND_STATUS_TINTS = {
+  pending:   { bg: "#FEF3C7", fg: "#92400E" },
+  scheduled: { bg: "#DBEAFE", fg: "#1E40AF" },
+  sent:      { bg: "#D1FAE5", fg: "#065F46" },
+  opened:    { bg: "#DBEAFE", fg: "#1E3A8A" },
+  clicked:   { bg: "#EDE9FE", fg: "#5B21B6" },
+  replied:   { bg: "#C7D2FE", fg: "#3730A3" },
+  failed:    { bg: "#FEE2E2", fg: "#991B1B" },
+  cancelled: { bg: "#F3F4F6", fg: "#374151" },
+  bounced:   { bg: "#FED7AA", fg: "#9A3412" },
+};
+const SEND_STATUS_FILTERS = ["all", "pending", "scheduled", "sent", "failed", "cancelled", "bounced"];
+const SEND_GROUP_FILTERS = ["all", "G1", "G2", "G3"];
+const SEND_TOUCH_FILTERS = ["all", "1", "2", "3"];
+
+function sendDisplayStatus(r) {
+  if (r.replied_at) return "replied";
+  if (r.clicked_at) return "clicked";
+  if (r.opened_at) return "opened";
+  return r.status;
+}
+function sendRunLabel(runSel) {
+  if (runSel === "today") return "today";
+  if (runSel === "all") return "all runs";
+  return `run ${runSel}`;
+}
+function sendRatePct(rate) {
+  if (rate == null || !isFinite(rate)) return "—";
+  return `${(rate * 100).toFixed(1)}%`;
+}
 
 export default function AiCampaignDetailPage() {
   const { theme } = useTheme();
@@ -97,6 +131,7 @@ export default function AiCampaignDetailPage() {
 
 const TABS = [
   ["overview",  "Overview"],
+  ["sends",     "Sends"],
   ["leads",     "Leads"],
   ["templates", "Templates"],
   ["settings",  "Settings"],
@@ -117,6 +152,9 @@ function CampaignTabs({ campaign, templates, metrics, theme, reload }) {
       <TabBar tabs={TABS} active={tab} onSelect={setTab} />
       {tab === "overview" && (
         <OverviewTab campaign={campaign} metrics={metrics} templates={templates} theme={theme} onJump={setTab} />
+      )}
+      {tab === "sends" && (
+        <SendsTab campaign={campaign} theme={theme} />
       )}
       {tab === "leads" && (
         <>
@@ -251,6 +289,295 @@ function MetricsCard({ metrics, theme }) {
   );
 }
 function pct(x) { return x ? `${(x * 100).toFixed(1)}%` : "0%"; }
+
+// ---------- SENDS ----------
+//
+// Live view of email_sends rows for this campaign. Picks a daily run (today /
+// all / specific date), filters by group + touch + status, surfaces the stop
+// list, and lets the user cancel pending touches per row.
+
+function SendsTab({ campaign, theme }) {
+  const [stats, setStats] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const [group, setGroup] = useState("all");
+  const [touch, setTouch] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [runSel, setRunSel] = useState("today");
+  const [runs, setRuns] = useState([]);
+
+  const [stopText, setStopText] = useState("");
+  const [stopReason, setStopReason] = useState("replied");
+  const [stopBusy, setStopBusy] = useState(false);
+  const [stopResult, setStopResult] = useState(null);
+
+  const runParams = useMemo(() => {
+    if (runSel === "all") return { scope: "all" };
+    if (runSel === "today") return { scope: "today" };
+    return { runDate: runSel };
+  }, [runSel]);
+
+  const reload = useCallback(() => {
+    setLoading(true); setError(null);
+    Promise.all([
+      api.getOutboundStats({ ...runParams, campaignId: campaign.id }),
+      api.listOutboundSends({
+        group: group === "all" ? undefined : group,
+        touch: touch === "all" ? undefined : touch,
+        status: status === "all" ? undefined : status,
+        ...runParams,
+        campaignId: campaign.id,
+        limit: 500,
+      }),
+    ])
+      .then(([s, r]) => { setStats(s); setRows(r.rows || []); })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [group, touch, status, runParams, campaign.id]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  useEffect(() => {
+    api.listOutboundRuns({ campaignId: campaign.id })
+      .then((res) => setRuns(res.runs || []))
+      .catch(() => setRuns([]));
+  }, [campaign.id]);
+
+  const stopEmails = useMemo(() => {
+    return stopText.split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter((s) => s.includes("@"));
+  }, [stopText]);
+
+  async function runStop(emails, reason) {
+    if (emails.length === 0) return;
+    setStopBusy(true); setStopResult(null);
+    try {
+      const out = await api.stopOutbound({ emails, reason });
+      const cancelled = (out.results || []).reduce((sum, r) => sum + (r.cancelled || 0), 0);
+      setStopResult({ ok: true, addresses: emails.length, cancelled });
+      setStopText("");
+      reload();
+    } catch (e) {
+      setStopResult({ ok: false, error: e.message });
+    } finally {
+      setStopBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {error && (
+        <Card style={{ borderColor: "#DC2626", marginBottom: 12 }}>
+          <div style={{ color: "#DC2626", fontSize: 13 }}>{error}</div>
+        </Card>
+      )}
+
+      {/* Stats — scoped to this campaign and the selected run. */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>
+            Metrics · {sendRunLabel(runSel)}
+          </div>
+          <select
+            value={runSel}
+            onChange={(e) => setRunSel(e.target.value)}
+            style={sendSelectStyle(theme)}
+            title="Filter by daily run"
+          >
+            <option value="today">Today</option>
+            <option value="all">All runs (aggregated)</option>
+            {runs.length > 0 && <option disabled>──────────</option>}
+            {runs.map((r) => (
+              <option key={r.date} value={r.date}>{r.date} · {r.count} enrolled</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+          {!stats ? (
+            Array.from({ length: 6 }).map((_, i) => <SendStatCardSkeleton key={i} />)
+          ) : (
+            <>
+              <SendStatCard label="Sent" value={stats.sent ?? 0} sub={`${stats.total ?? 0} queued`} theme={theme} tint={SEND_STATUS_TINTS.sent} />
+              <SendStatCard label="Delivered" value={stats.delivered ?? 0} sub={sendRatePct(stats.rates?.delivered)} theme={theme} tint={SEND_STATUS_TINTS.sent} />
+              <SendStatCard label="Opened" value={stats.opened ?? 0} sub={sendRatePct(stats.rates?.opened)} theme={theme} tint={SEND_STATUS_TINTS.opened} />
+              <SendStatCard label="Clicked" value={stats.clicked ?? 0} sub={sendRatePct(stats.rates?.clicked)} theme={theme} tint={SEND_STATUS_TINTS.clicked} />
+              <SendStatCard label="Replied" value={stats.replied ?? 0} sub={sendRatePct(stats.rates?.replied)} theme={theme} tint={SEND_STATUS_TINTS.replied} />
+              <SendStatCard label="Bounced" value={stats.bounced ?? 0} sub={sendRatePct(stats.rates?.bounced)} theme={theme} tint={SEND_STATUS_TINTS.bounced} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Stop list */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: theme.text }}>Stop list</div>
+        <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
+          Paste replied / opt-out addresses (any separators). Suppresses globally + cancels every pending touch.
+        </div>
+        <textarea
+          value={stopText}
+          onChange={(e) => setStopText(e.target.value)}
+          placeholder="sarah@glowserum.com&#10;mike@kombuchaco.com"
+          rows={3}
+          style={{
+            width: "100%", padding: "8px 12px", borderRadius: 8, fontFamily: "inherit", fontSize: 13,
+            border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text,
+            resize: "vertical",
+          }}
+        />
+        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select value={stopReason} onChange={(e) => setStopReason(e.target.value)} style={sendSelectStyle(theme)}>
+            <option value="replied">replied</option>
+            <option value="opted_out">opted_out</option>
+            <option value="bounced">bounced</option>
+            <option value="manual">manual</option>
+          </select>
+          <Btn onClick={() => runStop(stopEmails, stopReason)} loading={stopBusy} disabled={stopEmails.length === 0}>
+            {`Stop ${stopEmails.length} address${stopEmails.length === 1 ? "" : "es"}`}
+          </Btn>
+          {stopResult?.ok && (
+            <span style={{ fontSize: 12, color: "#065F46" }}>
+              ✓ {stopResult.addresses} suppressed · {stopResult.cancelled} touches cancelled
+            </span>
+          )}
+          {stopResult && !stopResult.ok && (
+            <span style={{ fontSize: 12, color: "#DC2626" }}>{stopResult.error}</span>
+          )}
+        </div>
+      </Card>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <select value={group} onChange={(e) => setGroup(e.target.value)} style={sendSelectStyle(theme)}>
+          {SEND_GROUP_FILTERS.map((g) => <option key={g} value={g}>{g === "all" ? "Any group" : g}</option>)}
+        </select>
+        <select value={touch} onChange={(e) => setTouch(e.target.value)} style={sendSelectStyle(theme)}>
+          {SEND_TOUCH_FILTERS.map((t) => <option key={t} value={t}>{t === "all" ? "Any touch" : `T+${t === "1" ? "0" : t === "2" ? "3" : "7"}`}</option>)}
+        </select>
+        <select value={status} onChange={(e) => setStatus(e.target.value)} style={sendSelectStyle(theme)}>
+          {SEND_STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "all" ? "Any status" : s}</option>)}
+        </select>
+        <Btn onClick={reload} variant="secondary">Reload</Btn>
+      </div>
+
+      {/* Sends table */}
+      {loading && rows.length === 0 ? (
+        <Card style={{ padding: 0, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                <th style={sendTh}>When</th><th style={sendTh}>Group</th><th style={sendTh}>Touch</th>
+                <th style={sendTh}>To</th><th style={sendTh}>Subject</th><th style={sendTh}>Status</th><th style={sendTh}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <SkeletonTableRows rows={6} cols={7} theme={theme} />
+            </tbody>
+          </table>
+        </Card>
+      ) : rows.length === 0 ? (
+        <Card><div style={{ color: theme.textMuted, fontSize: 13 }}>No sends match these filters.</div></Card>
+      ) : (
+        <Card style={{ padding: 0, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                <th style={sendTh}>When</th>
+                <th style={sendTh}>Group</th>
+                <th style={sendTh}>Touch</th>
+                <th style={sendTh}>To</th>
+                <th style={sendTh}>Subject</th>
+                <th style={sendTh}>Status</th>
+                <th style={sendTh}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                  <td style={{ ...sendTd, color: theme.textMuted, whiteSpace: "nowrap" }}>
+                    {friendlyDate(
+                      r.status === "sent" ? r.sent_at
+                        : r.status === "cancelled" ? (r.cancelled_at || r.scheduled_at)
+                        : r.scheduled_at
+                    )}
+                  </td>
+                  <td style={sendTd}><Pill tint={GROUP_TINTS[r.brand_group] || {}}>{r.brand_group || "—"}</Pill></td>
+                  <td style={sendTd}>T+{r.touch_number === 1 ? "0" : r.touch_number === 2 ? "3" : r.touch_number === 3 ? "7" : "?"}</td>
+                  <td style={sendTd}>
+                    <div style={{ color: theme.text }}>{r.to_name || "—"}</div>
+                    <div style={{ color: theme.textMuted, fontSize: 11 }}>{r.to_email}</div>
+                  </td>
+                  <td style={{ ...sendTd, color: theme.text, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.subject}
+                  </td>
+                  <td style={sendTd}>
+                    {(() => {
+                      const ds = sendDisplayStatus(r);
+                      return <Pill tint={SEND_STATUS_TINTS[ds] || {}}>{ds}</Pill>;
+                    })()}
+                    {r.cancel_reason && (
+                      <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{r.cancel_reason}</div>
+                    )}
+                  </td>
+                  <td style={sendTd}>
+                    {(r.status === "pending" || r.status === "scheduled") ? (
+                      <button
+                        onClick={() => runStop([r.to_email], "replied")}
+                        disabled={stopBusy}
+                        style={miniBtn(theme)}
+                        title="Cancel this row + all other pending touches for this address"
+                      >
+                        Stop
+                      </button>
+                    ) : (
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </>
+  );
+}
+
+function SendStatCard({ label, value, sub, theme, tint = {} }) {
+  return (
+    <Card style={{ padding: "12px 14px", marginBottom: 0 }}>
+      <div style={{ fontSize: 11, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: tint.fg || theme.text, marginTop: 2 }}>{value}</div>
+      {sub != null && (
+        <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{sub}</div>
+      )}
+    </Card>
+  );
+}
+
+// Mirrors SendStatCard's layout exactly so loading → loaded doesn't reflow.
+function SendStatCardSkeleton() {
+  return (
+    <Card style={{ padding: "12px 14px", marginBottom: 0 }}>
+      <Skeleton width="60%" height={11} />
+      <div style={{ height: 2 }} />
+      <Skeleton width="40%" height={22} />
+      <div style={{ height: 2 }} />
+      <Skeleton width="30%" height={11} />
+    </Card>
+  );
+}
+
+const sendTh = { padding: "8px 12px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 };
+const sendTd = { padding: "8px 12px", verticalAlign: "top" };
+function sendSelectStyle(theme) {
+  return {
+    padding: "8px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit",
+    border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text,
+    minWidth: 140,
+  };
+}
 
 // ---------- SETTINGS ----------
 
