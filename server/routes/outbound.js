@@ -81,6 +81,26 @@ export function outboundRoutes() {
     }
   });
 
+  // ---------- GET ONE SEND ----------
+  // Full row including the rendered body — kept off /sends to avoid bloating
+  // the list response. Used by the in-app email preview modal.
+  router.get("/sends/:id", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { data, error } = await supabase
+        .from("email_sends")
+        .select("id, sequence_id, campaign_id, contact_id, touch_number, brand_group, template_variant, template_key, to_email, to_name, subject, body, status, sender_domain, scheduled_at, sent_at, delivered_at, opened_at, clicked_at, replied_at, bounced_at, complained_at, cancelled_at, cancel_reason, error, resend_id, created_at")
+        .eq("team_id", teamId)
+        .eq("id", req.params.id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return res.status(404).json({ error: "send not found" });
+      res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---------- STATS ----------
   // Returns aggregate counts keyed by status × brand_group.
   //   scope=today (default) | all     — lifetime when "all"

@@ -1,7 +1,7 @@
 // AI Campaign detail — settings, templates (incl. A/B + AI drafts), metrics,
 // lead-discovery trigger, pause/resume. Routes: /ai/campaigns/:id
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
@@ -313,6 +313,8 @@ function SendsTab({ campaign, theme }) {
   const [stopBusy, setStopBusy] = useState(false);
   const [stopResult, setStopResult] = useState(null);
 
+  const [previewId, setPreviewId] = useState(null);
+
   const runParams = useMemo(() => {
     if (runSel === "all") return { scope: "all" };
     if (runSel === "today") return { scope: "today" };
@@ -521,18 +523,26 @@ function SendsTab({ campaign, theme }) {
                     )}
                   </td>
                   <td style={sendTd}>
-                    {(r.status === "pending" || r.status === "scheduled") ? (
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       <button
-                        onClick={() => runStop([r.to_email], "replied")}
-                        disabled={stopBusy}
-                        style={miniBtn(theme)}
-                        title="Cancel this row + all other pending touches for this address"
+                        onClick={() => setPreviewId(r.id)}
+                        style={iconBtn(theme)}
+                        title="Preview email"
+                        aria-label="Preview email"
                       >
-                        Stop
+                        <EyeIcon />
                       </button>
-                    ) : (
-                      <span style={{ color: theme.textMuted, fontSize: 11 }}>—</span>
-                    )}
+                      {(r.status === "pending" || r.status === "scheduled") && (
+                        <button
+                          onClick={() => runStop([r.to_email], "replied")}
+                          disabled={stopBusy}
+                          style={miniBtn(theme)}
+                          title="Cancel this row + all other pending touches for this address"
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -540,8 +550,185 @@ function SendsTab({ campaign, theme }) {
           </table>
         </Card>
       )}
+
+      {previewId && (
+        <EmailPreviewModal
+          sendId={previewId}
+          campaign={campaign}
+          theme={theme}
+          onClose={() => setPreviewId(null)}
+        />
+      )}
     </>
   );
+}
+
+// Lazy-loads the full email body via /outbound/sends/:id and shows headers,
+// rendered subject + body, status pill, and the engagement timeline.
+function EmailPreviewModal({ sendId, campaign, theme, onClose }) {
+  const [send, setSend] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSend(null); setError(null);
+    api.getOutboundSend(sendId)
+      .then((d) => { if (!cancelled) setSend(d); })
+      .catch((e) => { if (!cancelled) setError(e.message); });
+    return () => { cancelled = true; };
+  }, [sendId]);
+
+  // Esc closes. Click outside the panel closes too.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const events = send ? buildSendTimeline(send) : [];
+  const ds = send ? sendDisplayStatus(send) : null;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000,
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "48px 16px", overflowY: "auto",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: 720, background: theme.surface, color: theme.text,
+          borderRadius: 12, border: `1px solid ${theme.border}`, boxShadow: theme.shadow,
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${theme.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Email preview</div>
+          <button onClick={onClose} style={{ ...miniBtn(theme), padding: "4px 8px" }} title="Close (Esc)">✕</button>
+        </div>
+
+        {error && (
+          <div style={{ padding: 16, color: "#DC2626", fontSize: 13 }}>{error}</div>
+        )}
+
+        {!send && !error && (
+          <div style={{ padding: 16 }}>
+            <SkeletonRow widths={["30%", "50%", "70%", "60%", "80%"]} />
+          </div>
+        )}
+
+        {send && (
+          <div style={{ padding: 18 }}>
+            {/* Status row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              <Pill tint={SEND_STATUS_TINTS[ds] || {}}>{ds}</Pill>
+              <Pill tint={GROUP_TINTS[send.brand_group] || {}}>{send.brand_group || "—"}</Pill>
+              <span style={{ fontSize: 12, color: theme.textMuted }}>
+                T+{send.touch_number === 1 ? "0" : send.touch_number === 2 ? "3" : send.touch_number === 3 ? "7" : "?"}
+                {send.template_key ? ` · ${send.template_key}` : ""}
+              </span>
+              {send.cancel_reason && (
+                <span style={{ fontSize: 11, color: theme.textMuted }}>· {send.cancel_reason}</span>
+              )}
+            </div>
+
+            {/* Headers */}
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", marginBottom: 16, fontSize: 12 }}>
+              <div style={{ color: theme.textMuted }}>From</div>
+              <div style={{ color: theme.text }}>{campaign.sender_from}</div>
+              <div style={{ color: theme.textMuted }}>Reply-to</div>
+              <div style={{ color: theme.text }}>{campaign.reply_to}</div>
+              <div style={{ color: theme.textMuted }}>To</div>
+              <div style={{ color: theme.text }}>
+                {send.to_name ? `${send.to_name} · ` : ""}{send.to_email}
+              </div>
+            </div>
+
+            {/* Subject */}
+            <div style={{ fontSize: 16, fontWeight: 600, color: theme.text, marginBottom: 12, lineHeight: 1.35 }}>
+              {send.subject || "—"}
+            </div>
+
+            {/* Body */}
+            <div
+              style={{
+                padding: 14, borderRadius: 8, background: theme.bg,
+                border: `1px solid ${theme.border}`,
+                fontSize: 13, lineHeight: 1.55, color: theme.text,
+                whiteSpace: "pre-wrap", fontFamily: "inherit",
+                marginBottom: 16,
+              }}
+            >
+              {send.body || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>Body not yet rendered (still pending).</span>}
+            </div>
+
+            {/* Timeline */}
+            {events.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Timeline</div>
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 14px", fontSize: 12 }}>
+                  {events.map((e, i) => (
+                    <Fragment key={i}>
+                      <div style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>{friendlyDate(e.at)}</div>
+                      <div style={{ color: theme.text }}>{e.label}</div>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {send.error && (
+              <div style={{ marginTop: 12, padding: 10, borderRadius: 6, background: "#FEE2E2", color: "#991B1B", fontSize: 12 }}>
+                {send.error}
+              </div>
+            )}
+
+            {send.resend_id && (
+              <div style={{ marginTop: 14, fontSize: 11, color: theme.textMuted }}>
+                Resend ID: {send.resend_id}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function buildSendTimeline(s) {
+  const evts = [
+    { at: s.scheduled_at, label: "Scheduled" },
+    { at: s.sent_at, label: "Sent" },
+    { at: s.delivered_at, label: "Delivered" },
+    { at: s.opened_at, label: "Opened" },
+    { at: s.clicked_at, label: "Clicked" },
+    { at: s.replied_at, label: "Replied" },
+    { at: s.bounced_at, label: "Bounced" },
+    { at: s.complained_at, label: "Complained" },
+    { at: s.cancelled_at, label: s.cancel_reason ? `Cancelled (${s.cancel_reason})` : "Cancelled" },
+  ];
+  return evts.filter((e) => !!e.at).sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  );
+}
+
+function iconBtn(theme) {
+  return {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    width: 26, height: 26, padding: 0,
+    border: `1px solid ${theme.border}`, borderRadius: 4,
+    background: theme.bg, color: theme.text, cursor: "pointer",
+  };
 }
 
 function SendStatCard({ label, value, sub, theme, tint = {} }) {
