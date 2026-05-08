@@ -376,11 +376,15 @@ export async function processOneBrand({ teamId, brand }) {
       row.contact_position = person.position;
       row.contact_source = person.source;
     }
-    if (!qualified) {
-      // Stamp the reason inside raw_data so we can audit later without a
-      // migration. (raw_data is jsonb so this is cheap to query.)
-      row.raw_data = { ...brand, _disqualify_reason: reason || null, _hunter_status: hunterStatus || null };
-    }
+    // Stamp meta inside raw_data on every path so we can audit later without
+    // a migration. (raw_data is jsonb so this is cheap to query.) The
+    // qualified path also keeps the verification status — useful when the
+    // backfill job needs to skip rows we've already verified.
+    row.raw_data = {
+      ...brand,
+      _disqualify_reason: qualified ? null : (reason || null),
+      _hunter_status: hunterStatus || null,
+    };
     await supabase.from("storeleads_brands").upsert(row, { onConflict: "domain" });
     return { qualified, email: person?.email, name: person?.firstName, reason };
   }
@@ -441,23 +445,35 @@ export async function processOneBrand({ teamId, brand }) {
     }
   }
 
-  // Verify only what we can't already trust:
+  // Verify deliverability against Hunter's email-verifier:
   //   - apollo-orgchart: Apollo already returned email_status='verified', skip.
-  //   - hunter: domain-search returned with confidence>=70, which is the same
-  //     deliverability signal as the verifier — skip to save credits.
-  //   - storeleads-personal: address scraped from a public page; could be a
-  //     guess or stale. This is the case worth spending a verification credit on.
+  //   - hunter (domain-search): confidence is pattern-match certainty, NOT
+  //     mailbox reachability. Empirically these bounce ~9% — every bounce we
+  //     saw came via this path. Always verify.
+  //   - storeleads-personal: address scraped from a public page; verify.
+  //
+  // Hunter `status` values we treat as a hard reject:
+  //   invalid     — definitely undeliverable
+  //   disposable  — temp-email service, will bounce or harm reputation
+  //   accept_all  — catch-all domain; reachability unknown, Resend treats
+  //                 catch-all bounces harshly so we skip
+  //   webmail     — public webmail (gmail/yahoo) — not the brand decision-maker
+  // Accept: valid | unknown (rate-limited / couldn't verify, accept the risk).
   let hunterStatus = null;
-  if (person.source === "storeleads-personal" && process.env.HUNTER_API_KEY) {
+  const needsVerify =
+    process.env.HUNTER_API_KEY &&
+    (person.source === "hunter" || person.source === "storeleads-personal");
+  if (needsVerify) {
     hunterStatus = await hunterVerify(person.email).catch(() => "unknown");
-    if (hunterStatus === "invalid") {
-      return persistAndReturn({ qualified: false, reason: "Hunter says invalid", person, hunterStatus });
+    if (HUNTER_REJECT_STATUSES.has(hunterStatus)) {
+      return persistAndReturn({ qualified: false, reason: `Hunter says ${hunterStatus}`, person, hunterStatus });
     }
-    // 429 etc. → "unknown" → we keep the lead, accepting the deliverability risk.
   }
 
   return persistAndReturn({ qualified: true, person, hunterStatus });
 }
+
+const HUNTER_REJECT_STATUSES = new Set(["invalid", "disposable", "accept_all", "webmail"]);
 
 // ---------- STORELEADS ----------
 
