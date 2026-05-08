@@ -22,6 +22,58 @@ function safeFirstName(name) {
   if (isGenericLocal(first.toLowerCase())) return "there";
   return first;
 }
+
+// StoreLeads frequently sets brand.merchant_name and brand.name to the URL
+// (e.g. "www.zingorganics.co.uk") instead of a real brand name, which rendered
+// awful subject lines like "www.zingorganics.co.uk + Linkable". This walks the
+// candidate fields, rejects URL-shaped values, and falls back to extracting
+// from the page title or humanising the domain.
+function looksLikeUrl(s) {
+  if (!s) return false;
+  const t = s.toString().trim().toLowerCase();
+  if (t.startsWith("http") || t.startsWith("www.")) return true;
+  // Bare domain heuristic: any single-token value with a dot and a TLD.
+  if (!/\s/.test(t) && /\.[a-z]{2,}(\.[a-z]{2,})?$/.test(t)) return true;
+  return false;
+}
+// Try to pull a brand name out of a Shopify-style <title>. The convention is
+// "<page description> <separator> <Brand Name>" where the brand sits at the
+// END after an em-dash, pipe, or bullet. Examples:
+//   "Artisan Apothecary Workshop – Zing Organics" → "Zing Organics"
+//   "All Natural Beard Products – Beard Balm"     → "Beard Balm"
+// Returns null if there's no separator or the last segment is implausible.
+function brandNameFromTitle(title) {
+  if (!title) return null;
+  const parts = title.split(/[–|·•—]|\s-\s/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const last = parts[parts.length - 1];
+  // Reject the segment if it's too long (marketing copy, not a brand name)
+  // or too short (probably noise like an emoji or single char).
+  if (last.length < 2 || last.length > 60) return null;
+  return last;
+}
+function humanizeDomain(domain) {
+  if (!domain) return null;
+  // strip protocol/www, take registrable-ish part, title-case
+  const stem = domain.replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[/.]/)[0];
+  if (!stem) return null;
+  return stem.replace(/[-_]+/g, " ")
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+function resolveBrandName(brand) {
+  const candidates = [brand?.storeName, brand?.name, brand?.merchant_name];
+  for (const c of candidates) {
+    if (c && !looksLikeUrl(c)) return c;
+  }
+  // Fall back: try to mine the page title (StoreLeads-set), then humanise the
+  // domain. Last-ditch returns "your brand" so subject still reads cleanly.
+  return brandNameFromTitle(brand?.title)
+    || humanizeDomain(brand?.domain)
+    || humanizeDomain(brand?.name)   // brand.name is often the URL — humanise it
+    || "your brand";
+}
 import { getSequenceTemplate, getPrimaryProductType } from "./templates.js";
 import { classifyBrand } from "./brand-groups.js";
 
@@ -158,7 +210,7 @@ export async function enrollProspect({
   const sequenceId = crypto.randomUUID();
   const t1Date = nextWeekday(new Date(startAt));
   const variables = {
-    brandName: brand?.storeName || brand?.name || brand?.merchant_name || brand?.domain || "your brand",
+    brandName: resolveBrandName(brand),
     firstName: safeFirstName(toName),
     productType,
     observation,
