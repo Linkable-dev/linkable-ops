@@ -9,7 +9,8 @@ import { Router } from "express";
 import { sendDueScheduled } from "../automation/conversation-runner.js";
 import { processFollowUps } from "../automation/conversation-followup.js";
 import { runDailyOutbound } from "../automation/run-daily-200.js";
-import { processOneRunTick } from "../automation/lead-discovery.js";
+import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discovery.js";
+import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
@@ -147,6 +148,27 @@ export function cronRoutes() {
       res.json({ tick: now.toISOString(), fired: results.length, results, log: lines });
     } catch (err) {
       console.error("/cron/run-daily-outbound error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Auto top-up: walks every active campaign, queues a discovery run when its
+  // uncontacted in-band pool drops below `threshold` (default 50, batch 200).
+  // Idempotent — skips campaigns with a pending/running run from the last hour.
+  // Designed for a daily cron tick.
+  //
+  // Query params: ?threshold=50&batch=200&dry=1
+  router.get("/auto-discover", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const teamId = await getDefaultTeamId();
+      const threshold = Math.max(parseInt(req.query.threshold) || 50, 0);
+      const batch = Math.min(Math.max(parseInt(req.query.batch) || 200, 10), 500);
+      const dryRun = req.query.dry === "1" || req.query.dry === "true";
+      const result = await autoTopUpDiscovery({ teamId, threshold, batch, dryRun });
+      res.json(result);
+    } catch (err) {
+      console.error("/cron/auto-discover error:", err);
       res.status(500).json({ error: err.message });
     }
   });

@@ -52,6 +52,93 @@ export async function queueLeadDiscovery({ teamId, campaignId, filters = {}, lim
 // Backward-compat alias — older callers still import startLeadDiscovery.
 export const startLeadDiscovery = queueLeadDiscovery;
 
+// Helper: revenue band check matching the lead-pool filter. raw_data is jsonb,
+// `estimated_sales` is monthly USD as text — convert and compare in JS.
+function inRevenueBand(row, { minRev, maxRev }) {
+  if (minRev == null && maxRev == null) return true;
+  const rev = Number(row?.raw_data?.estimated_sales);
+  if (!Number.isFinite(rev)) return false;
+  if (minRev != null && rev < minRev) return false;
+  if (maxRev != null && rev > maxRev) return false;
+  return true;
+}
+
+// Auto top-up: walks every active email_campaign for a team, queues a discovery
+// run when its uncontacted in-band lead pool drops below `threshold`. Skips
+// campaigns that already have a pending/running run from the last hour.
+//
+// Used by the cron tick. Returns a per-campaign summary so the cron handler
+// can log it. Idempotent.
+export async function autoTopUpDiscovery({ teamId, threshold = 50, batch = 200, dryRun = false }) {
+  const { data: campaigns, error } = await supabase
+    .from("email_campaigns")
+    .select("id,name,target_filters,team_id")
+    .eq("team_id", teamId).eq("status", "active");
+  if (error) throw new Error(error.message);
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const summary = [];
+
+  for (const c of campaigns || []) {
+    const tf = c.target_filters || {};
+    const filters = {
+      countries: tf.countries || [],
+      minRev: tf.min_revenue ?? null,
+      maxRev: tf.max_revenue ?? null,
+    };
+
+    // Count uncontacted in-band leads. raw_data->>estimated_sales is text in
+    // jsonb so we JS-filter; cap at 5000 to bound work.
+    let q = supabase.from("storeleads_brands")
+      .select("id,emailed,raw_data")
+      .eq("team_id", teamId)
+      .not("email", "is", null)
+      .eq("emailed", false)
+      .limit(5000);
+    if (filters.countries.length) q = q.in("country_code", filters.countries);
+    const { data: pool, error: pErr } = await q;
+    if (pErr) { summary.push({ campaign_id: c.id, name: c.name, error: pErr.message }); continue; }
+    const eligible = (pool || []).filter((r) => inRevenueBand(r, filters)).length;
+
+    // Skip if a run is already in-flight for this campaign — don't pile up.
+    const { data: recent } = await supabase
+      .from("ai_bulk_runs")
+      .select("id,status,created_at")
+      .eq("team_id", teamId)
+      .eq("source", "discover_storeleads")
+      .eq("filters->>email_campaign_id", c.id)
+      .in("status", ["pending", "running"])
+      .gte("created_at", oneHourAgo)
+      .limit(1);
+    const inFlight = (recent || []).length > 0;
+
+    const action = eligible >= threshold
+      ? "skip:above-threshold"
+      : inFlight
+        ? "skip:run-in-flight"
+        : dryRun
+          ? "would-queue"
+          : "queued";
+    let runId = null;
+    if (action === "queued") {
+      const out = await queueLeadDiscovery({
+        teamId, campaignId: null, limit: batch,
+        filters: {
+          countries: (tf.countries || []).join(" "),
+          minRevenue: tf.min_revenue,
+          maxRevenue: tf.max_revenue,
+          categories: tf.categories || [],
+          email_campaign_id: c.id,
+        },
+      });
+      runId = out.run_id;
+    }
+    summary.push({ campaign_id: c.id, name: c.name, eligible, action, run_id: runId });
+  }
+
+  return { threshold, batch, dryRun, campaigns: summary };
+}
+
 // Worker entry point — drains the queue end-to-end. Used by the CLI script.
 // Picks the oldest pending run for the team (or any team if teamId omitted),
 // flips it to 'running', and processes it to completion. No deadline.
