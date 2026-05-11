@@ -36,6 +36,33 @@ function parseArgs() {
   return args;
 }
 
+// Detect creator/affiliate/influencer platform install from a storeleads
+// raw_data.apps[] array. Strict app-level matching only — substring-scanning
+// the whole raw_data blob produces false positives (Smile.io has "referral",
+// half the Shopify ecosystem mentions "impact"). Probe against 1000 rows in
+// May 2026 showed app-level matching fires on ~12% of pool — enough to feed
+// the 25% G1 daily quota; orchestrator backfills the rest from G2/G3.
+const AFFILIATE_APP_NAME = /\b(refersion|shareasale|goaffpro|leaddyno|tapfiliate|uppromote|social\s*snowball|post\s*affiliate|partnerstack|awin|skimlinks|shopify\s+collabs)\b/i;
+const CREATOR_APP_NAME = /\b(creator|influencer|ambassador)\b/i;
+const AFFILIATE_CATEGORY = /\b(affiliate|referral)\b/i;
+const CREATOR_CATEGORY = /\b(creator|influencer|ambassador)\b/i;
+
+function detectCreatorSignals(apps) {
+  let hasCreators = false, hasAffiliates = false, hasInfluencers = false;
+  for (const a of apps || []) {
+    const name = `${a?.name || ""} ${a?.vendor_name || ""}`;
+    const cats = Array.isArray(a?.categories) ? a.categories.join(" ") : "";
+    if (AFFILIATE_APP_NAME.test(name) || AFFILIATE_CATEGORY.test(cats)) hasAffiliates = true;
+    if (CREATOR_APP_NAME.test(name) || CREATOR_CATEGORY.test(cats)) {
+      // "influencer" → influencers; "creator"/"ambassador" → creators
+      if (/influencer/i.test(name) || /influencer/i.test(cats)) hasInfluencers = true;
+      else hasCreators = true;
+    }
+    if (hasCreators && hasAffiliates && hasInfluencers) break;
+  }
+  return { hasCreators, hasAffiliates, hasInfluencers };
+}
+
 // How many emails has this team already sent today? Used to enforce the
 // daily cap across multiple invocations (re-runs, retries).
 async function todaySentCount(teamId) {
@@ -104,6 +131,15 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
 
   const buckets = { G1: [], G2: [], G3: [] };
   for (const row of (data || []).filter(inBand)) {
+    // G1 signal lives in raw_data.apps[] — about 12% of brands have a
+    // dedicated affiliate/creator platform installed (UpPromote, GoAffPro,
+    // Awin, Shopify Collabs, Refersion, etc.). Without this derivation, the
+    // classifier's isCreatorActive() check is always false → G1 is dead.
+    // We intentionally do NOT substring-scan raw_data wholesale ("referral"
+    // would match Smile.io review apps, "impact" matches unrelated apps).
+    const apps = Array.isArray(row.raw_data?.apps) ? row.raw_data.apps : [];
+    const { hasCreators, hasAffiliates, hasInfluencers } = detectCreatorSignals(apps);
+
     // Adapt storeleads_brands row → classifier input shape.
     const brand = {
       storeName: row.merchant_name || row.title || row.domain,
@@ -116,6 +152,9 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
       about_us: row.about_us,
       brandInfo: {
         brandStory: row.description || row.about_us,
+        hasCreators,
+        hasAffiliates,
+        hasInfluencers,
       },
       // No matchedKeywords/sampleTypes from storeleads — classifier falls back to text scan.
       matchedKeywords: [],
