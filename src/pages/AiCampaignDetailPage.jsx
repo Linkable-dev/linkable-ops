@@ -230,6 +230,7 @@ function OverviewTab({ campaign, metrics, templates, theme, onJump }) {
       </Card>
 
       <MetricsCard metrics={metrics} theme={theme} />
+      <PerformanceBreakdownCard metrics={metrics} theme={theme} />
     </>
   );
 }
@@ -290,6 +291,114 @@ function MetricsCard({ metrics, theme }) {
   );
 }
 function pct(x) { return x ? `${(x * 100).toFixed(1)}%` : "0%"; }
+
+// Per-slot / per-group / per-touch performance breakdown. Same metrics as the
+// overall Deliverability card but bucketed, so you can see which template set
+// is pulling its weight and which isn't.
+function PerformanceBreakdownCard({ metrics, theme }) {
+  if (!metrics) return null;
+  const slotKeys = ["G1-T1","G1-T2","G1-T3","G2-T1","G2-T2","G2-T3","G3-T1","G3-T2","G3-T3"];
+  const slotRows = slotKeys
+    .map((k) => ({ label: k, bucket: metrics.bySlot?.[k] }))
+    .filter((r) => r.bucket && r.bucket.sent > 0);
+  const groupRows = ["G1","G2","G3"]
+    .map((k) => ({ label: k, bucket: metrics.byGroup?.[k] }))
+    .filter((r) => r.bucket && r.bucket.sent > 0);
+  const touchRows = ["T1","T2","T3"]
+    .map((k) => ({ label: k, bucket: metrics.byTouch?.[k] }))
+    .filter((r) => r.bucket && r.bucket.sent > 0);
+
+  if (!slotRows.length && !groupRows.length && !touchRows.length) return null;
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 12 }}>Performance by template set</div>
+      <BreakdownTable title="By slot" subtitle="brand-group × touch" rows={slotRows} theme={theme} />
+      <BreakdownTable title="By group" subtitle="brand-group pitch" rows={groupRows} theme={theme} />
+      <BreakdownTable title="By touch" subtitle="1st / 2nd / 3rd reach" rows={touchRows} theme={theme} last />
+    </Card>
+  );
+}
+
+function BreakdownTable({ title, subtitle, rows, theme, last }) {
+  if (!rows.length) return null;
+  const cols = [
+    { key: "sent",      label: "Sent",      value: (b) => b.sent || 0 },
+    { key: "delivered", label: "Delivered", value: (b) => pct(b.rates?.delivered), rate: (b) => b.rates?.delivered || 0 },
+    { key: "opened",    label: "Opened",    value: (b) => pct(b.rates?.opened),    rate: (b) => b.rates?.opened || 0,    higherIsBetter: true },
+    { key: "clicked",   label: "Clicked",   value: (b) => pct(b.rates?.clicked),   rate: (b) => b.rates?.clicked || 0,   higherIsBetter: true },
+    { key: "replied",   label: "Replied",   value: (b) => pct(b.rates?.replied),   rate: (b) => b.rates?.replied || 0,   higherIsBetter: true },
+    { key: "bounced",   label: "Bounced",   value: (b) => pct(b.rates?.bounced),   rate: (b) => b.rates?.bounced || 0,   warnAbove: 0.05 },
+  ];
+  // Best row per column gets a bold treatment so the eye lands on it.
+  const bestPerCol = {};
+  for (const c of cols) {
+    if (!c.higherIsBetter || rows.length < 2) continue;
+    let bestRate = 0, bestLabel = null;
+    for (const r of rows) {
+      const v = c.rate(r.bucket);
+      if (v > bestRate) { bestRate = v; bestLabel = r.label; }
+    }
+    if (bestRate > 0) bestPerCol[c.key] = bestLabel;
+  }
+
+  return (
+    <div style={{ marginBottom: last ? 0 : 16 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: theme.text }}>{title}</div>
+        <div style={{ fontSize: 11, color: theme.textMuted }}>{subtitle}</div>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={thStyle(theme, "left")}>Set</th>
+              {cols.map((c) => (
+                <th key={c.key} style={thStyle(theme, "right")}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td style={tdStyle(theme, "left", true)}>{r.label}</td>
+                {cols.map((c) => {
+                  const isBest = bestPerCol[c.key] === r.label;
+                  const warn = c.warnAbove != null && (c.rate?.(r.bucket) || 0) > c.warnAbove;
+                  return (
+                    <td key={c.key} style={{
+                      ...tdStyle(theme, "right"),
+                      fontWeight: isBest ? 600 : 400,
+                      color: warn ? "#DC2626" : (isBest ? theme.text : theme.textMuted),
+                    }}>{c.value(r.bucket)}</td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function thStyle(theme, align) {
+  return {
+    fontSize: 10, fontWeight: 600, color: theme.textMuted,
+    textTransform: "uppercase", letterSpacing: 0.4,
+    padding: "4px 8px", textAlign: align,
+    borderBottom: `1px solid ${theme.border}`,
+  };
+}
+function tdStyle(theme, align, strong) {
+  return {
+    padding: "6px 8px", textAlign: align,
+    color: strong ? theme.text : theme.textMuted,
+    fontWeight: strong ? 600 : 400,
+    borderBottom: `1px solid ${theme.border}`,
+    whiteSpace: "nowrap",
+  };
+}
 
 // ---------- SENDS ----------
 //
