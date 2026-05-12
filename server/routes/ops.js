@@ -2,9 +2,16 @@ import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
 
 // Link status enum (from main proto):
-// 0=unset, 1=pending_brand, 2=pending_influencer, 3=accepted, 4=rejected, 5=ended
+//   0=unset
+//   1=pending_brand        -- BRAND-initiated invitation, awaiting creator response
+//                             (chat type=4 from brand side). UI: "Invited".
+//   2=pending_influencer   -- CREATOR-initiated application, awaiting brand response.
+//                             UI: "Applied".
+//   3=accepted, 4=rejected, 5=ended
+// The pending_X naming refers to whose original request is still pending — NOT who
+// the system is waiting on to act. Verified against chats data 2026-05-12.
 const LINK_ACCEPTED = 3;
-const LINK_PENDING_INFLUENCER = 2;
+const LINK_INVITED = 1;
 
 // `deleted` uses '-infinity' as sentinel for "not deleted" in this DB.
 const ND = `(deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -74,9 +81,9 @@ export function opsRoutes() {
             AND ($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)
         ),
         link_agg AS (
-          -- "Invited" = brand reached out, creator hasn't responded yet (link.status = pending_influencer).
-          -- "Applied" = anything else (creator-initiated apps, accepted, rejected, ended, unset). Once an
-          -- invited creator responds, status moves off pending_influencer and they count as Applied.
+          -- "Invited" = brand reached out, creator hasn't responded yet (link.status = pending_brand = 1).
+          -- "Applied" = creator-initiated or further along (anything except pending_brand). Once an
+          -- invited creator responds, status moves off pending_brand and they count as Applied.
           SELECT l.product_id,
                  COUNT(DISTINCT l.influencer_user_id) FILTER (WHERE l.status = $5)           AS creators_invited,
                  COUNT(DISTINCT COALESCE(l.influencer_user_id::text, l.id::text))
@@ -138,7 +145,7 @@ export function opsRoutes() {
         SELECT * FROM enriched
         ORDER BY ${sortColumn} ${sortDir} NULLS LAST, created DESC NULLS LAST
         LIMIT $3 OFFSET $4
-      `, [searchPattern, LINK_ACCEPTED, limit, offset, LINK_PENDING_INFLUENCER]);
+      `, [searchPattern, LINK_ACCEPTED, limit, offset, LINK_INVITED]);
 
       res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir });
     } catch (e) {
@@ -184,7 +191,7 @@ export function opsRoutes() {
         else if (srStatus === "shipped") status = "Shipped";
         else if (srStatus === "accepted") status = "Sample Accepted";
         else if (r.link_status === LINK_ACCEPTED) status = "Accepted";
-        else if (r.link_status === LINK_PENDING_INFLUENCER) status = "Invited";
+        else if (r.link_status === LINK_INVITED) status = "Invited";
         return {
           ...r,
           status,
