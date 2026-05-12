@@ -2,7 +2,7 @@
 //
 // Federico triages brand@linkable.link replies each morning and pastes the
 // "remove me" / "not interested" / opt-out addresses here. This:
-//   - cancels every pending T+3 / T+7 touch for that address
+//   - cancels every pending T+3 / T+7 / T+12 touch for that address
 //   - inserts the address into ai_suppressions so it can never be hit again
 //
 // Usage:

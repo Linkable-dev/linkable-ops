@@ -1,9 +1,11 @@
 // Multi-touch sequencer for the daily-200 outbound agent.
-// Owns: scheduling 3 touches per prospect (T+0 / T+3 / T+7), picking due rows
-// up to a daily cap, and cancelling pending touches when a reply lands.
+// Owns: scheduling 4 touches per prospect (T+0 / T+3 / T+7 / T+12), picking
+// due rows up to a daily cap, and cancelling pending touches when a reply
+// lands. T+12 is the breakup touch — pure pressure-removal, historically
+// the highest reply-rate-per-send slot in the sequence.
 //
 // Storage model: each touch is one `email_sends` row. Rows for the same
-// prospect share `sequence_id`, with `touch_number` ∈ {1,2,3} and
+// prospect share `sequence_id`, with `touch_number` ∈ {1,2,3,4} and
 // `scheduled_at` driving when each fires.
 
 import crypto from "node:crypto";
@@ -11,6 +13,7 @@ import { supabase } from "../lib/supabase.js";
 import { sendEmail } from "./send.js";
 import { generateObservation, renderTemplate, validateRenderedEmail } from "./personalize.js";
 import { isGenericLocal } from "./lead-discovery.js";
+import { getNextInbox } from "./sender-pool.js";
 
 // Belt-and-suspenders: even if a junk first_name slips into the DB, never
 // inject it into a customer-facing email greeting. Falls back to "there"
@@ -128,7 +131,10 @@ function pickWeightedTemplate(bucket, fallbackGroup, fallbackTouch) {
 }
 
 // Touch offsets in calendar days (skip-weekend logic applies on top).
-const TOUCH_OFFSETS_DAYS = { 1: 0, 2: 3, 3: 7 };
+// T4 (breakup) lands ~5 days after T3 so the buyer has time to forget the
+// pressure of T3's "reply yes" ask; the breakup reads less like a follow-up
+// and more like a clean close.
+const TOUCH_OFFSETS_DAYS = { 1: 0, 2: 3, 3: 7, 4: 12 };
 
 // Push to Mon if a Sat/Sun lands. We don't send on weekends.
 function nextWeekday(date) {
@@ -148,8 +154,8 @@ function touchScheduledAt(t1Date, touch) {
 
 // ---------- SCHEDULING ----------
 
-// Insert 3 email_sends rows for one prospect. Touch 1 is due immediately
-// (scheduled_at = now); touches 2 and 3 are future-dated.
+// Insert 4 email_sends rows for one prospect. Touch 1 is due immediately
+// (scheduled_at = now); touches 2, 3, and 4 are future-dated.
 //
 // Returns { sequence_id, group, productType, touches: [...] } or
 // { skipped: 'reason' } when the prospect can't be enrolled.
@@ -222,7 +228,7 @@ export async function enrollProspect({
   const buckets = templateBuckets || (campaignId ? await loadCampaignTemplateBuckets(teamId, campaignId) : {});
 
   const rows = [];
-  for (const touch of [1, 2, 3]) {
+  for (const touch of [1, 2, 3, 4]) {
     const key = `${grp}-T${touch}`;
     const tpl = pickWeightedTemplate(buckets[key], grp, touch);
     if (!tpl) {
@@ -252,6 +258,7 @@ export async function enrollProspect({
       to_name: toName || null,
       subject,
       body,
+      observation: observation || null,        // stored on every touch so analytics can skip the T1 join
       status: touch === 1 ? "pending" : "scheduled",
       scheduled_at: touch === 1 ? t1Date.toISOString() : touchScheduledAt(t1Date, touch),
     });
@@ -346,27 +353,51 @@ export async function sendDueRow(row, { resendApiKey, senderFrom, replyTo }) {
     return { sent: false, cancelled: true, reason: "suppressed" };
   }
 
+  // Sender selection: prefer the per-team inbox pool when configured.
+  // - hasPool=false → no inboxes set up, use the campaign's sender_from (legacy)
+  // - hasPool=true, inbox=null → all configured inboxes hit cap today, defer
+  // - hasPool=true, inbox set → rotate this send through the selected inbox
+  // Deferred rows stay in 'scheduled' status so the next cron picks them up.
+  const { hasPool, inbox } = await getNextInbox(row.team_id);
+  if (hasPool && !inbox) {
+    return { sent: false, deferred: true, reason: "all inboxes at daily cap" };
+  }
+
+  const finalFrom = inbox?.from || senderFrom || SENDER_FROM;
+  const finalReplyTo = inbox?.replyTo || replyTo || REPLY_TO;
+
   const result = await sendEmail({
     to: row.to_email,
     toName: row.to_name,
     subject: row.subject,
     body: row.body,
-    from: senderFrom || SENDER_FROM,
-    replyTo: replyTo || REPLY_TO,
+    from: finalFrom,
+    replyTo: finalReplyTo,
     resendApiKey,
   });
 
   if (result.success) {
     await supabase
       .from("email_sends")
-      .update({ status: "sent", resend_id: result.resendId, sent_at: new Date().toISOString() })
+      .update({
+        status: "sent",
+        resend_id: result.resendId,
+        sent_at: new Date().toISOString(),
+        sender_email: inbox?.email || null,
+        sender_domain: inbox?.domain || row.sender_domain || SENDER_DOMAIN,
+      })
       .eq("id", row.id);
-    return { sent: true, resendId: result.resendId };
+    return { sent: true, resendId: result.resendId, senderEmail: inbox?.email || null };
   }
 
   await supabase
     .from("email_sends")
-    .update({ status: "failed", error: result.error, sent_at: new Date().toISOString() })
+    .update({
+      status: "failed",
+      error: result.error,
+      sent_at: new Date().toISOString(),
+      sender_email: inbox?.email || null,
+    })
     .eq("id", row.id);
   return { sent: false, error: result.error };
 }

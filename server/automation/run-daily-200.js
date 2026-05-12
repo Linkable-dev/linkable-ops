@@ -21,6 +21,7 @@ import {
   loadTemplateBucketsForCampaign,
 } from "./sequencer.js";
 import { classifyBrand, allocateDailyQuota, GROUPS } from "./brand-groups.js";
+import { MIN_SEND_SCORE } from "./brand-scoring.js";
 
 const TEAM_ID = process.env.TEAM_ID || "a0000000-0000-0000-0000-000000000001";
 const DEFAULT_CAP = 200;
@@ -95,7 +96,13 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
     .eq("team_id", teamId)
     .eq("contact_used", false)
     .not("email", "is", null)
-    .not("contact_first_name", "is", null);
+    .not("contact_first_name", "is", null)
+    // ICP gate: only enroll brands that scored above MIN_SEND_SCORE at
+    // ingestion. Score is computed from revenue band, vertical fit, creator
+    // stack signal, recency, and email quality (see brand-scoring.js). Brands
+    // ingested before migration 010 are scored by backfill-scores.js; rows
+    // with NULL brand_score are skipped here so the gate is strict by default.
+    .gte("brand_score", MIN_SEND_SCORE);
 
   const countries = (targetFilters.countries || []).map((c) => c?.toString().trim().toUpperCase()).filter(Boolean);
   if (countries.length) q = q.in("country_code", countries);
@@ -115,7 +122,13 @@ async function fetchFreshProspectsByGroup({ teamId, perGroupQuota, targetFilters
   // for the group classifier to balance G1/G2/G3.
   const fetchSize = Math.max(totalNeeded * (hasRevFilter ? 10 : 5), 200);
 
-  q = q.order("imported_at", { ascending: false }).limit(fetchSize);
+  // Score-first ordering: highest-scoring brands burn first, with recency as
+  // a tiebreaker. This is the lever that 2x's reply rate — without it the
+  // gate just removes the floor without lifting the median.
+  q = q
+    .order("brand_score", { ascending: false })
+    .order("imported_at", { ascending: false })
+    .limit(fetchSize);
   const { data, error } = await q;
 
   if (error) throw new Error(`fetchFreshProspects: ${error.message}`);
@@ -240,11 +253,11 @@ export async function runDailyOutbound({
   const replyTo = campaign.reply_to;
   const templateBuckets = await loadTemplateBucketsForCampaign(teamId, campaignId);
 
-  // ---------- 1. Drain due rows from prior enrollments (T+3, T+7) ----------
+  // ---------- 1. Drain due rows from prior enrollments (T+3, T+7, T+12) ----------
   const dueRows = await fetchDueRows({ teamId, limit: remaining });
   log(`[daily-200] due rows from prior enrollments: ${dueRows.length}`);
 
-  let sent = 0, failed = 0, cancelled = 0;
+  let sent = 0, failed = 0, cancelled = 0, deferred = 0;
   for (const row of dueRows) {
     if (sent + failed >= remaining) break;
     if (dryRun) {
@@ -253,17 +266,25 @@ export async function runDailyOutbound({
     }
     const result = await sendDueRow(row, { resendApiKey, senderFrom, replyTo });
     if (result.cancelled) cancelled++;
+    else if (result.deferred) deferred++;
     else if (result.sent) sent++;
     else failed++;
-    log(`  [drain] ${row.template_variant} → ${row.to_email}: ${result.sent ? "OK" : result.cancelled ? "cancelled" : "FAIL"} ${result.error || ""}`);
+    const tag = result.sent ? "OK" : result.cancelled ? "cancelled" : result.deferred ? "deferred" : "FAIL";
+    log(`  [drain] ${row.template_variant} → ${row.to_email}: ${tag} ${result.error || result.reason || ""}`);
     await delaySend();
+    // All inboxes hit daily cap — no point iterating the remaining due rows;
+    // they'll be picked up on tomorrow's run. Stop the drain loop early.
+    if (result.deferred) {
+      log(`[daily-200] inbox pool exhausted (deferred=${deferred}), stopping drain`);
+      break;
+    }
   }
 
   // ---------- 2. Enroll fresh prospects into the daily mix ----------
   const slotsLeft = remaining - sent;
   // Slots-left is the *send* budget. Enrolling N fresh prospects only adds
-  // N T+1 sends today (T+3/T+7 will be on future days), so we can enroll up
-  // to slotsLeft new prospects.
+  // N T+1 sends today (T+3/T+7/T+12 will be on future days), so we can enroll
+  // up to slotsLeft new prospects.
   if (slotsLeft <= 0) {
     log("[daily-200] cap hit during drain phase, no fresh enrollment");
   } else {

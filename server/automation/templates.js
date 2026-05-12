@@ -294,6 +294,57 @@ Yes or no. I'll stop reaching out either way.
 
 Federico`,
   },
+
+  // ----- T4 · Breakup touch (T+12) -----
+  //
+  // Sent ~5 days after T3. Pure pressure-removal: acknowledges silence,
+  // closes the loop, leaves a low-cost door open. Historically the highest
+  // reply-rate-per-send touch in a sequence because it costs nothing to
+  // answer and the buyer no longer feels chased. Same body for all groups
+  // would work, but a one-line group-specific hook before the breakup keeps
+  // it consistent with the angle the prospect saw in T1-T3.
+  {
+    key: "G1-T4",
+    group: "G1",
+    touch: 4,
+    name: "G1 · Breakup",
+    subject_template: "closing this out — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+I'll stop here — clearly creator attribution isn't a priority right now, and that's fine.
+
+If it ever becomes a question — which creators at {{brandName}} are actually driving Shopify revenue versus the ones just posting — just reply "later" and I'll circle back next quarter. No follow-up otherwise.
+
+Federico`,
+  },
+  {
+    key: "G2-T4",
+    group: "G2",
+    touch: 4,
+    name: "G2 · Breakup",
+    subject_template: "closing this out — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+I'll stop here — peak summer is busy and this clearly isn't the priority.
+
+If knowing which creators converted during peak ever becomes useful — for next year's planning, budget review, anything — reply "later" and I'll circle back. No follow-up otherwise.
+
+Federico`,
+  },
+  {
+    key: "G3-T4",
+    group: "G3",
+    touch: 4,
+    name: "G3 · Breakup",
+    subject_template: "closing this out — {{brandName}}",
+    body_template: `Hi {{firstName}},
+
+I'll stop here — if creator-led revenue isn't on the roadmap for {{brandName}} right now, no problem.
+
+If it ever becomes a priority — even six months out — just reply "later" and I'll circle back. No follow-up otherwise.
+
+Federico`,
+  },
 ];
 
 // Look up the template for a (group, touch) pair. Returns null if missing —

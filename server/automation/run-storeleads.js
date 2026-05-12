@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase.js";
 import { TEMPLATES, getPrimaryProductType, pickTemplate } from "./templates.js";
 import { generateObservation, renderTemplate, validateRenderedEmail } from "./personalize.js";
 import { sendEmail } from "./send.js";
+import { scoreBrand } from "./brand-scoring.js";
 
 const TEAM_ID = "a0000000-0000-0000-0000-000000000001";
 const STORELEADS_KEY = process.env.STORELEADS_KEY;
@@ -168,8 +169,15 @@ async function isAlreadySent(emailDomain) {
   return data?.length > 0;
 }
 
-// StoreLeads query: Shopify, US+UK, $50k-$100k/mo, Beauty & Wellness categories
-const STORELEADS_BQ = "bq=%7B%22must%22%3A%7B%22conjuncts%22%3A%5B%7B%22field%22%3A%22p%22%2C%22operator%22%3A%22or%22%2C%22analyzer%22%3A%22advanced%22%2C%22match%22%3A%221%22%7D%2C%7B%22field%22%3A%22er%22%2C%22min%22%3A5000000%2C%22max%22%3A10000000%2C%22inclusive_min%22%3Atrue%2C%22inclusive_max%22%3Atrue%7D%2C%7B%22field%22%3A%22cc%22%2C%22operator%22%3A%22or%22%2C%22analyzer%22%3A%22advanced%22%2C%22match%22%3A%22US%20GB%22%7D%2C%7B%22field%22%3A%22cat%22%2C%22operator%22%3A%22or%22%2C%22analyzer%22%3A%22advanced%22%2C%22match%22%3A%22%2FApparel%20%2FBeauty...%26...Fitness%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%2FSkin...%26...Nail...Care%20%2FHealth%2FNutrition%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%2FMake-Up...%26...Cosmetics%20%2FBeauty...%26...Fitness%2FFitness%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%2FPerfumes...%26...Fragrances%22%7D%5D%7D%7D";
+// StoreLeads query: Shopify, US+UK, $80k-$2M/mo, Beauty & Wellness categories.
+//
+// Previous band ($50k-$100k/mo, er=5_000_000..10_000_000) was too low: brands
+// at $50k/mo gross $600k/yr, run with 1-3 people, and have no budget for
+// $99+/mo SaaS. Widening to $80k-$2M captures both founder-led growth-stage
+// shops ($80k-$300k) and mid-market brands with real marketing budget
+// ($300k-$2M) but still pre-enterprise creator tooling (Aspire, GRIN).
+// er units are USD cents per month: $80k = 8_000_000, $2M = 200_000_000.
+const STORELEADS_BQ = "bq=%7B%22must%22%3A%7B%22conjuncts%22%3A%5B%7B%22field%22%3A%22p%22%2C%22operator%22%3A%22or%22%2C%22analyzer%22%3A%22advanced%22%2C%22match%22%3A%221%22%7D%2C%7B%22field%22%3A%22er%22%2C%22min%22%3A8000000%2C%22max%22%3A200000000%2C%22inclusive_min%22%3Atrue%2C%22inclusive_max%22%3Atrue%7D%2C%7B%22field%22%3A%22cc%22%2C%22operator%22%3A%22or%22%2C%22analyzer%22%3A%22advanced%22%2C%22match%22%3A%22US%20GB%22%7D%2C%7B%22field%22%3A%22cat%22%2C%22operator%22%3A%22or%22%2C%22analyzer%22%3A%22advanced%22%2C%22match%22%3A%22%2FApparel%20%2FBeauty...%26...Fitness%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%2FSkin...%26...Nail...Care%20%2FHealth%2FNutrition%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%2FMake-Up...%26...Cosmetics%20%2FBeauty...%26...Fitness%2FFitness%20%2FBeauty...%26...Fitness%2FFace...%26...Body...Care%2FPerfumes...%26...Fragrances%22%7D%5D%7D%7D";
 
 // Fetch brands with cursor pagination + retry
 let nextCursor = null;
@@ -248,6 +256,22 @@ async function storeBrand(domain, data) {
   const emails = (data.contact_info || []).filter(c => c.type === "email").map(c => c.value);
   const bestEmail = getBestEmail(domain, data.contact_info);
 
+  // Score the brand at ingestion using the same shape the row will have
+  // post-upsert. Contact fields aren't filled in yet (those come from the
+  // Apollo/Hunter enrichment pass later) so email-quality scoring runs
+  // again during backfill once contact_first_name is populated.
+  const scoringInput = {
+    email: bestEmail,
+    contact_first_name: null,
+    title: data.title,
+    description: data.description,
+    about_us: data.about_us,
+    contact_page: data.contact_page,
+    last_updated_at: data.last_updated_at,
+    raw_data: data,
+  };
+  const { score, breakdown } = scoreBrand(scoringInput);
+
   await supabase.from("storeleads_brands").upsert({
     domain: domain.replace(/^www\./, ""),
     merchant_name: data.merchant_name || null,
@@ -272,6 +296,9 @@ async function storeBrand(domain, data) {
     career_page: data.career_page || null,
     raw_data: data,
     imported_at: new Date().toISOString(),
+    brand_score: score,
+    brand_score_breakdown: breakdown,
+    scored_at: new Date().toISOString(),
   }, { onConflict: "domain" });
 
   return bestEmail;
