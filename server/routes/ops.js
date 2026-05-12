@@ -4,6 +4,7 @@ import { cloudSqlQuery } from "../lib/cloudsql.js";
 // Link status enum (from main proto):
 // 0=unset, 1=pending_brand, 2=pending_influencer, 3=accepted, 4=rejected, 5=ended
 const LINK_ACCEPTED = 3;
+const LINK_PENDING_INFLUENCER = 2;
 
 // `deleted` uses '-infinity' as sentinel for "not deleted" in this DB.
 const ND = `(deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -26,6 +27,7 @@ export function opsRoutes() {
       const SORTABLE = {
         campaign_name:     "campaign_name",
         brand_name:        "brand_name",
+        creators_invited:  "creators_invited",
         creators_applied:  "creators_applied",
         creators_accepted: "creators_accepted",
         samples_accepted:  "samples_accepted",
@@ -72,8 +74,13 @@ export function opsRoutes() {
             AND ($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)
         ),
         link_agg AS (
+          -- "Invited" = brand reached out, creator hasn't responded yet (link.status = pending_influencer).
+          -- "Applied" = anything else (creator-initiated apps, accepted, rejected, ended, unset). Once an
+          -- invited creator responds, status moves off pending_influencer and they count as Applied.
           SELECT l.product_id,
-                 COUNT(DISTINCT COALESCE(l.influencer_user_id::text, l.id::text))            AS creators_applied,
+                 COUNT(DISTINCT l.influencer_user_id) FILTER (WHERE l.status = $5)           AS creators_invited,
+                 COUNT(DISTINCT COALESCE(l.influencer_user_id::text, l.id::text))
+                   FILTER (WHERE l.status IS DISTINCT FROM $5)                               AS creators_applied,
                  COUNT(DISTINCT l.influencer_user_id) FILTER (WHERE l.status = $2)           AS creators_accepted,
                  COALESCE(SUM(l.clicks_counter), 0)                                          AS clicks
           FROM links l
@@ -102,6 +109,7 @@ export function opsRoutes() {
             p.brand_name,
             p.product_status,
             p.created,
+            COALESCE(la.creators_invited, 0)::int  AS creators_invited,
             COALESCE(la.creators_applied, 0)::int  AS creators_applied,
             COALESCE(la.creators_accepted, 0)::int AS creators_accepted,
             COALESCE(sm.samples_accepted, 0)::int  AS samples_accepted,
@@ -115,7 +123,9 @@ export function opsRoutes() {
               WHEN COALESCE(sm.samples_accepted, 0) > 0
                    AND COALESCE(sm.products_shipped, 0) < COALESCE(sm.samples_accepted, 0) THEN 3 -- danger: shipping
               WHEN COALESCE(sm.products_shipped, 0) < COALESCE(la.creators_accepted, 0) THEN 3    -- danger: shipping
-              WHEN COALESCE(la.creators_applied, 0) = 0 THEN 2                                    -- warn: no apps
+              WHEN COALESCE(la.creators_applied, 0) = 0
+                   AND COALESCE(la.creators_invited, 0) = 0 THEN 2                                -- warn: no outreach
+              WHEN COALESCE(la.creators_applied, 0) = 0 THEN 1                                    -- info: awaiting invite responses
               WHEN COALESCE(la.creators_accepted, 0) = 0 THEN 2                                   -- warn: no accepts
               WHEN COALESCE(sa.sales, 0) = 0 THEN 1                                               -- info: no sales
               ELSE 0                                                                              -- healthy
@@ -128,7 +138,7 @@ export function opsRoutes() {
         SELECT * FROM enriched
         ORDER BY ${sortColumn} ${sortDir} NULLS LAST, created DESC NULLS LAST
         LIMIT $3 OFFSET $4
-      `, [searchPattern, LINK_ACCEPTED, limit, offset]);
+      `, [searchPattern, LINK_ACCEPTED, limit, offset, LINK_PENDING_INFLUENCER]);
 
       res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir });
     } catch (e) {
@@ -174,6 +184,7 @@ export function opsRoutes() {
         else if (srStatus === "shipped") status = "Shipped";
         else if (srStatus === "accepted") status = "Sample Accepted";
         else if (r.link_status === LINK_ACCEPTED) status = "Accepted";
+        else if (r.link_status === LINK_PENDING_INFLUENCER) status = "Invited";
         return {
           ...r,
           status,

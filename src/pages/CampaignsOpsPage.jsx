@@ -5,6 +5,7 @@ import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, Skeleton } from "../components/ui/Skeleton";
 
 const STATUS_COLORS = {
+  Invited:           { bg: "#F3E8FF", fg: "#6B21A8", bgDark: "#2A1B47", fgDark: "#C4B5FD" },
   Applied:           { bg: "#FEF3C7", fg: "#92400E", bgDark: "#3B2A0E", fgDark: "#FCD34D" },
   Accepted:          { bg: "#DBEAFE", fg: "#1E40AF", bgDark: "#0F2547", fgDark: "#93C5FD" },
   "Sample Accepted": { bg: "#CCFBF1", fg: "#115E59", bgDark: "#0E2E2A", fgDark: "#5EEAD4" },
@@ -13,7 +14,7 @@ const STATUS_COLORS = {
   Sold:              { bg: "#D1FAE5", fg: "#065F46", bgDark: "#0E2E22", fgDark: "#6EE7B7" },
 };
 
-const STAGES = ["Applied", "Accepted", "Sample Accepted", "Shipped", "Sold"];
+const STAGES = ["Invited", "Applied", "Accepted", "Sample Accepted", "Shipped", "Sold"];
 
 const PAGE_SIZE = 25;
 
@@ -269,12 +270,14 @@ function CampaignRows({ children }) {
 }
 
 function computeBottleneck(c) {
+  const invited = Number(c.creators_invited || 0);
   const applied = Number(c.creators_applied || 0);
   const accepted = Number(c.creators_accepted || 0);
   const samplesAccepted = Number(c.samples_accepted || 0);
   const shipped = Number(c.products_shipped || 0);
   const sales = Number(c.sales || 0);
-  if (applied === 0) return { label: "No applications", tone: "warn" };
+  if (applied === 0 && invited === 0) return { label: "No outreach", tone: "warn" };
+  if (applied === 0) return { label: "Awaiting invite responses", tone: "info" };
   if (accepted === 0) return { label: "No acceptances", tone: "warn" };
   if (samplesAccepted > 0 && shipped < samplesAccepted) return { label: "Brand: accepted, not shipped", tone: "danger" };
   if (shipped < accepted) return { label: "Brand: not shipping", tone: "danger" };
@@ -358,7 +361,11 @@ function CreatorTable({ theme, mode, creators, loading }) {
 function StageFunnel({ theme, mode, creators }) {
   const counts = STAGES.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
   for (const c of creators) {
-    counts.Applied += 1;
+    // Invited and Applied are sibling entry points: a creator is in one or the other,
+    // not both. Once an invited creator responds, status moves off "Invited" and they
+    // flow through the rest of the funnel from Applied onward.
+    if (c.status === "Invited") counts.Invited += 1;
+    else counts.Applied += 1;
     if (["Accepted", "Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts.Accepted += 1;
     if (["Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts["Sample Accepted"] += 1;
     if (["Shipped", "Sold"].includes(c.status)) counts.Shipped += 1;
