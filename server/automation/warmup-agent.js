@@ -29,10 +29,14 @@ const RAMP_SCHEDULE = [
   9, 9, 10, 10,
 ];
 
-const MIN_SEND_GAP_MS = 90_000;   // 90s between warmup sends within one run
-                                  // — keeps the sender from blasting all
-                                  // its daily quota in 30 seconds, which is
-                                  // a deliverability red flag
+// 3s gap between sends *within a single inbox*. Inboxes are processed in
+// parallel (see Promise.all below) so the total wall-clock for the daily
+// run is ~30s even on Day 14 (10 sends × 3s per inbox, 4 inboxes in
+// parallel). Why this matters: Vercel serverless functions cap at 60s,
+// and a longer per-send gap would mean the cron gets killed mid-loop and
+// most sends never go out. 3s also keeps the per-inbox cadence plausibly
+// human — same inbox doesn't fire 10 emails in 5 seconds.
+const MIN_SEND_GAP_MS = 3_000;
 
 export async function runWarmup({ teamId, dryRun = false, log = console.log }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -83,123 +87,120 @@ export async function runWarmup({ teamId, dryRun = false, log = console.log }) {
   const startOfDay = new Date();
   startOfDay.setUTCHours(0, 0, 0, 0);
 
-  let totalSent = 0;
-  let totalFailed = 0;
-  const perInbox = [];
+  // Process inboxes in parallel so the function fits inside Vercel's 60s
+  // serverless budget even at Day-14 peak volume. Sends *within* a single
+  // inbox stay serial with a small gap so we don't fire 10 emails in 5s
+  // from the same sender.
+  const results = await Promise.all(inboxes.map((inbox) => processInbox({
+    inbox, teamId, seeds, startOfDay, dryRun, apiKey, resendApiKey, log,
+  })));
 
-  for (const inbox of inboxes) {
-    const startedAt = inbox.warming_started_at ? new Date(inbox.warming_started_at) : new Date();
-    const daysWarming = Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 86_400_000));
-    const targetToday = RAMP_SCHEDULE[daysWarming];
-
-    if (targetToday === undefined) {
-      log(`[warmup] ${inbox.email}: day ${daysWarming} is past the 2-week ramp — agent stopping for this inbox. Flip is_warming=false to graduate.`);
-      perInbox.push({ inbox: inbox.email, day: daysWarming, status: "graduated" });
-      continue;
-    }
-
-    // Count today's warmup sends already made by this inbox
-    const { count: sentToday, error: countErr } = await supabase
-      .from("email_sends")
-      .select("id", { count: "exact", head: true })
-      .eq("team_id", teamId)
-      .eq("sender_email", inbox.email)
-      .eq("template_key", "warmup")
-      .gte("sent_at", startOfDay.toISOString());
-
-    if (countErr) {
-      log(`[warmup] ${inbox.email}: count error ${countErr.message}, skipping`);
-      continue;
-    }
-
-    const remaining = targetToday - (sentToday || 0);
-    if (remaining <= 0) {
-      log(`[warmup] ${inbox.email}: day ${daysWarming}, already at target (${sentToday}/${targetToday})`);
-      perInbox.push({ inbox: inbox.email, day: daysWarming, sent: sentToday, target: targetToday, ran: 0 });
-      continue;
-    }
-
-    // Pick recipients: shuffle seeds, take `remaining`. If we have fewer
-    // seeds than the remaining count, recycle — but warn loudly because
-    // it means the operator under-populated warmup_seeds.
-    const picks = pickRecipients(seeds, remaining);
-    if (picks.length < remaining) {
-      log(`[warmup] ${inbox.email}: only ${seeds.length} seeds available, capping today's run at ${picks.length} (target was ${remaining})`);
-    }
-
-    let inboxSent = 0;
-    let inboxFailed = 0;
-
-    for (const seed of picks) {
-      if (dryRun) {
-        log(`[warmup]   DRY: would send from ${inbox.email} → ${seed.email}`);
-        totalSent++;
-        inboxSent++;
-        continue;
-      }
-
-      const { subject, body } = await generateWarmupEmail({
-        senderName: inbox.from_name,
-        recipientName: seed.display_name,
-        apiKey,
-      });
-
-      const result = await sendEmail({
-        to: seed.email,
-        toName: seed.display_name,
-        subject,
-        body,
-        from: `${inbox.from_name} <${inbox.email}>`,
-        replyTo: inbox.reply_to || inbox.email,
-        resendApiKey,
-      });
-
-      // Record in email_sends so future cap-counting + reply-tracking work.
-      // template_key='warmup' is the signal that distinguishes these from
-      // real outbound for any reporting query.
-      await supabase.from("email_sends").insert({
-        team_id: teamId,
-        sender_email: inbox.email,
-        sender_domain: inbox.domain,
-        to_email: seed.email.toLowerCase(),
-        to_name: seed.display_name || null,
-        subject,
-        body,
-        template_key: "warmup",
-        template_variant: "warmup",
-        status: result.success ? "sent" : "failed",
-        resend_id: result.resendId || null,
-        error: result.error || null,
-        sent_at: new Date().toISOString(),
-      });
-
-      if (result.success) {
-        inboxSent++;
-        totalSent++;
-        log(`[warmup]   ${inbox.email} → ${seed.email}: OK (${subject})`);
-      } else {
-        inboxFailed++;
-        totalFailed++;
-        log(`[warmup]   ${inbox.email} → ${seed.email}: FAIL ${result.error}`);
-      }
-
-      // Pace ourselves between sends so the inbox doesn't fire 10 emails in
-      // 15 seconds. Real humans don't do that.
-      await sleep(MIN_SEND_GAP_MS);
-    }
-
-    perInbox.push({
-      inbox: inbox.email,
-      day: daysWarming,
-      target: targetToday,
-      already_sent: sentToday || 0,
-      sent_this_run: inboxSent,
-      failed: inboxFailed,
-    });
-  }
+  const totalSent = results.reduce((s, r) => s + (r.sent_this_run || 0), 0);
+  const totalFailed = results.reduce((s, r) => s + (r.failed || 0), 0);
+  const perInbox = results;
 
   log(`[warmup] DONE — sent=${totalSent} failed=${totalFailed} across ${inboxes.length} inbox(es)`);
   return { ran: totalSent, failed: totalFailed, perInbox };
+}
+
+async function processInbox({ inbox, teamId, seeds, startOfDay, dryRun, apiKey, resendApiKey, log }) {
+  const startedAt = inbox.warming_started_at ? new Date(inbox.warming_started_at) : new Date();
+  const daysWarming = Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 86_400_000));
+  const targetToday = RAMP_SCHEDULE[daysWarming];
+
+  if (targetToday === undefined) {
+    log(`[warmup] ${inbox.email}: day ${daysWarming} is past the 2-week ramp — agent stopping for this inbox. Flip is_warming=false to graduate.`);
+    return { inbox: inbox.email, day: daysWarming, status: "graduated", sent_this_run: 0, failed: 0 };
+  }
+
+  const { count: sentToday, error: countErr } = await supabase
+    .from("email_sends")
+    .select("id", { count: "exact", head: true })
+    .eq("team_id", teamId)
+    .eq("sender_email", inbox.email)
+    .eq("template_key", "warmup")
+    .gte("sent_at", startOfDay.toISOString());
+
+  if (countErr) {
+    log(`[warmup] ${inbox.email}: count error ${countErr.message}, skipping`);
+    return { inbox: inbox.email, day: daysWarming, error: countErr.message, sent_this_run: 0, failed: 0 };
+  }
+
+  const remaining = targetToday - (sentToday || 0);
+  if (remaining <= 0) {
+    log(`[warmup] ${inbox.email}: day ${daysWarming}, already at target (${sentToday}/${targetToday})`);
+    return { inbox: inbox.email, day: daysWarming, already_sent: sentToday, target: targetToday, sent_this_run: 0, failed: 0 };
+  }
+
+  const picks = pickRecipients(seeds, remaining);
+  if (picks.length < remaining) {
+    log(`[warmup] ${inbox.email}: only ${seeds.length} seeds available, capping today's run at ${picks.length} (target was ${remaining})`);
+  }
+
+  let inboxSent = 0;
+  let inboxFailed = 0;
+
+  for (let i = 0; i < picks.length; i++) {
+    const seed = picks[i];
+
+    if (dryRun) {
+      log(`[warmup]   DRY: would send from ${inbox.email} → ${seed.email}`);
+      inboxSent++;
+      continue;
+    }
+
+    const { subject, body } = await generateWarmupEmail({
+      senderName: inbox.from_name,
+      recipientName: seed.display_name,
+      apiKey,
+    });
+
+    const result = await sendEmail({
+      to: seed.email,
+      toName: seed.display_name,
+      subject,
+      body,
+      from: `${inbox.from_name} <${inbox.email}>`,
+      replyTo: inbox.reply_to || inbox.email,
+      resendApiKey,
+    });
+
+    await supabase.from("email_sends").insert({
+      team_id: teamId,
+      sender_email: inbox.email,
+      sender_domain: inbox.domain,
+      to_email: seed.email.toLowerCase(),
+      to_name: seed.display_name || null,
+      subject,
+      body,
+      template_key: "warmup",
+      template_variant: "warmup",
+      status: result.success ? "sent" : "failed",
+      resend_id: result.resendId || null,
+      error: result.error || null,
+      sent_at: new Date().toISOString(),
+    });
+
+    if (result.success) {
+      inboxSent++;
+      log(`[warmup]   ${inbox.email} → ${seed.email}: OK (${subject})`);
+    } else {
+      inboxFailed++;
+      log(`[warmup]   ${inbox.email} → ${seed.email}: FAIL ${result.error}`);
+    }
+
+    // Sleep between sends within this inbox (but not after the last one).
+    if (i < picks.length - 1) await sleep(MIN_SEND_GAP_MS);
+  }
+
+  return {
+    inbox: inbox.email,
+    day: daysWarming,
+    target: targetToday,
+    already_sent: sentToday || 0,
+    sent_this_run: inboxSent,
+    failed: inboxFailed,
+  };
 }
 
 function pickRecipients(seeds, count) {
