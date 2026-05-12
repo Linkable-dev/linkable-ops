@@ -361,9 +361,9 @@ function CreatorTable({ theme, mode, creators, loading }) {
 function StageFunnel({ theme, mode, creators }) {
   const counts = STAGES.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
   for (const c of creators) {
-    // Invited and Applied are sibling entry points: a creator is in one or the other,
-    // not both. Once an invited creator responds, status moves off "Invited" and they
-    // flow through the rest of the funnel from Applied onward.
+    // Invited (brand-initiated) and Applied (creator-initiated) are parallel sources;
+    // a creator is in exactly one. Both converge at Accepted, which the linear funnel
+    // continues from.
     if (c.status === "Invited") counts.Invited += 1;
     else counts.Applied += 1;
     if (["Accepted", "Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts.Accepted += 1;
@@ -371,20 +371,31 @@ function StageFunnel({ theme, mode, creators }) {
     if (["Shipped", "Sold"].includes(c.status)) counts.Shipped += 1;
     if (c.status === "Sold") counts.Sold += 1;
   }
+
+  const linearStages = ["Accepted", "Sample Accepted", "Shipped", "Sold"];
+  const pillStyle = (s) => ({
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "4px 10px", borderRadius: 14,
+    background: mode === "dark" ? STATUS_COLORS[s].bgDark : STATUS_COLORS[s].bg,
+    color: mode === "dark" ? STATUS_COLORS[s].fgDark : STATUS_COLORS[s].fg,
+    fontSize: 11, fontWeight: 600,
+    whiteSpace: "nowrap",
+  });
+
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      {STAGES.map((s, i) => (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+        <span style={pillStyle("Invited")}>Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span></span>
+        <span style={pillStyle("Applied")}>Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span></span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, color: theme.textMuted, fontSize: 13, lineHeight: 1 }}>
+        <span>↘</span>
+        <span>↗</span>
+      </div>
+      {linearStages.map((s, i) => (
         <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "4px 10px", borderRadius: 14,
-            background: mode === "dark" ? STATUS_COLORS[s].bgDark : STATUS_COLORS[s].bg,
-            color: mode === "dark" ? STATUS_COLORS[s].fgDark : STATUS_COLORS[s].fg,
-            fontSize: 11, fontWeight: 600,
-          }}>
-            {s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span>
-          </div>
-          {i < STAGES.length - 1 && <span style={{ color: theme.textMuted }}>→</span>}
+          <span style={pillStyle(s)}>{s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span></span>
+          {i < linearStages.length - 1 && <span style={{ color: theme.textMuted }}>→</span>}
         </div>
       ))}
     </div>
