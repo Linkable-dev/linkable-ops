@@ -16,12 +16,26 @@ import { supabase } from "../lib/supabase.js";
 //   { hasPool: false, inbox: null }                 — no inboxes configured, use legacy sender
 //   { hasPool: true,  inbox: null }                 — all configured inboxes hit cap today, defer
 //   { hasPool: true,  inbox: { id, email, from, replyTo, domain, isWarming } } — send via this
-export async function getNextInbox(teamId) {
-  const { data: inboxes, error: ibErr } = await supabase
+//
+// Options:
+//   pinnedEmail — restrict selection to this specific inbox (used by sendDueRow
+//     to preserve thread continuity: every touch in a sequence sends from the
+//     same inbox the enrollment picked). When pinned, hasPool=true and
+//     inbox=null means that single inbox is at cap → defer the row.
+export async function getNextInbox(teamId, options = {}) {
+  const { pinnedEmail = null } = options;
+
+  let query = supabase
     .from("sender_inboxes")
     .select("id, email, from_name, reply_to, domain, daily_cap, warming_cap, is_warming")
     .eq("team_id", teamId)
     .eq("is_active", true);
+
+  if (pinnedEmail) {
+    query = query.ilike("email", pinnedEmail);
+  }
+
+  const { data: inboxes, error: ibErr } = await query;
 
   if (ibErr) {
     console.error("sender-pool: fetch inboxes failed:", ibErr.message);

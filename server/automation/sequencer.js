@@ -203,6 +203,18 @@ export async function enrollProspect({
     [brand?.storeName, brand?.name, brand?.merchant_name, brand?.title, brand?.description].filter(Boolean).join(" ")
   );
 
+  // Pick the sender inbox ONCE for the whole sequence and pin it on every
+  // touch row. Without this, sendDueRow would re-pick via getNextInbox at
+  // each send, and a 4-touch sequence over 12 days would land on 4 different
+  // inboxes — Gmail breaks threading and the prospect sees 4 strangers
+  // following up. hasPool=false means no pool configured at all (legacy
+  // single-sender path stays active). hasPool=true with inbox=null means
+  // every inbox is at cap today — defer the whole enrollment to tomorrow.
+  const { hasPool: poolConfigured, inbox: pickedInbox } = await getNextInbox(teamId);
+  if (poolConfigured && !pickedInbox) {
+    return { skipped: "all inboxes at daily cap" };
+  }
+
   // Generate the personalized observation once — reused across touches that need it.
   let observation = "";
   if (apiKey) {
@@ -252,7 +264,12 @@ export async function enrollProspect({
       sequence_id: sequenceId,
       touch_number: touch,
       brand_group: grp,
-      sender_domain: SENDER_DOMAIN,
+      // Pin the inbox on every row so all 4 touches send from the same sender.
+      // sendDueRow reads sender_email from the row and looks up the inbox via
+      // getNextInbox(..., {pinnedEmail}). Falls back to legacy SENDER_DOMAIN
+      // when the pool isn't configured.
+      sender_email: pickedInbox?.email || null,
+      sender_domain: pickedInbox?.domain || SENDER_DOMAIN,
       template_variant: tpl.template_key || key,
       to_email: toEmail.toLowerCase(),
       to_name: toName || null,
@@ -353,14 +370,28 @@ export async function sendDueRow(row, { resendApiKey, senderFrom, replyTo }) {
     return { sent: false, cancelled: true, reason: "suppressed" };
   }
 
-  // Sender selection: prefer the per-team inbox pool when configured.
-  // - hasPool=false → no inboxes set up, use the campaign's sender_from (legacy)
-  // - hasPool=true, inbox=null → all configured inboxes hit cap today, defer
-  // - hasPool=true, inbox set → rotate this send through the selected inbox
-  // Deferred rows stay in 'scheduled' status so the next cron picks them up.
-  const { hasPool, inbox } = await getNextInbox(row.team_id);
+  // Sender selection — pinned-first for thread continuity:
+  //
+  // If row.sender_email is set, the inbox was pinned at enrollment time.
+  // Honor it: every touch in the sequence sends from the same address so
+  // the prospect sees one coherent thread. If that inbox is at cap today,
+  // defer (don't fall back to a different inbox — that breaks threading).
+  //
+  // If row.sender_email is NULL (legacy enrollments pre-fix, or pool wasn't
+  // configured at enrollment time), fall through to free rotation across
+  // the pool.
+  //
+  // hasPool=false in either case means no pool exists at all — use the
+  // campaign's sender_from (legacy single-sender path).
+  const { hasPool, inbox } = row.sender_email
+    ? await getNextInbox(row.team_id, { pinnedEmail: row.sender_email })
+    : await getNextInbox(row.team_id);
+
   if (hasPool && !inbox) {
-    return { sent: false, deferred: true, reason: "all inboxes at daily cap" };
+    const reason = row.sender_email
+      ? `pinned inbox ${row.sender_email} at daily cap`
+      : "all inboxes at daily cap";
+    return { sent: false, deferred: true, reason };
   }
 
   const finalFrom = inbox?.from || senderFrom || SENDER_FROM;
