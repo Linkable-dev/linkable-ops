@@ -388,10 +388,8 @@ function StageFunnel({ theme, mode, creators }) {
         <span style={pillStyle("Invited")}>Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span></span>
         <span style={pillStyle("Applied")}>Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span></span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, color: theme.textMuted, fontSize: 13, lineHeight: 1 }}>
-        <span>↘</span>
-        <span>↗</span>
-      </div>
+      <EntryMergeConnector color={theme.textMuted} />
+
       {linearStages.map((s, i) => (
         <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={pillStyle(s)}>{s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span></span>
@@ -399,6 +397,19 @@ function StageFunnel({ theme, mode, creators }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function EntryMergeConnector({ color }) {
+  // Two curves from the entry pills (left, top and bottom) converge into a short
+  // horizontal segment with a chevron, pointing into the Accepted pill on the right.
+  return (
+    <svg width="36" height="48" viewBox="0 0 36 48" fill="none" style={{ flexShrink: 0 }} aria-hidden="true">
+      <path d="M 0 12 Q 18 12, 24 24" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <path d="M 0 36 Q 18 36, 24 24" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <path d="M 24 24 L 30 24" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <path d="M 28 21 L 32 24 L 28 27" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
