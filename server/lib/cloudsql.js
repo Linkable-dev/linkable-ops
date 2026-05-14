@@ -38,7 +38,28 @@ export function currentDbTarget() {
 const pools = { prod: null, dev: null };
 let connector = null;
 
-async function buildProdPool() {
+// Both targets prefer the Cloud SQL connector so they work from Vercel
+// without IP whitelisting. The dev pool falls back to DATABASE_URL_DEV
+// (direct public-IP Postgres) when CLOUDSQL_CONNECTION_NAME_DEV is unset —
+// handy if the connector ever has issues during local development.
+const TARGET_VARS = {
+  prod: {
+    connectionName: "CLOUDSQL_CONNECTION_NAME",
+    db: "CLOUDSQL_DB",
+    user: "CLOUDSQL_USER",
+    password: "CLOUDSQL_PASSWORD",
+    fallbackUrl: null,
+  },
+  dev: {
+    connectionName: "CLOUDSQL_CONNECTION_NAME_DEV",
+    db: "CLOUDSQL_DB_DEV",
+    user: "CLOUDSQL_USER_DEV",
+    password: "CLOUDSQL_PASSWORD_DEV",
+    fallbackUrl: "DATABASE_URL_DEV",
+  },
+};
+
+async function ensureCredentialsFile() {
   // On Vercel, we pass the service account key as a JSON string env var
   // because we can't write a file to the filesystem reliably.
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -49,31 +70,36 @@ async function buildProdPool() {
     fs.default.writeFileSync(tmpPath, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
     process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
   }
+}
 
+async function buildConnectorPool(vars) {
+  await ensureCredentialsFile();
   if (!connector) connector = new Connector();
   const clientOpts = await connector.getOptions({
-    instanceConnectionName: process.env.CLOUDSQL_CONNECTION_NAME,
+    instanceConnectionName: process.env[vars.connectionName],
     ipType: "PUBLIC",
   });
-
   return new pg.Pool({
     ...clientOpts,
-    user: process.env.CLOUDSQL_USER,
-    password: process.env.CLOUDSQL_PASSWORD,
-    database: process.env.CLOUDSQL_DB,
+    user: process.env[vars.user],
+    password: process.env[vars.password],
+    database: process.env[vars.db],
     max: 5,
   });
 }
 
-function buildDevPool() {
-  // Dev DB is exposed via direct public-IP Postgres rather than the Cloud SQL
-  // connector. From Vercel this only works if the dev instance whitelists the
-  // egress range; locally any laptop with the password can connect.
-  const url = process.env.DATABASE_URL_DEV;
-  if (!url) {
-    throw new Error("DATABASE_URL_DEV is not set — cannot target dev DB");
+async function buildPool(target) {
+  const vars = TARGET_VARS[target];
+  if (process.env[vars.connectionName]) {
+    return buildConnectorPool(vars);
   }
-  return new pg.Pool({ connectionString: url, max: 5 });
+  if (vars.fallbackUrl && process.env[vars.fallbackUrl]) {
+    return new pg.Pool({ connectionString: process.env[vars.fallbackUrl], max: 5 });
+  }
+  throw new Error(
+    `No connection config for target=${target}: set ${vars.connectionName}` +
+    (vars.fallbackUrl ? ` or ${vars.fallbackUrl}` : ""),
+  );
 }
 
 /**
@@ -83,7 +109,7 @@ function buildDevPool() {
 export async function getCloudSqlPool(target = currentDbTarget()) {
   if (target !== "prod" && target !== "dev") target = "prod";
   if (pools[target]) return pools[target];
-  pools[target] = target === "dev" ? buildDevPool() : await buildProdPool();
+  pools[target] = await buildPool(target);
   return pools[target];
 }
 
