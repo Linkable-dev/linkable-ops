@@ -11,6 +11,7 @@ import {
 } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
 import { closeCloudSql } from "./lib/cloudsql.js";
+import { dbTargetMiddleware } from "./middleware/dbTarget.js";
 
 const app = express();
 app.use(cors({ origin: ["http://localhost:3010", "http://localhost:5173"] }));
@@ -35,11 +36,14 @@ app.use("/api/conversations", conversationsWebhookRoutes());
 // Cron routes (no admin auth — secured by CRON_SECRET / x-vercel-cron header).
 app.use("/api/cron", cronRoutes());
 
-// Protected routes
-app.use("/api/tables", requireOpsAdmin, tableRoutes());
-app.use("/api/analytics", requireOpsAdmin, analyticsRoutes());
-app.use("/api/ops", requireOpsAdmin, opsRoutes());
-app.use("/api/admin-users", requireOpsAdmin, adminUsersRoutes());
+// Protected routes. The dbTarget middleware reads the x-db-target header
+// from the ops UI and binds the per-request target to AsyncLocalStorage so
+// cloudSqlQuery() inside route handlers picks the matching pool. Auth and
+// cron/webhook routes intentionally bypass it — those always hit prod.
+app.use("/api/tables", dbTargetMiddleware, requireOpsAdmin, tableRoutes());
+app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes());
+app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
+app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 
 const PORT = process.env.PORT || 3001;

@@ -12,6 +12,7 @@ import {
 import { cronRoutes } from "../server/routes/cron.js";
 import { outboundRoutes } from "../server/routes/outbound.js";
 import { outboundCampaignsRoutes } from "../server/routes/outbound-campaigns.js";
+import { dbTargetMiddleware } from "../server/middleware/dbTarget.js";
 
 const app = express();
 app.use(cors());
@@ -88,10 +89,15 @@ app.use("/api/conversations", conversationsWebhookRoutes());
 // Cron routes (no admin auth — secured by CRON_SECRET / x-vercel-cron).
 app.use("/api/cron", cronRoutes());
 
-app.use("/api/tables", requireOpsAdmin, tableRoutes());
-app.use("/api/analytics", requireOpsAdmin, analyticsRoutes());
-app.use("/api/ops", requireOpsAdmin, opsRoutes());
-app.use("/api/admin-users", requireOpsAdmin, adminUsersRoutes());
+// dbTargetMiddleware reads the x-db-target header from the ops UI and binds
+// the per-request target to AsyncLocalStorage so cloudSqlQuery() inside route
+// handlers picks the matching pool. Conversations/outbound and auth/cron
+// intentionally bypass it — those always hit prod (ops-internal tables only
+// exist there).
+app.use("/api/tables", dbTargetMiddleware, requireOpsAdmin, tableRoutes());
+app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes());
+app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
+app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());

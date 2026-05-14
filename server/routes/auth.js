@@ -1,7 +1,12 @@
 import express from "express";
 import crypto from "crypto";
-import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { cloudSqlQuery as cloudSqlQueryRaw } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
+
+// `ops_admins` lives in the prod DB only — pin every query in this file to
+// prod so flipping the UI's dev toggle never locks an admin out or queries a
+// non-existent dev table.
+const cloudSqlQuery = (text, params) => cloudSqlQueryRaw(text, params, "prod");
 
 // Inline middleware for use inside the auth router
 async function requireOpsAdminInline(req, res, next) {

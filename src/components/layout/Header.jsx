@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
+import { useDbTarget } from "../../contexts/DbTargetContext";
 
 function getPageInfo(pathname) {
   if (pathname === "/") return { title: "Dashboard", subtitle: "Database overview and analytics" };
@@ -19,8 +20,36 @@ function getPageInfo(pathname) {
 export default function Header() {
   const location = useLocation();
   const { theme, mode, toggleTheme } = useTheme();
+  const { target, setTarget } = useDbTarget();
   const { title, subtitle } = getPageInfo(location.pathname);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+  const [dbMenuOpen, setDbMenuOpen] = useState(false);
+  const dbMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!dbMenuOpen) return;
+    function onClickOutside(e) {
+      if (dbMenuRef.current && !dbMenuRef.current.contains(e.target)) setDbMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [dbMenuOpen]);
+
+  // Switching target during a session would leave stale data on screen; force
+  // a reload so every in-flight cache/query starts from a clean state.
+  const switchTarget = (next) => {
+    setDbMenuOpen(false);
+    if (next === target) return;
+    setTarget(next);
+    window.location.reload();
+  };
+
+  const isDev = target === "dev";
+  const pillBg = isDev
+    ? (mode === "dark" ? "#3D2A05" : "#FFFBEB")
+    : (mode === "dark" ? "#052e16" : "#F0FDF4");
+  const pillColor = isDev ? "#F59E0B" : "#22C55E";
+  const pillLabel = isDev ? "Cloud SQL · Dev" : "Cloud SQL · Prod";
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -52,14 +81,51 @@ export default function Header() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500,
-          padding: "4px 10px", borderRadius: 20,
-          background: mode === "dark" ? "#052e16" : "#F0FDF4",
-          color: "#22C55E",
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E" }} />
-          Cloud SQL
+        <div ref={dbMenuRef} style={{ position: "relative" }}>
+          <button
+            onClick={() => setDbMenuOpen((v) => !v)}
+            title={isDev
+              ? "Targeting DEV database — click to switch"
+              : "Targeting PROD database — click to switch"}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500,
+              padding: "4px 10px", borderRadius: 20, border: "none", cursor: "pointer",
+              background: pillBg, color: pillColor,
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: pillColor }} />
+            {pillLabel}
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2 }}>
+              <path d="M2 4l3 3 3-3" />
+            </svg>
+          </button>
+          {dbMenuOpen && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 200,
+              background: theme.surface, border: `1px solid ${theme.border}`,
+              borderRadius: 10, boxShadow: theme.shadowMd, zIndex: 100, overflow: "hidden",
+            }}>
+              <DbOption
+                theme={theme} dot="#22C55E" label="Prod"
+                hint="app.linkable.link"
+                active={!isDev}
+                onClick={() => switchTarget("prod")}
+              />
+              <DbOption
+                theme={theme} dot="#F59E0B" label="Dev"
+                hint="34.105.150.146"
+                active={isDev}
+                onClick={() => switchTarget("dev")}
+              />
+              <div style={{
+                padding: "8px 12px", fontSize: 11, color: theme.textMuted,
+                borderTop: `1px solid ${theme.border}`, background: theme.surfaceAlt,
+                lineHeight: 1.4,
+              }}>
+                Auth & ops-internal tables always hit prod.
+              </div>
+            </div>
+          )}
         </div>
 
         {iconBtn(toggleFullscreen, isFullscreen ? "Exit fullscreen" : "Fullscreen",
@@ -88,5 +154,31 @@ export default function Header() {
         )}
       </div>
     </header>
+  );
+}
+
+function DbOption({ theme, dot, label, hint, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 10, width: "100%",
+        padding: "10px 12px", border: "none", background: "transparent",
+        cursor: "pointer", textAlign: "left", color: theme.text,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = theme.surfaceAlt; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dot, flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11, color: theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hint}</div>
+      </span>
+      {active && (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: theme.text }}>
+          <path d="M3 8l3 3 7-7" />
+        </svg>
+      )}
+    </button>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
+import { useDbTarget } from "../contexts/DbTargetContext";
 import { api, friendlyDate, friendlyNumber } from "../lib/api";
 import { TabBar } from "../components/ui/TabBar";
 import { Input } from "../components/ui/Input";
@@ -58,6 +59,8 @@ function initialsFor(row, kind) {
 
 export default function UsersPage() {
   const { theme, mode } = useTheme();
+  const { target } = useDbTarget();
+  const isDev = target === "dev";
   const [tab, setTab] = useState("brands");
   const [q, setQ] = useState("");
   const [rows, setRows] = useState([]);
@@ -132,11 +135,20 @@ export default function UsersPage() {
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 6px", color: theme.text }}>
           Impersonation
+          {isDev && (
+            <span style={{
+              marginLeft: 10, fontSize: 11, fontWeight: 600,
+              padding: "2px 8px", borderRadius: 10,
+              background: mode === "dark" ? "#3D2A05" : "#FFFBEB", color: "#F59E0B",
+              verticalAlign: "middle",
+            }}>DEV</span>
+          )}
         </h1>
         <p style={{ fontSize: 13, color: theme.textMuted, margin: 0 }}>
-          Open the production main app as any brand or creator. Sessions are minted in prod and
-          flagged as <code style={{ background: theme.surfaceAlt, padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>admin_impersonation</code> in
-          the tokens table; every login is logged to <code style={{ background: theme.surfaceAlt, padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>admin_impersonations</code>.
+          Open the {isDev ? "dev" : "production"} main app as any brand or creator. Sessions are
+          minted in the {isDev ? "dev DB" : "prod DB"} and flagged as <code style={{ background: theme.surfaceAlt, padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>admin_impersonation</code> in
+          the tokens table; every login is logged to <code style={{ background: theme.surfaceAlt, padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>admin_impersonations</code> (always
+          prod — audit trail).
         </p>
       </div>
 

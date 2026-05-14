@@ -1,10 +1,15 @@
 const BASE = "/api";
 
 import { supabase } from "./supabase";
+import { getDbTarget } from "../contexts/DbTargetContext";
 
 async function request(path, options = {}) {
   const { data: { session } } = await supabase.auth.getSession();
-  const headers = { "Content-Type": "application/json", ...options.headers };
+  const headers = {
+    "Content-Type": "application/json",
+    "x-db-target": getDbTarget(),
+    ...options.headers,
+  };
   if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
   const res = await fetch(`${BASE}${path}`, { headers, ...options });
   if (!res.ok) {

@@ -1,5 +1,5 @@
 import express from "express";
-import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { cloudSqlQuery, currentDbTarget } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
 
 // Mirrors the main app's role enum (see linkable-new/backend/models/enums.py
@@ -15,7 +15,13 @@ const LINK_STATUS_ACCEPTED = 3;
 
 function clientUrl() {
   // Strip trailing slash(es) so the gateway URL never has `//?token=`.
-  return (process.env.MAIN_APP_CLIENT_URL || "http://localhost:3002").replace(/\/+$/, "");
+  // Token rows live in whichever DB the request is targeting, so the gateway
+  // URL must point at the matching main-app deployment.
+  const target = currentDbTarget();
+  const raw = target === "dev"
+    ? (process.env.MAIN_APP_CLIENT_URL_DEV || "http://localhost:3002")
+    : (process.env.MAIN_APP_CLIENT_URL || "http://localhost:3002");
+  return raw.replace(/\/+$/, "");
 }
 
 // Active-row sentinels MUST match the main app exactly, otherwise
@@ -277,11 +283,15 @@ async function impersonateUser(userId, admin) {
   );
   const tokenId = tokenRows[0].id;
 
+  // Audit trail lives in prod regardless of target — admin_impersonations.admin_id
+  // FKs into ops_admins (prod-only) and the table is the canonical ops audit log.
+  // token_id has no FK so storing a dev token UUID here is safe.
   await cloudSqlQuery(
     `INSERT INTO admin_impersonations
        (admin_id, admin_email, target_user_id, target_email, target_role, target_kind, token_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [admin.id, admin.email, user.id, user.email, user.role, targetKind, tokenId],
+    "prod",
   );
 
   return {

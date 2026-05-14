@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AuthProvider } from "./contexts/AuthContext";
+import { DbTargetProvider } from "./contexts/DbTargetContext";
 import AuthGate from "./components/layout/AuthGate";
 import App from "./App";
 import DashboardPage from "./pages/DashboardPage";
@@ -23,8 +24,9 @@ createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <ThemeProvider>
-        <AuthProvider>
-          <Routes>
+        <DbTargetProvider>
+          <AuthProvider>
+            <Routes>
             <Route path="/setup-password" element={<SetupPasswordPage />} />
             <Route path="/accept-invite" element={<AcceptInvitePage />} />
             <Route element={<AuthGate />}>
@@ -42,8 +44,9 @@ createRoot(document.getElementById("root")).render(
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Route>
-          </Routes>
-        </AuthProvider>
+            </Routes>
+          </AuthProvider>
+        </DbTargetProvider>
       </ThemeProvider>
     </BrowserRouter>
   </StrictMode>
