@@ -22,6 +22,8 @@
 //   }
 
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { getSearchBackend } from "./creator-search.js";
+import { extractBioRecord } from "./creator-bio-extract.js";
 
 // Mirror the main-app role + active sentinels (see admin-users.js for the
 // canonical version). ROLE_INFLUENCER=3 from linkable-new/backend/models/enums.py.
@@ -113,17 +115,157 @@ export function mainAppProvider({ target = "prod" } = {}) {
   };
 }
 
-// ---------- Future: scraper provider stub ----------
+// ---------- Bio-mining provider (Linktree / Beacons / similar) ----------
 //
-// Stubbed signature so the sync layer is forward-compatible. Implement when
-// the first external source (e.g. Modash) is wired up; until then it throws
-// clearly so a misconfigured `--source modash` fails fast rather than silently
-// returning zero rows.
-export function scraperProvider({ name = "scraper" } = {}) {
+// Discovers creators by searching the open web for public bio pages in
+// the operator's target niches, fetches each page, and extracts the only
+// signals we need to cold-email them: contact email + IG handle + display
+// name. No platform API access; no headless browser.
+//
+// Flow per fetch():
+//   1. For each niche × site pattern (linktr.ee, beacons.ai, …) build a
+//      `site:<pattern> <niche>` query and ask the search backend.
+//   2. Sleep ~1.1s between queries so we stay inside Brave's 1 q/s free-tier
+//      rate limit. Search-side concurrency would buy little vs the fetch
+//      pass anyway.
+//   3. For each unique result URL, fetch + extract. Drop rows with no
+//      usable email — there's no point inserting prospects we can't mail.
+//
+// Each provider row carries `source: 'bio_mining'` and `source_id: <url>`.
+// Re-runs upsert on `(team_id, source, source_id)` so the same Linktree
+// URL only ever produces one creator_prospects row regardless of which
+// niche search surfaced it (or how many times we've re-scraped).
+//
+// Followers / engagement remain null — the scoring path branches on
+// `source` (see creator-scoring.js scoreBioMinedCreator) so these rows
+// can still clear the MIN_SEND_SCORE gate when basic data is present.
+
+const DEFAULT_SITE_PATTERNS = ["linktr.ee", "beacons.ai", "bio.link", "lnk.bio"];
+const SEARCH_PAGE_COUNT = 20;          // Brave caps at 20 / page
+const SEARCH_SLEEP_MS = 1100;          // Brave free tier: 1 q/s, +10% margin
+const FETCH_SLEEP_MS = 250;            // be polite to bio hosts on the fetch pass
+const FETCH_CONCURRENCY = 4;           // small concurrency on the fetch pass
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function processWithConcurrency(items, limit, worker) {
+  const results = [];
+  let i = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) {
+        const myIdx = i++;
+        results[myIdx] = await worker(items[myIdx], myIdx);
+      }
+    }),
+  );
+  return results;
+}
+
+export function bioMiningProvider({
+  niches = [],
+  sitePatterns = DEFAULT_SITE_PATTERNS,
+  searchBackend = "brave",
+  searchOpts = {},
+  // Maximum search-result pages per (niche, site) combo. count=20 per page;
+  // pages=1 → up to 20 candidate URLs per combo. Operators tune this with
+  // --search-pages on the CLI.
+  pages = 1,
+  log = console.log,
+} = {}) {
+  if (!Array.isArray(niches) || niches.length === 0) {
+    throw new Error("bio_mining provider requires at least one --niche");
+  }
+  const backend = getSearchBackend(searchBackend, searchOpts);
+  if (!backend.available) {
+    throw new Error(
+      `search backend '${searchBackend}' is not configured (missing API key?). ` +
+      `Set BRAVE_SEARCH_API_KEY or pass a different --search-backend.`
+    );
+  }
+
   return {
-    name,
-    async fetch() {
-      throw new Error(`scraper provider '${name}' not implemented yet`);
+    name: "bio_mining",
+
+    async fetch({ limit = 200 } = {}) {
+      // 1. Discover URLs via search. Track the niche we used so the
+      //    scraped record can record it without keyword-matching the bio body.
+      const seen = new Set();
+      const candidates = [];     // [{ url, niche }]
+      outer: for (const niche of niches) {
+        for (const sitePattern of sitePatterns) {
+          for (let p = 0; p < pages; p++) {
+            const query = `site:${sitePattern} ${niche}`;
+            let page;
+            try {
+              page = await backend.search(query, { count: SEARCH_PAGE_COUNT, offset: p });
+            } catch (err) {
+              log(`[bio_mining] search failed for "${query}" (offset=${p}): ${err.message}`);
+              break;     // next site pattern; don't keep hammering on a 4xx
+            }
+            log(`[bio_mining] search "${query}" offset=${p} → ${page.results.length} results`);
+            for (const r of page.results) {
+              if (!r.url || seen.has(r.url)) continue;
+              seen.add(r.url);
+              candidates.push({ url: r.url, niche });
+              if (candidates.length >= limit) break outer;
+            }
+            if (!page.hasMore) break;
+            await sleep(SEARCH_SLEEP_MS);
+          }
+        }
+      }
+      log(`[bio_mining] candidate URLs after search: ${candidates.length}`);
+
+      // 2. Fetch + extract. Drop pages with no usable email; map the rest
+      //    into the canonical Provider Row shape.
+      let dropped = 0, errored = 0;
+      const rows = [];
+      const extracted = await processWithConcurrency(candidates, FETCH_CONCURRENCY, async (c) => {
+        await sleep(FETCH_SLEEP_MS);
+        try {
+          return await extractBioRecord(c.url, { niche: c.niche });
+        } catch (err) {
+          return { ok: false, url: c.url, reason: `exception: ${err.message}` };
+        }
+      });
+
+      for (const ex of extracted) {
+        if (!ex || !ex.ok) {
+          if (ex && ex.reason && ex.reason.startsWith("fetch_failed")) errored++;
+          else dropped++;
+          continue;
+        }
+        rows.push({
+          source: "bio_mining",
+          source_id: ex.url,                     // unique per bio page
+          email: ex.email,
+          first_name: ex.first_name,
+          last_name: null,
+          instagram_username: ex.instagram_username,
+          instagram_name: ex.instagram_name,
+          followers_count: null,                 // bio pages don't expose it
+          engagement_rate: null,
+          profile_pic_name: null,
+          niche: ex.niche,
+          country: null,
+          city: null,
+          raw_data: {
+            provider: "bio_mining",
+            search_backend: backend.name,
+            site_patterns: sitePatterns,
+            source_url: ex.url,
+            bio_text: ex.bio_text,
+          },
+        });
+      }
+      log(`[bio_mining] usable rows: ${rows.length} (dropped: ${dropped}, fetch errors: ${errored})`);
+
+      // No real pagination — caller controls volume via --limit on the
+      // top-level sync (which caps `candidates.length` above). hasMore is
+      // always false because re-running this provider would repeat the
+      // same search queries; idempotency comes from the upsert key.
+      return { rows, hasMore: false };
     },
   };
 }
@@ -133,8 +275,8 @@ export function getProvider(name, opts = {}) {
   switch ((name || "main_app").toLowerCase()) {
     case "main_app":
       return mainAppProvider(opts);
-    case "scraper":
-      return scraperProvider(opts);
+    case "bio_mining":
+      return bioMiningProvider(opts);
     default:
       throw new Error(`unknown creator source provider: ${name}`);
   }

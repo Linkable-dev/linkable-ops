@@ -40,10 +40,78 @@ parses the inbound, `cancelPendingTouches` halts future sends.
 - **Templates:** `server/automation/creator-templates.js`
   (12 default templates: C1/C2/C3 × T1-T4)
 - **Tier classifier:** `server/automation/creator-groups.js`
-- **Scoring:** `server/automation/creator-scoring.js`
+- **Scoring:** `server/automation/creator-scoring.js` (source-aware:
+  main-app rows score on followers/engagement, bio-mined rows score on
+  email + completeness)
 - **Sender pool partitioning:** new `sender_inboxes.sender_pool_tag`
   column. Influencer campaigns get `sender_pool_tag='influencer'`; brand
   campaigns stay `NULL`.
+- **Web-search bio mining:** `server/automation/creator-search.js`
+  (search-backend abstraction, Brave default) +
+  `server/automation/creator-bio-extract.js` (Linktree/Beacons → email
+  + IG handle + display name).
+
+## Sources
+
+The sync layer is pluggable — every source yields the same `creator_prospects`
+shape, scored at insert time. Today there are two:
+
+| Source | Provider | Coverage | Email yield | Cost |
+|--------|----------|----------|-------------|------|
+| `main_app` | `mainAppProvider` (CloudSQL → `influencers` table) | Existing platform creators | 100% (only synced when present) | Free |
+| `bio_mining` | `bioMiningProvider` (search → Linktree/Beacons → bio extract) | Public web | ~10-20% per candidate URL | Brave free tier (2000 q/mo) |
+
+**Adding a new source:** drop a new `xxxProvider({...})` factory into
+`server/automation/creator-source.js` that returns
+`{ name, async fetch({ limit, offset, sinceTs }) → { rows, hasMore } }`,
+register it in `getProvider()`, and call
+`node sync-creators.js --source xxx`. Each row needs at minimum
+`{ source, source_id, email }` — the rest fall into the optional bucket.
+
+## Bio mining — quick start
+
+Discovers creators by searching Linktree / Beacons / similar bio
+platforms for public pages in your target niches, fetches each page, and
+extracts the email + IG handle. Bio-mined creators land in
+`creator_prospects` with `source='bio_mining'` and score 6-8 when basic
+data extracts cleanly, so they're enrollable through the same daily runner.
+
+**Setup (one-time):**
+1. Sign up at https://brave.com/search/api/ for a free API key (2000 queries/month).
+2. Add `BRAVE_SEARCH_API_KEY=<key>` to `server/.env`.
+
+**Run:**
+```bash
+# Smallest useful run: 1 niche × 4 default sites × 1 page = up to 80 URLs to fetch
+node server/automation/sync-creators.js --source bio_mining \
+  --niche "beauty creator" --limit 50
+
+# Wider sweep: multiple niches, 2 pages per (niche × site) = up to 320 URLs/niche
+node server/automation/sync-creators.js --source bio_mining \
+  --niche "beauty creator" --niche "skincare blogger" --niche "fashion micro influencer" \
+  --search-pages 2 --limit 300
+
+# Restrict the bio sites to mine
+node server/automation/sync-creators.js --source bio_mining \
+  --niche "wellness coach" \
+  --site-pattern linktr.ee --site-pattern beacons.ai \
+  --limit 100
+```
+
+**What you'll see in the pool:** rows with `source='bio_mining'`,
+`followers_count=NULL`, `engagement_rate=NULL`,
+`creator_score_breakdown.mode='bio_mined'`. The bio-mined scoring path
+gives them 6-8 (vs 4-7 for typical main-app rows), so they pass the gate
+on email-validity + first-name + niche alone.
+
+**Quality watch-outs:**
+- The same Linktree URL may surface under multiple niches — the upsert
+  on `(source, source_id)` dedupes; only the first niche to find them sticks.
+- Email extraction yield is roughly 10-20% per candidate URL (most bios
+  link to a contact form, not a mailto). The provider drops the rest.
+- No follower / engagement signal — if you want to enroll only mid-tier
+  bio-mined creators, you'd need a second-pass enrichment (Apify / Modash)
+  to fill `followers_count` before re-scoring.
 
 ## Setup checklist (one-time)
 

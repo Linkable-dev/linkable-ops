@@ -1,9 +1,17 @@
 // Sync creators from a source provider into creator_prospects.
 //
 // CLI:
-//   node server/automation/sync-creators.js               # default: main_app, prod, batch=500
+//   node server/automation/sync-creators.js                                    # default: main_app, prod, batch=500
 //   node server/automation/sync-creators.js --source main_app --target prod --limit 1000
 //   node server/automation/sync-creators.js --since 2025-01-01
+//
+// Bio-mining (Brave Search → Linktree/Beacons):
+//   node server/automation/sync-creators.js --source bio_mining \
+//        --niche "beauty creator" --niche "fashion blogger" --limit 100
+//   node server/automation/sync-creators.js --source bio_mining \
+//        --niche "wellness coach" --site-pattern linktr.ee --site-pattern beacons.ai \
+//        --search-pages 2 --limit 200
+//   ENV: BRAVE_SEARCH_API_KEY (required for the bio_mining source)
 //
 // Behaviour:
 //   - Pages through the provider until exhausted (or --limit N reached).
@@ -26,9 +34,16 @@ function parseArgs() {
     source: "main_app",
     target: "prod",
     pageSize: 500,
-    limit: null,         // hard cap on rows fetched (across pages)
-    since: null,         // ISO timestamp; provider may use as cursor
+    limit: null,                 // hard cap on rows fetched (across pages)
+    since: null,                 // ISO timestamp; provider may use as cursor
     dryRun: false,
+
+    // bio_mining-only knobs. niches and sitePatterns are repeatable so the
+    // operator can `--niche A --niche B --site-pattern linktr.ee`.
+    niches: [],
+    sitePatterns: [],
+    searchBackend: "brave",
+    searchPages: 1,
   };
   for (let i = 2; i < process.argv.length; i++) {
     const a = process.argv[i];
@@ -38,6 +53,10 @@ function parseArgs() {
     else if (a === "--limit") args.limit = Number(process.argv[++i]);
     else if (a === "--since") args.since = process.argv[++i];
     else if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--niche") args.niches.push(process.argv[++i]);
+    else if (a === "--site-pattern") args.sitePatterns.push(process.argv[++i]);
+    else if (a === "--search-backend") args.searchBackend = process.argv[++i];
+    else if (a === "--search-pages") args.searchPages = Number(process.argv[++i]);
   }
   return args;
 }
@@ -50,9 +69,23 @@ export async function syncCreators({
   limit = null,
   sinceTs = null,
   dryRun = false,
+  // bio_mining options — ignored by other providers
+  niches = [],
+  sitePatterns = [],
+  searchBackend = "brave",
+  searchPages = 1,
   log = console.log,
 } = {}) {
-  const provider = getProvider(source, { target });
+  const providerOpts = source === "bio_mining"
+    ? {
+        niches,
+        ...(sitePatterns.length ? { sitePatterns } : {}),
+        searchBackend,
+        pages: searchPages,
+        log,
+      }
+    : { target };
+  const provider = getProvider(source, providerOpts);
 
   const stats = {
     fetched: 0,
@@ -189,11 +222,16 @@ async function main() {
       limit: args.limit,
       sinceTs: args.since,
       dryRun: args.dryRun,
+      niches: args.niches,
+      sitePatterns: args.sitePatterns,
+      searchBackend: args.searchBackend,
+      searchPages: args.searchPages,
     });
   } finally {
     // Close the CloudSQL pg pool so the process can exit. Without this,
     // the open pool keeps the event loop alive and the CLI hangs forever
-    // after the DONE log line.
+    // after the DONE log line. Safe to call when CloudSQL was never used
+    // (bio_mining run): closeCloudSql is a no-op on uninitialised pools.
     await closeCloudSql().catch(() => {});
   }
 }

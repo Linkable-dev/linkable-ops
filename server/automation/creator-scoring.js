@@ -66,7 +66,23 @@ function scoreEmail(email) {
 
 // Returns { score, breakdown } where score is rounded to a SMALLINT and
 // breakdown captures the per-component points for downstream tuning.
+//
+// Source-aware: bio-mined creators (Linktree / Beacons / similar) don't
+// carry follower or engagement data, so the standard formula would always
+// score them below the gate and the scraper would produce zero enrollable
+// rows. We branch on source so bio-mined rows are scored on what we *do*
+// have (email validity + bio completeness) and can clear MIN_SEND_SCORE
+// when the basics are present. The breakdown JSONB always records which
+// path scored the row (`mode: 'standard'|'bio_mined'`) so we can compare
+// reply rates per source later.
 export function scoreCreator(p) {
+  const source = p.source || (p.raw_data && p.raw_data.provider) || null;
+  const isBioMined = source === "bio_mining";
+
+  if (isBioMined) {
+    return scoreBioMinedCreator(p);
+  }
+
   const followers = scoreFollowers(p.followers_count);
   const engagement = scoreEngagement(p.engagement_rate);
   const completeness = scoreCompleteness(p);
@@ -78,11 +94,45 @@ export function scoreCreator(p) {
   return {
     score,
     breakdown: {
+      mode: "standard",
       followers: followers.points,
       followers_tier: followers.tier,
       engagement,
       completeness,
       email,
+    },
+  };
+}
+
+// Bio-mined scoring: no follower / engagement signal available. Score is
+// driven by email validity (gate) + completeness of the data we did extract
+// (first_name, niche, IG handle, geo). A complete bio-mined row scores 8;
+// the absolute floor is 0 (invalid email = hard reject). 6 is the soft
+// floor that just-passes MIN_SEND_SCORE, achieved with valid email +
+// first_name + niche.
+function scoreBioMinedCreator(p) {
+  const email = scoreEmail(p.email);
+  if (email === 0) {
+    return { score: 0, breakdown: { mode: "bio_mined", email: 0, reason: "invalid_email" } };
+  }
+
+  let s = 3;                                  // valid email = baseline 3
+  let firstName = 0, niche = 0, handle = 0, geo = 0;
+  if (p.first_name)         { firstName = 1.5; s += firstName; }
+  if (p.niche)              { niche     = 1.5; s += niche; }
+  if (p.instagram_username) { handle    = 1;   s += handle; }
+  if (p.country || p.city)  { geo       = 1;   s += geo; }
+
+  const score = Math.max(0, Math.min(10, Math.round(s)));
+  return {
+    score,
+    breakdown: {
+      mode: "bio_mined",
+      email,
+      first_name: firstName,
+      niche,
+      instagram_handle: handle,
+      geo,
     },
   };
 }
