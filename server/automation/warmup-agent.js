@@ -155,13 +155,19 @@ async function processInbox({ inbox, teamId, seeds, startOfDay, dryRun, apiKey, 
       apiKey,
     });
 
+    // Warmup MUST route replies back to the warming inbox itself — not to
+    // the inbox's configured reply_to (which on trylinkable.link points to
+    // brand@linkable.link for real cold outbound). Reputation building
+    // requires Gmail/Outlook to see two-way traffic on the warming address.
+    // If replies route elsewhere, the inbox is silent inbound-wise and the
+    // domain reputation stalls.
     const result = await sendEmail({
       to: seed.email,
       toName: seed.display_name,
       subject,
       body,
       from: `${inbox.from_name} <${inbox.email}>`,
-      replyTo: inbox.reply_to || inbox.email,
+      replyTo: inbox.email,
       resendApiKey,
     });
 
