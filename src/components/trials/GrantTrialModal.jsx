@@ -265,8 +265,11 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
             <div style={{ color: theme.text, fontWeight: 500, marginBottom: 2 }}>{row.email}</div>
             <div style={{ fontSize: 12, color: theme.textMuted }}>
               {hasActivePlan
-                ? <>Currently: {planLabel(row.trial_plan_name)} · {row.trial_days}d · {row.trial_interval || "—"}
-                    {expires && <> · {isExpired ? "expired" : "ends"} {friendlyDate(row.trial_expiration_date)}</>}</>
+                ? <>{expires ? "Currently" : "Offered"}: {planLabel(row.trial_plan_name)} · {row.trial_days}d · {row.trial_interval || "—"}
+                    {expires
+                      ? <> · {isExpired ? "expired" : "ends"} {friendlyDate(row.trial_expiration_date)}</>
+                      : <> · never activated</>
+                    }</>
                 : <>No trial set</>
               }
             </div>
