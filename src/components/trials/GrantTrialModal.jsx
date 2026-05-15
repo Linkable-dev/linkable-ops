@@ -132,7 +132,11 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
     ? new Date(row.trial_expiration_date) : null;
   const isExpired = expires && expires.getTime() <= Date.now();
   const hasActivePlan = !!row.trial_plan_name;
-  const looksLikeActiveSubscription = expires && !isExpired && row.trial_activation_date && row.trial_activation_date !== "-infinity";
+  const activated = !!row.trial_activation_date && row.trial_activation_date !== "-infinity";
+  const daysLeft = expires && !isExpired
+    ? Math.max(0, Math.ceil((expires.getTime() - Date.now()) / 86_400_000))
+    : null;
+  const looksLikeActiveSubscription = activated && expires && !isExpired;
 
   // Apply a preset and jump straight to the confirm step. This is the
   // happy path for non-techy admins: 2 clicks (preset → confirm) and done.
@@ -263,16 +267,15 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
         }}>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ color: theme.text, fontWeight: 500, marginBottom: 2 }}>{row.email}</div>
-            <div style={{ fontSize: 12, color: theme.textMuted }}>
-              {hasActivePlan
-                ? <>{expires ? "Currently" : "Offered"}: {planLabel(row.trial_plan_name)} · {row.trial_days}d · {row.trial_interval || "—"}
-                    {expires
-                      ? <> · {isExpired ? "expired" : "ends"} {friendlyDate(row.trial_expiration_date)}</>
-                      : <> · never activated</>
-                    }</>
-                : <>No trial set</>
-              }
-            </div>
+            <TrialStatusLine
+              row={row}
+              hasActivePlan={hasActivePlan}
+              activated={activated}
+              isExpired={isExpired}
+              daysLeft={daysLeft}
+              expires={expires}
+              theme={theme}
+            />
           </div>
           <DbTargetPill isDev={isDev} theme={theme} />
         </div>
@@ -381,6 +384,38 @@ function PresetButton({ title, hint, onClick, theme }) {
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{title}</div>
       <div style={{ fontSize: 12, color: theme.textMuted }}>{hint}</div>
     </button>
+  );
+}
+
+// Colored-dot status indicator for the brand's current trial state.
+// Three states, each with a distinct dot color so an operator can read
+// the row at a glance before deciding what to grant.
+function TrialStatusLine({ row, hasActivePlan, activated, isExpired, daysLeft, expires, theme }) {
+  if (!hasActivePlan) {
+    return <StatusLine theme={theme} color={theme.textMuted} text="No trial set" />;
+  }
+  const planDetails = `${planLabel(row.trial_plan_name)} · ${row.trial_days}d · ${row.trial_interval || "—"}`;
+  if (!activated) {
+    return <StatusLine theme={theme} color="#F59E0B" text={`Assigned, not activated — ${planDetails}`} />;
+  }
+  if (isExpired) {
+    const endedOn = expires ? friendlyDate(row.trial_expiration_date) : "unknown date";
+    return <StatusLine theme={theme} color="#EF4444" text={`Expired on ${endedOn} — ${planDetails}`} />;
+  }
+  const left = daysLeft != null ? ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` : "";
+  return <StatusLine theme={theme} color="#10B981" text={`Active — ${planDetails}${left}`} />;
+}
+
+function StatusLine({ theme, color, text }) {
+  return (
+    <div style={{ fontSize: 12, color: theme.textMuted, display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: "50%",
+        background: color, flexShrink: 0,
+        boxShadow: `0 0 0 2px ${color}22`,
+      }} />
+      <span>{text}</span>
+    </div>
   );
 }
 
