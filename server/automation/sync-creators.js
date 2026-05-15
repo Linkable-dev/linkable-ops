@@ -5,13 +5,13 @@
 //   node server/automation/sync-creators.js --source main_app --target prod --limit 1000
 //   node server/automation/sync-creators.js --since 2025-01-01
 //
-// Bio-mining (Brave Search → Linktree/Beacons):
+// Bio-mining (DuckDuckGo Search → Linktree/Beacons, no key required):
 //   node server/automation/sync-creators.js --source bio_mining \
 //        --niche "beauty creator" --niche "fashion blogger" --limit 100
 //   node server/automation/sync-creators.js --source bio_mining \
 //        --niche "wellness coach" --site-pattern linktr.ee --site-pattern beacons.ai \
 //        --search-pages 2 --limit 200
-//   ENV: BRAVE_SEARCH_API_KEY (required for the bio_mining source)
+//   To use Brave instead (paid): --search-backend brave + BRAVE_SEARCH_API_KEY in env
 //
 // Behaviour:
 //   - Pages through the provider until exhausted (or --limit N reached).
@@ -42,7 +42,7 @@ function parseArgs() {
     // operator can `--niche A --niche B --site-pattern linktr.ee`.
     niches: [],
     sitePatterns: [],
-    searchBackend: "brave",
+    searchBackend: "duckduckgo",
     searchPages: 1,
   };
   for (let i = 2; i < process.argv.length; i++) {
@@ -72,7 +72,7 @@ export async function syncCreators({
   // bio_mining options — ignored by other providers
   niches = [],
   sitePatterns = [],
-  searchBackend = "brave",
+  searchBackend = "duckduckgo",
   searchPages = 1,
   log = console.log,
 } = {}) {

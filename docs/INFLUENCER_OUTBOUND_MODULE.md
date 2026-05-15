@@ -47,9 +47,9 @@ parses the inbound, `cancelPendingTouches` halts future sends.
   column. Influencer campaigns get `sender_pool_tag='influencer'`; brand
   campaigns stay `NULL`.
 - **Web-search bio mining:** `server/automation/creator-search.js`
-  (search-backend abstraction, Brave default) +
-  `server/automation/creator-bio-extract.js` (Linktree/Beacons → email
-  + IG handle + display name).
+  (search-backend abstraction; default = DuckDuckGo HTML scrape, no key
+  required) + `server/automation/creator-bio-extract.js` (Linktree/Beacons
+  → email + IG handle + display name).
 
 ## Sources
 
@@ -59,7 +59,7 @@ shape, scored at insert time. Today there are two:
 | Source | Provider | Coverage | Email yield | Cost |
 |--------|----------|----------|-------------|------|
 | `main_app` | `mainAppProvider` (CloudSQL → `influencers` table) | Existing platform creators | 100% (only synced when present) | Free |
-| `bio_mining` | `bioMiningProvider` (search → Linktree/Beacons → bio extract) | Public web | ~10-20% per candidate URL | Brave free tier (2000 q/mo) |
+| `bio_mining` | `bioMiningProvider` (search → Linktree/Beacons → bio extract) | Public web | ~10-20% per candidate URL | DuckDuckGo HTML (free, no key) |
 
 **Adding a new source:** drop a new `xxxProvider({...})` factory into
 `server/automation/creator-source.js` that returns
@@ -76,9 +76,9 @@ extracts the email + IG handle. Bio-mined creators land in
 `creator_prospects` with `source='bio_mining'` and score 6-8 when basic
 data extracts cleanly, so they're enrollable through the same daily runner.
 
-**Setup (one-time):**
-1. Sign up at https://brave.com/search/api/ for a free API key (2000 queries/month).
-2. Add `BRAVE_SEARCH_API_KEY=<key>` to `server/.env`.
+**Setup:** none — default backend is DuckDuckGo HTML scraping (no key,
+no signup). To swap in Brave Search API instead (paid), set
+`BRAVE_SEARCH_API_KEY` in `server/.env` and pass `--search-backend brave`.
 
 **Run:**
 ```bash

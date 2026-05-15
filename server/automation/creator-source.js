@@ -141,8 +141,8 @@ export function mainAppProvider({ target = "prod" } = {}) {
 // can still clear the MIN_SEND_SCORE gate when basic data is present.
 
 const DEFAULT_SITE_PATTERNS = ["linktr.ee", "beacons.ai", "bio.link", "lnk.bio"];
-const SEARCH_PAGE_COUNT = 20;          // Brave caps at 20 / page
-const SEARCH_SLEEP_MS = 1100;          // Brave free tier: 1 q/s, +10% margin
+const SEARCH_PAGE_COUNT = 30;          // DDG returns ~30/page; Brave caps at 20 (the backend itself clamps)
+const SEARCH_SLEEP_MS = 1500;          // be conservative — DDG flags aggressive scrapers
 const FETCH_SLEEP_MS = 250;            // be polite to bio hosts on the fetch pass
 const FETCH_CONCURRENCY = 4;           // small concurrency on the fetch pass
 
@@ -165,7 +165,7 @@ async function processWithConcurrency(items, limit, worker) {
 export function bioMiningProvider({
   niches = [],
   sitePatterns = DEFAULT_SITE_PATTERNS,
-  searchBackend = "brave",
+  searchBackend = "duckduckgo",
   searchOpts = {},
   // Maximum search-result pages per (niche, site) combo. count=20 per page;
   // pages=1 → up to 20 candidate URLs per combo. Operators tune this with
