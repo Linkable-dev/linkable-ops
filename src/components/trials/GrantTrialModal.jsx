@@ -37,6 +37,12 @@ function buildPresets(row) {
   const prevPlan     = row?.trial_plan_name || null;
   const prevDays     = Number(row?.trial_days) > 0 ? Number(row.trial_days) : null;
   const prevInterval = row?.trial_interval === "annual" ? "annual" : "monthly";
+  const prevExpiresRaw = row?.trial_expiration_date;
+  const prevExpires = prevExpiresRaw && prevExpiresRaw !== "-infinity"
+    ? new Date(prevExpiresRaw) : null;
+  const missingDays = prevExpires
+    ? Math.ceil((prevExpires.getTime() - Date.now()) / 86_400_000)
+    : 0;
   const presets = [];
 
   if (prevPlan && prevDays) {
@@ -46,6 +52,19 @@ function buildPresets(row) {
       hint: `${planLabel(prevPlan)} · ${prevDays} days · ${prevInterval}`,
       plan: prevPlan,
       days: prevDays,
+      interval: prevInterval,
+    });
+  }
+  // Restore-missing-days preset: only shown when the brand still has a
+  // future expiry on file, so the operator can re-grant a trial that
+  // ends on the originally-promised date instead of starting fresh.
+  if (prevPlan && prevExpires && missingDays >= 1 && missingDays <= 90) {
+    presets.push({
+      key: "missing",
+      title: `Restore missing days (${missingDays})`,
+      hint: `Same plan, ends ${friendlyDate(prevExpiresRaw)} — as originally granted`,
+      plan: prevPlan,
+      days: missingDays,
       interval: prevInterval,
     });
   }
