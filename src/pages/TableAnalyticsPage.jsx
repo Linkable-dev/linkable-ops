@@ -181,7 +181,9 @@ export default function TableAnalyticsPage() {
 
       {!hasAnything && (
         <div style={{ textAlign: "center", padding: "48px 0", color: theme.textMuted, fontSize: 13 }}>
-          No analytics available for this table
+          {data.total === 0
+            ? "No records yet — charts will appear here once the table has data."
+            : "No chartable columns on this table — analytics needs at least one categorical or numeric column with values."}
         </div>
       )}
     </div>
