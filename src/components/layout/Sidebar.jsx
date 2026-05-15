@@ -230,7 +230,7 @@ export default function Sidebar() {
         )}
 
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("GTM", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
+          {moduleHeader("Email Outbound", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
         </div>
         {(aiOpen || !sidebarOpen) && (
           <div style={{
