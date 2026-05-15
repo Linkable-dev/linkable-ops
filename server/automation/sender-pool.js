@@ -22,17 +22,28 @@ import { supabase } from "../lib/supabase.js";
 //     to preserve thread continuity: every touch in a sequence sends from the
 //     same inbox the enrollment picked). When pinned, hasPool=true and
 //     inbox=null means that single inbox is at cap → defer the row.
+//   poolTag — restrict selection to inboxes with sender_pool_tag = poolTag.
+//     Used by influencer outbound to keep its sender reputation isolated
+//     from the brand sender pool. When omitted, only NULL-tagged inboxes
+//     are considered (the legacy shared pool) so existing brand campaigns
+//     stay on their current rotation untouched.
 export async function getNextInbox(teamId, options = {}) {
-  const { pinnedEmail = null } = options;
+  const { pinnedEmail = null, poolTag = null } = options;
 
   let query = supabase
     .from("sender_inboxes")
-    .select("id, email, from_name, reply_to, domain, daily_cap, warming_cap, is_warming")
+    .select("id, email, from_name, reply_to, domain, daily_cap, warming_cap, is_warming, sender_pool_tag")
     .eq("team_id", teamId)
     .eq("is_active", true);
 
   if (pinnedEmail) {
     query = query.ilike("email", pinnedEmail);
+  } else if (poolTag) {
+    query = query.eq("sender_pool_tag", poolTag);
+  } else {
+    // Default: shared / legacy pool only. Without this, a tagged influencer
+    // inbox would silently leak into the brand rotation the day it's added.
+    query = query.is("sender_pool_tag", null);
   }
 
   const { data: inboxes, error: ibErr } = await query;

@@ -27,7 +27,9 @@ import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
 import { DEFAULT_OFFERING, DEFAULT_PERSONA, buildContextPrompt } from "../automation/conversation-prompts.js";
 import { SEQUENCE_TEMPLATES } from "../automation/templates.js";
+import { CREATOR_SEQUENCE_TEMPLATES } from "../automation/creator-templates.js";
 import { CATEGORY_PRESETS } from "../automation/lead-discovery.js";
+import { syncCreators } from "../automation/sync-creators.js";
 
 // Snapshot of distinct StoreLeads category paths discovered by sampling the
 // index. Refresh via scripts/refresh-storeleads-categories.js.
@@ -51,10 +53,12 @@ export function outboundCampaignsRoutes() {
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
+      const audience = (req.query.audience || "all").toString();
       let q = supabase.from("email_campaigns")
         .select("*", { count: "exact" })
         .eq("team_id", teamId);
       if (status !== "all") q = q.eq("status", status);
+      if (audience !== "all") q = q.eq("audience_type", audience);
       q = q.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
 
       const { data, error, count } = await q;
@@ -83,15 +87,22 @@ export function outboundCampaignsRoutes() {
       const body = req.body || {};
       if (!body.name) return res.status(400).json({ error: "name required" });
 
+      const audienceType = body.audience_type === "influencer" ? "influencer" : "brand";
       const insertRow = {
         team_id: teamId,
         name: body.name,
         status: body.status || "active",
         source: "daily-200",
+        audience_type: audienceType,
+        sender_pool_tag: body.sender_pool_tag || (audienceType === "influencer" ? "influencer" : null),
         target_filters: body.target_filters || {},
-        daily_cap: body.daily_cap || 200,
-        sender_from: body.sender_from || "Federico from Linkable <brand@linkable.link>",
-        reply_to: body.reply_to || "brand@linkable.link",
+        daily_cap: body.daily_cap || (audienceType === "influencer" ? 100 : 200),
+        sender_from: body.sender_from || (audienceType === "influencer"
+          ? "Federico from Linkable <influencer@trylinkable.link>"
+          : "Federico from Linkable <brand@linkable.link>"),
+        reply_to: body.reply_to || (audienceType === "influencer"
+          ? "influencer@trylinkable.link"
+          : "brand@linkable.link"),
         auto_reply: !!body.auto_reply,
         ai_campaign_id: body.ai_campaign_id || null,
         brief: body.brief || null,
@@ -104,8 +115,8 @@ export function outboundCampaignsRoutes() {
         .single();
       if (error) throw new Error(error.message);
 
-      // Seed the 9 default templates linked to this campaign.
-      const templates = await seedDefaultTemplates(teamId, campaign.id);
+      // Seed the audience-appropriate default templates linked to this campaign.
+      const templates = await seedDefaultTemplates(teamId, campaign.id, audienceType);
 
       res.json({ campaign, templates });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -137,7 +148,7 @@ export function outboundCampaignsRoutes() {
   router.put("/campaigns/:id", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const allowed = ["name", "status", "target_filters", "daily_cap", "sender_from", "reply_to", "auto_reply", "ai_campaign_id", "brief", "config"];
+      const allowed = ["name", "status", "target_filters", "daily_cap", "sender_from", "reply_to", "auto_reply", "ai_campaign_id", "brief", "config", "sender_pool_tag", "audience_type"];
       const patch = {};
       for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
       if (Object.keys(patch).length === 0) {
@@ -415,6 +426,102 @@ export function outboundCampaignsRoutes() {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // ---------- INFLUENCER (CREATOR) PROSPECT POOL ----------
+  //
+  // Mirror of /leads but reads creator_prospects. v1 sync source is the
+  // main-app `influencers` table via CloudSQL; future scrapers can write
+  // into the same pool by setting a different `source` value.
+
+  router.get("/creators", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const q = (req.query.q || "").toString().trim();
+      const onlyQualified = req.query.qualified !== "false";
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const country = (req.query.country || "").toString().trim().toUpperCase();
+      const minFollowers = parseInt(req.query.minFollowers, 10);
+      const maxFollowers = parseInt(req.query.maxFollowers, 10);
+      const minEngagement = parseFloat(req.query.minEngagement);
+
+      const safeQ = q ? q.replace(/[,()%*]/g, " ").trim() : "";
+
+      let query = supabase
+        .from("creator_prospects")
+        .select(
+          "id,email,first_name,last_name,instagram_username,instagram_name,followers_count,engagement_rate,niche,country,city,creator_score,creator_score_breakdown,emailed,emailed_at,imported_at,last_synced_at",
+          { count: "exact" }
+        )
+        .eq("team_id", teamId);
+
+      if (onlyQualified) query = query.not("email", "is", null);
+      if (safeQ) {
+        query = query.or(
+          `email.ilike.%${safeQ}%,first_name.ilike.%${safeQ}%,last_name.ilike.%${safeQ}%,instagram_username.ilike.%${safeQ}%,niche.ilike.%${safeQ}%`
+        );
+      }
+      if (country) query = query.eq("country", country);
+      if (Number.isFinite(minFollowers) && minFollowers > 0) query = query.gte("followers_count", minFollowers);
+      if (Number.isFinite(maxFollowers) && maxFollowers > 0) query = query.lte("followers_count", maxFollowers);
+      if (Number.isFinite(minEngagement) && minEngagement > 0) query = query.gte("engagement_rate", minEngagement);
+
+      query = query
+        .order("creator_score", { ascending: false, nullsFirst: false })
+        .order("imported_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      const { data, error, count } = await query;
+      if (error) throw new Error(error.message);
+      res.json({ rows: data || [], total: count ?? data?.length ?? 0 });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get("/creators/counts", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { count: total } = await supabase
+        .from("creator_prospects")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", teamId);
+      const { count: qualified } = await supabase
+        .from("creator_prospects")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", teamId)
+        .not("email", "is", null);
+      const { count: emailed } = await supabase
+        .from("creator_prospects")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", teamId)
+        .eq("emailed", true);
+      res.json({ total: total || 0, qualified: qualified || 0, emailed: emailed || 0 });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Trigger a sync from the configured source provider. Returns when the
+  // sync is done — keep the limit conservative so we don't block the
+  // request beyond Vercel's 60s function ceiling. Heavy / paginated syncs
+  // should run via the CLI (node server/automation/sync-creators.js).
+  router.post("/creators/sync", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const source = (req.body?.source || "main_app").toString();
+      const target = (req.body?.target || "prod").toString();
+      const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 500, 50), 5000);
+      const dryRun = !!req.body?.dry_run;
+
+      const lines = [];
+      const stats = await syncCreators({
+        teamId,
+        source,
+        target,
+        limit,
+        dryRun,
+        log: (s) => lines.push(s),
+      });
+      res.json({ ...stats, log: lines });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Cooperative cancel — the discovery worker polls for status='stopped'.
   router.post("/discovery-runs/:id/stop", async (req, res) => {
     try {
@@ -479,7 +586,16 @@ export function outboundCampaignsRoutes() {
   router.post("/campaigns/:id/templates/seed-defaults", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const templates = await seedDefaultTemplates(teamId, req.params.id);
+      // Honour the campaign's own audience_type — operators don't have to
+      // pass it. Falls back to 'brand' for legacy campaigns where the
+      // column hasn't been set.
+      const { data: c } = await supabase
+        .from("email_campaigns")
+        .select("audience_type")
+        .eq("team_id", teamId).eq("id", req.params.id)
+        .maybeSingle();
+      const audienceType = c?.audience_type || "brand";
+      const templates = await seedDefaultTemplates(teamId, req.params.id, audienceType);
       res.json({ templates });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -545,7 +661,7 @@ export function outboundCampaignsRoutes() {
 
 // ---------- HELPERS ----------
 
-async function seedDefaultTemplates(teamId, campaignId) {
+async function seedDefaultTemplates(teamId, campaignId, audienceType = "brand") {
   // Insert one row per (group, touch). If any rows already exist for this
   // campaign at that key, we skip — idempotent.
   const { data: existing } = await supabase
@@ -554,14 +670,21 @@ async function seedDefaultTemplates(teamId, campaignId) {
     .eq("team_id", teamId).eq("campaign_id", campaignId);
   const seen = new Set((existing || []).map((r) => r.template_key));
 
+  // Pick the seed set per audience. Brand → G1/G2/G3 × T1-T4 (12 rows).
+  // Influencer → C1/C2/C3 × T1-T4 (12 rows). The variant column is
+  // CHAR(1) legacy: take the second char of the group ('G1' → '1',
+  // 'C1' → '1') so it always fits.
+  const seedSet = audienceType === "influencer" ? CREATOR_SEQUENCE_TEMPLATES : SEQUENCE_TEMPLATES;
+
   const rows = [];
-  for (const t of SEQUENCE_TEMPLATES) {
+  for (const t of seedSet) {
     if (seen.has(t.key)) continue;
     rows.push({
       team_id: teamId,
       campaign_id: campaignId,
       name: t.name,
-      variant: t.group.charAt(1) || "A",   // 'G1' → '1' → fits the legacy CHAR(1) field
+      variant: t.group.charAt(1) || "A",
+      audience_type: audienceType,
       brand_group: t.group,
       touch_number: t.touch,
       template_key: t.key,

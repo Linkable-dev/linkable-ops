@@ -251,6 +251,7 @@ export async function runDailyOutbound({
   const campaignId = campaign.id;
   const senderFrom = campaign.sender_from;
   const replyTo = campaign.reply_to;
+  const senderPoolTag = campaign.sender_pool_tag || null;
   const templateBuckets = await loadTemplateBucketsForCampaign(teamId, campaignId);
 
   // ---------- 1. Drain due rows from prior enrollments (T+3, T+7, T+12) ----------
@@ -264,7 +265,7 @@ export async function runDailyOutbound({
       log(`  DRY: would send seq=${row.sequence_id} touch=${row.touch_number} to=${row.to_email} variant=${row.template_variant}`);
       continue;
     }
-    const result = await sendDueRow(row, { resendApiKey, senderFrom, replyTo });
+    const result = await sendDueRow(row, { resendApiKey, senderFrom, replyTo, senderPoolTag });
     if (result.cancelled) cancelled++;
     else if (result.deferred) deferred++;
     else if (result.sent) sent++;
@@ -320,6 +321,8 @@ export async function runDailyOutbound({
         apiKey: anthropicApiKey,
         group,
         templateBuckets,
+        senderPoolTag,
+        audienceType: "brand",
       });
 
       if (enroll.skipped) {

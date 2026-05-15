@@ -107,8 +107,8 @@ export const api = {
     request("/outbound/stop", { method: "POST", body: JSON.stringify({ emails, reason }) }),
 
   // Outbound campaigns
-  listOutboundCampaigns: ({ status, limit, offset } = {}) =>
-    request(`/outbound/campaigns?${buildQs({ status, limit, offset })}`),
+  listOutboundCampaigns: ({ status, limit, offset, audience } = {}) =>
+    request(`/outbound/campaigns?${buildQs({ status, limit, offset, audience })}`),
   getOutboundCampaignStatusCounts: () => request("/outbound/campaigns/status-counts"),
   createOutboundCampaign: (data) =>
     request("/outbound/campaigns", { method: "POST", body: JSON.stringify(data) }),
@@ -137,6 +137,14 @@ export const api = {
   getOutboundLeadCounts: ({ country, minRevenue, maxRevenue } = {}) =>
     request(`/outbound/leads/counts?${buildQs({ country, minRevenue, maxRevenue })}`),
 
+  // Influencer (creator) prospect pool — separate table, but lives under
+  // /outbound since it's part of the same campaign system as brand outbound.
+  listOutboundCreators: ({ q, qualified, limit, offset, country, minFollowers, maxFollowers, minEngagement } = {}) =>
+    request(`/outbound/creators?${buildQs({ q, qualified, limit, offset, country, minFollowers, maxFollowers, minEngagement })}`),
+  getOutboundCreatorCounts: () => request("/outbound/creators/counts"),
+  syncOutboundCreators: (body = {}) =>
+    request("/outbound/creators/sync", { method: "POST", body: JSON.stringify(body) }),
+
   // Outbound templates
   listOutboundTemplates: (campaignId) =>
     request(`/outbound/campaigns/${campaignId}/templates`),
@@ -158,6 +166,8 @@ export const api = {
     request(`/admin-users/creators?${buildQs({ q, limit, offset })}`),
   impersonateUser: (userId) =>
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
+  grantTrial: (userId, body) =>
+    request(`/admin-users/${userId}/grant-trial`, { method: "POST", body: JSON.stringify(body) }),
 };
 
 // Helpers for formatting

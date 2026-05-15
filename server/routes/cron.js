@@ -9,6 +9,7 @@ import { Router } from "express";
 import { sendDueScheduled } from "../automation/conversation-runner.js";
 import { processFollowUps } from "../automation/conversation-followup.js";
 import { runDailyOutbound } from "../automation/run-daily-200.js";
+import { runDailyInfluencer } from "../automation/run-daily-influencer.js";
 import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discovery.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { runWarmup } from "../automation/warmup-agent.js";
@@ -115,11 +116,24 @@ export function cronRoutes() {
       const lines = [];
       const log = (s) => lines.push(s);
 
+      // Pick the orchestrator for a campaign by its audience_type. Brand
+      // and influencer campaigns share the cron + scheduling layer but
+      // dispatch to different runners (different prospect pools, scoring,
+      // template defaults).
+      const runnerFor = (campaign) =>
+        campaign.audience_type === "influencer" ? runDailyInfluencer : runDailyOutbound;
+
       // Explicit-campaign mode: caller knows what to run. Used by the CLI and
       // for one-off triggers from the UI.
       if (req.query.campaign) {
         const cap = Math.min(parseInt(req.query.cap) || 30, 200);
-        const result = await runDailyOutbound({ cap, campaignId: req.query.campaign, dryRun, log });
+        const { data: c } = await supabase
+          .from("email_campaigns")
+          .select("id,audience_type")
+          .eq("id", req.query.campaign)
+          .maybeSingle();
+        const runner = runnerFor(c || {});
+        const result = await runner({ cap, campaignId: req.query.campaign, dryRun, log });
         return res.json({ ...result, log: lines });
       }
 
@@ -128,7 +142,7 @@ export function cronRoutes() {
       // that say yes. Returns a per-campaign breakdown.
       const { data: campaigns, error } = await supabase
         .from("email_campaigns")
-        .select("id,name,daily_cap,config,status")
+        .select("id,name,daily_cap,config,status,audience_type")
         .eq("status", "active");
       if (error) throw new Error(error.message);
 
@@ -137,9 +151,10 @@ export function cronRoutes() {
       for (const c of campaigns || []) {
         const decision = scheduleDecision(c.config?.schedule, c.daily_cap || 200, now);
         if (!decision) continue;
-        log(`[scheduler] firing ${c.name} (${c.id}) cap=${decision.cap}`);
+        log(`[scheduler] firing ${c.name} (${c.id}, audience=${c.audience_type || "brand"}) cap=${decision.cap}`);
         try {
-          const r = await runDailyOutbound({ cap: decision.cap, campaignId: c.id, dryRun, log });
+          const runner = runnerFor(c);
+          const r = await runner({ cap: decision.cap, campaignId: c.id, dryRun, log });
           results.push({ campaign_id: c.id, name: c.name, ...r });
         } catch (e) {
           results.push({ campaign_id: c.id, name: c.name, error: e.message });

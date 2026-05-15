@@ -1,4 +1,4 @@
-// Multi-touch sequencer for the daily-200 outbound agent.
+// Multi-touch sequencer for the daily outbound agent.
 // Owns: scheduling 4 touches per prospect (T+0 / T+3 / T+7 / T+12), picking
 // due rows up to a daily cap, and cancelling pending touches when a reply
 // lands. T+12 is the breakup touch — pure pressure-removal, historically
@@ -7,6 +7,13 @@
 // Storage model: each touch is one `email_sends` row. Rows for the same
 // prospect share `sequence_id`, with `touch_number` ∈ {1,2,3,4} and
 // `scheduled_at` driving when each fires.
+//
+// Audience: the brand path uses enrollProspect() with classifyBrand groups
+// (G1/G2/G3). The influencer path uses enrollCreator() with classifyCreator
+// tiers (C1/C2/C3). Both share fetchDueRows / sendDueRow / cancelPendingTouches —
+// those operate on email_sends rows and are audience-agnostic. The
+// audience_type column on email_sends is set at enrollment so analytics
+// (and the inbound parser, eventually) can split brand vs creator metrics.
 
 import crypto from "node:crypto";
 import { supabase } from "../lib/supabase.js";
@@ -174,6 +181,8 @@ export async function enrollProspect({
   startAt = new Date(),  // when T+1 fires
   group,                 // optional override; else classifier picks
   templateBuckets,       // optional pre-loaded buckets; else loaded per campaign
+  senderPoolTag = null,  // restrict sender selection to a tagged inbox subset
+  audienceType = "brand",
 }) {
   if (!toEmail) return { skipped: "no email" };
 
@@ -210,7 +219,7 @@ export async function enrollProspect({
   // following up. hasPool=false means no pool configured at all (legacy
   // single-sender path stays active). hasPool=true with inbox=null means
   // every inbox is at cap today — defer the whole enrollment to tomorrow.
-  const { hasPool: poolConfigured, inbox: pickedInbox } = await getNextInbox(teamId);
+  const { hasPool: poolConfigured, inbox: pickedInbox } = await getNextInbox(teamId, { poolTag: senderPoolTag });
   if (poolConfigured && !pickedInbox) {
     return { skipped: "all inboxes at daily cap" };
   }
@@ -259,6 +268,7 @@ export async function enrollProspect({
       campaign_id: campaignId,
       team_id: teamId,
       contact_id: contactId,
+      audience_type: audienceType,
       template_id: tpl.id || null,             // links to email_templates row when DB-sourced
       template_key: tpl.template_key || key,
       sequence_id: sequenceId,
@@ -309,6 +319,142 @@ export async function enrollProspect({
   };
 }
 
+// ---------- CREATOR (INFLUENCER) ENROLLMENT ----------
+//
+// Mirror of enrollProspect for the influencer audience. Same shape on email_sends
+// (4 rows, shared sequence_id, pinned sender), but the per-creator variables come
+// from buildCreatorVariables and the lifecycle flag flip targets creator_prospects
+// instead of storeleads_brands.
+import {
+  generateCreatorObservation,
+  buildCreatorVariables,
+  renderTemplate as renderCreatorTemplate,
+  validateRenderedEmail as validateCreatorEmail,
+} from "./personalize-creator.js";
+import { classifyCreator } from "./creator-groups.js";
+import { getCreatorSequenceTemplate } from "./creator-templates.js";
+
+export async function enrollCreator({
+  teamId,
+  campaignId,
+  contactId = null,
+  toEmail,
+  toName,
+  creator,               // creator_prospects row shape
+  apiKey,
+  startAt = new Date(),
+  group,                 // optional override; else classifyCreator picks
+  templateBuckets,       // pre-loaded buckets for this campaign
+  senderPoolTag = null,
+}) {
+  if (!toEmail) return { skipped: "no email" };
+
+  const { data: suppression } = await supabase
+    .from("ai_suppressions")
+    .select("id")
+    .eq("team_id", teamId)
+    .ilike("email", toEmail)
+    .maybeSingle();
+  if (suppression) return { skipped: "suppressed" };
+
+  const { data: existing } = await supabase
+    .from("email_sends")
+    .select("id, sequence_id, status")
+    .eq("team_id", teamId)
+    .ilike("to_email", toEmail)
+    .not("sequence_id", "is", null)
+    .limit(1);
+  if (existing?.length) return { skipped: "already enrolled", sequence_id: existing[0].sequence_id };
+
+  const grp = group || classifyCreator(creator);
+
+  const { hasPool: poolConfigured, inbox: pickedInbox } = await getNextInbox(teamId, { poolTag: senderPoolTag });
+  if (poolConfigured && !pickedInbox) {
+    return { skipped: "all inboxes at daily cap" };
+  }
+
+  let observation = "";
+  if (apiKey) {
+    try {
+      observation = await generateCreatorObservation(creator, apiKey);
+    } catch (err) {
+      console.error(`creator observation gen failed for ${toEmail}:`, err.message);
+    }
+  }
+
+  const sequenceId = crypto.randomUUID();
+  const t1Date = nextWeekday(new Date(startAt));
+  const variables = buildCreatorVariables(creator, observation);
+  const buckets = templateBuckets || (campaignId ? await loadCampaignTemplateBuckets(teamId, campaignId) : {});
+
+  const rows = [];
+  for (const touch of [1, 2, 3, 4]) {
+    const key = `${grp}-T${touch}`;
+    const bucket = buckets[key];
+    let tpl = pickWeightedTemplate(bucket, grp, touch);
+    if (!tpl || (!tpl.subject_template && !tpl.body_template)) {
+      // Fall back to the creator-specific seed template when the campaign
+      // has no row for this slot (e.g. operator deleted it).
+      tpl = getCreatorSequenceTemplate(grp, touch);
+    }
+    if (!tpl) {
+      console.error(`no creator template for ${key}`);
+      return { skipped: `template missing: ${key}` };
+    }
+    const subject = renderCreatorTemplate(tpl.subject_template, variables);
+    const body = renderCreatorTemplate(tpl.body_template, variables);
+    const v = validateCreatorEmail(subject, body);
+    if (!v.valid) {
+      console.warn(`creator render issues for ${toEmail} ${key}:`, v.issues);
+      if (touch === 1) return { skipped: `render: ${v.issues.join("; ")}` };
+    }
+
+    rows.push({
+      campaign_id: campaignId,
+      team_id: teamId,
+      contact_id: contactId,
+      audience_type: "influencer",
+      template_id: tpl.id || null,
+      template_key: tpl.template_key || key,
+      sequence_id: sequenceId,
+      touch_number: touch,
+      brand_group: grp,                          // reuse the column for tier (C1/C2/C3)
+      sender_email: pickedInbox?.email || null,
+      sender_domain: pickedInbox?.domain || SENDER_DOMAIN,
+      template_variant: tpl.template_key || key,
+      to_email: toEmail.toLowerCase(),
+      to_name: toName || null,
+      subject,
+      body,
+      observation: observation || null,
+      status: touch === 1 ? "pending" : "scheduled",
+      scheduled_at: touch === 1 ? t1Date.toISOString() : touchScheduledAt(t1Date, touch),
+    });
+  }
+
+  const { data: inserted, error } = await supabase
+    .from("email_sends")
+    .insert(rows)
+    .select("id, touch_number, scheduled_at");
+
+  if (error) {
+    console.error("enrollCreator insert failed:", error.message);
+    return { skipped: `insert error: ${error.message}` };
+  }
+
+  await supabase
+    .from("creator_prospects")
+    .update({ emailed: true, emailed_at: new Date().toISOString() })
+    .eq("team_id", teamId)
+    .ilike("email", toEmail.toLowerCase());
+
+  return {
+    sequence_id: sequenceId,
+    group: grp,
+    touches: inserted,
+  };
+}
+
 // ---------- CAMPAIGN HELPERS ----------
 
 // Public version so the orchestrator can preload once per run and avoid
@@ -317,11 +463,15 @@ export async function loadTemplateBucketsForCampaign(teamId, campaignId) {
   return await loadCampaignTemplateBuckets(teamId, campaignId);
 }
 
-// Find the campaign the daily-200 orchestrator should use.
+// Find the campaign the daily orchestrator should use.
 //   1. By id (if explicit)
-//   2. By the most recently-active 'daily-200' campaign
+//   2. By the most recently-active 'daily-200' campaign for this audience
 //   3. null when none exists (orchestrator falls back to legacy hardcoded mode)
-export async function resolveActiveCampaign(teamId, explicitId) {
+//
+// audienceType filters between brand and influencer auto-pick when no explicit
+// id is passed. Defaults to "brand" so existing brand-only callers stay
+// behaviour-compatible.
+export async function resolveActiveCampaign(teamId, explicitId, audienceType = "brand") {
   if (explicitId) {
     const { data } = await supabase.from("email_campaigns").select("*")
       .eq("team_id", teamId).eq("id", explicitId).maybeSingle();
@@ -329,6 +479,7 @@ export async function resolveActiveCampaign(teamId, explicitId) {
   }
   const { data } = await supabase.from("email_campaigns").select("*")
     .eq("team_id", teamId).eq("status", "active").eq("source", "daily-200")
+    .eq("audience_type", audienceType)
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   return data || null;
 }
@@ -354,7 +505,7 @@ export async function fetchDueRows({ teamId, limit }) {
 
 // ---------- SEND ONE ROW ----------
 
-export async function sendDueRow(row, { resendApiKey, senderFrom, replyTo }) {
+export async function sendDueRow(row, { resendApiKey, senderFrom, replyTo, senderPoolTag = null }) {
   // Last-mile suppression check — caught between enrollment and send.
   const { data: suppressed } = await supabase
     .from("ai_suppressions")
@@ -385,7 +536,7 @@ export async function sendDueRow(row, { resendApiKey, senderFrom, replyTo }) {
   // campaign's sender_from (legacy single-sender path).
   const { hasPool, inbox } = row.sender_email
     ? await getNextInbox(row.team_id, { pinnedEmail: row.sender_email })
-    : await getNextInbox(row.team_id);
+    : await getNextInbox(row.team_id, { poolTag: senderPoolTag });
 
   if (hasPool && !inbox) {
     const reason = row.sender_email
