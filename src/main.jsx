@@ -18,6 +18,7 @@ import AiInboxPage from "./pages/AiInboxPage";
 import AiCampaignsPage from "./pages/AiCampaignsPage";
 import AiCampaignDetailPage from "./pages/AiCampaignDetailPage";
 import UsersPage from "./pages/UsersPage";
+import TrialsPage from "./pages/TrialsPage";
 import "./index.css";
 
 createRoot(document.getElementById("root")).render(
@@ -38,6 +39,7 @@ createRoot(document.getElementById("root")).render(
                 <Route path="/ai/campaigns" element={<AiCampaignsPage />} />
                 <Route path="/ai/campaigns/:id" element={<AiCampaignDetailPage />} />
                 <Route path="/users" element={<UsersPage />} />
+                <Route path="/trials" element={<TrialsPage />} />
                 <Route path="/tables/:table" element={<TablePage />} />
                 <Route path="/tables/:table/analytics" element={<TableAnalyticsPage />} />
                 <Route path="/team" element={<TeamPage />} />
