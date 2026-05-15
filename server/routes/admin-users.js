@@ -68,6 +68,18 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Grant a fresh trial to a brand (re-activates the "Start Free Trial" path
+  // in the main app). Writes to brands in whichever DB the request targets;
+  // the audit row in admin_trial_grants always lives in prod.
+  router.post("/:userId/grant-trial", async (req, res) => {
+    try {
+      const out = await grantTrial(req.params.userId, req.body || {}, req.admin, req.dbTarget || "prod");
+      res.json(out);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 
@@ -91,6 +103,11 @@ async function listBrands({ q = "", limit = "50", offset = "0" }) {
             b.logo_pic_name,
             b.location,
             b.niche,
+            b.trial_plan_name,
+            b.trial_days,
+            b.trial_interval,
+            b.trial_activation_date,
+            b.trial_expiration_date,
             sig.last_sign_in,
             COALESCE(camp.n, 0)::int    AS active_campaigns,
             COALESCE(prom.n, 0)::int    AS active_promoters,
@@ -300,5 +317,105 @@ async function impersonateUser(userId, admin) {
     target_role: user.role,
     target_kind: targetKind,
     gateway_url: `${clientUrl()}/?token=${tokenId}`,
+  };
+}
+
+// Valid Shopify plan names from the main app's billing config. Keeping the
+// set tight prevents typos that would silently break the activation gate.
+const VALID_TRIAL_PLANS = new Set(["starter", "grow", "scale"]);
+const VALID_TRIAL_INTERVALS = new Set(["monthly", "annual"]);
+
+async function grantTrial(userId, body, admin, dbTarget) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  const plan = String(body.plan || "").toLowerCase();
+  const interval = String(body.interval || "").toLowerCase();
+  const days = Number(body.days);
+  const note = body.note ? String(body.note).slice(0, 500) : null;
+
+  if (!VALID_TRIAL_PLANS.has(plan)) {
+    const e = new Error(`plan must be one of: ${[...VALID_TRIAL_PLANS].join(", ")}`); e.status = 400; throw e;
+  }
+  if (!VALID_TRIAL_INTERVALS.has(interval)) {
+    const e = new Error(`interval must be monthly or annual`); e.status = 400; throw e;
+  }
+  if (!Number.isInteger(days) || days < 1 || days > 90) {
+    const e = new Error("days must be an integer between 1 and 90"); e.status = 400; throw e;
+  }
+
+  // Verify the brand row exists, is active, and capture previous trial state
+  // for the audit row. Pinned to the request's DB target.
+  const { rows: brandRows } = await cloudSqlQuery(
+    `SELECT b.id          AS brand_id,
+            u.email,
+            b.trial_plan_name,
+            b.trial_days,
+            b.trial_interval,
+            b.trial_activation_date,
+            b.trial_expiration_date
+       FROM brands b
+       JOIN users  u ON u.id = b.user_id
+      WHERE b.user_id = $1
+        AND b.deleted = ${ENTITY_ACTIVE}
+      LIMIT 1`,
+    [userId],
+  );
+  if (brandRows.length === 0) {
+    const e = new Error("No active brand found for that user"); e.status = 404; throw e;
+  }
+  const prev = brandRows[0];
+
+  // Re-arm the trial: write new plan/days/interval and clear the activation
+  // window so the main app's `/brands/settings/subscription` page surfaces the
+  // "Start Free Trial" button again. Shopify still owns the actual billing
+  // state — see admin_trial_grants.sql header for the Shopify caveat.
+  const { rows: updated } = await cloudSqlQuery(
+    `UPDATE brands
+        SET trial_plan_name       = $2,
+            trial_days            = $3,
+            trial_interval        = $4,
+            trial_activation_date = NULL,
+            trial_expiration_date = NULL,
+            updated               = NOW()
+      WHERE user_id = $1
+        AND deleted = ${ENTITY_ACTIVE}
+      RETURNING trial_plan_name, trial_days, trial_interval,
+                trial_activation_date, trial_expiration_date`,
+    [userId, plan, days, interval],
+  );
+
+  // Audit row goes to the same DB the brand UPDATE landed in (admin_trial_grants
+  // exists in both prod and dev). Diverges from admin_impersonations (always
+  // prod) by design — see server/sql/admin_trial_grants.sql header.
+  await cloudSqlQuery(
+    `INSERT INTO admin_trial_grants
+       (admin_id, admin_email, target_user_id, target_email, target_brand_id,
+        plan, days, "interval",
+        previous_plan, previous_days, previous_interval,
+        previous_activation, previous_expiration,
+        target_db, note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    [
+      admin.id, admin.email, userId, prev.email, prev.brand_id,
+      plan, days, interval,
+      prev.trial_plan_name, prev.trial_days, prev.trial_interval,
+      prev.trial_activation_date, prev.trial_expiration_date,
+      dbTarget, note,
+    ],
+    dbTarget,
+  );
+
+  return {
+    user_id: userId,
+    target_db: dbTarget,
+    trial: updated[0],
+    previous: {
+      trial_plan_name: prev.trial_plan_name,
+      trial_days: prev.trial_days,
+      trial_interval: prev.trial_interval,
+      trial_activation_date: prev.trial_activation_date,
+      trial_expiration_date: prev.trial_expiration_date,
+    },
   };
 }

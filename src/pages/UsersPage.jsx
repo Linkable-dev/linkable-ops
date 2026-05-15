@@ -6,6 +6,7 @@ import { TabBar } from "../components/ui/TabBar";
 import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
+import { Modal } from "../components/ui/Modal";
 
 const TABS = [["brands", "Brands"], ["creators", "Creators"]];
 
@@ -70,6 +71,7 @@ export default function UsersPage() {
   const [actionError, setActionError] = useState("");
   const [sortBy, setSortBy] = useState(DEFAULT_SORT.sortBy);
   const [sortDir, setSortDir] = useState(DEFAULT_SORT.sortDir);
+  const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
 
   const handleSort = (key) => {
     if (sortBy === key) {
@@ -190,7 +192,7 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.4fr) 120px 120px 130px"
+            ? "44px minmax(0, 1.8fr) minmax(0, 1.8fr) minmax(0, 1.2fr) 100px 110px 130px 200px"
             : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
@@ -206,6 +208,7 @@ export default function UsersPage() {
               <SortHeader theme={theme} sortKey="owner_name"   label="Owner"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="last_sign_in" label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <span>Trial</span>
               <span></span>
             </>
           ) : (
@@ -243,10 +246,18 @@ export default function UsersPage() {
               theme={theme}
               busy={impersonating === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
+              onGrantTrial={() => setTrialModalRow(row)}
             />
           ))
         )}
       </div>
+
+      <GrantTrialModal
+        row={trialModalRow}
+        isDev={isDev}
+        onClose={() => setTrialModalRow(null)}
+        onGranted={() => { setTrialModalRow(null); fetchRows(); }}
+      />
 
       {!loading && rows.length > 0 && (
         <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
@@ -257,7 +268,7 @@ export default function UsersPage() {
   );
 }
 
-function UserRow({ row, tab, theme, busy, onImpersonate }) {
+function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -268,7 +279,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.4fr) 120px 120px 130px"
+        ? "44px minmax(0, 1.8fr) minmax(0, 1.8fr) minmax(0, 1.2fr) 100px 110px 130px 200px"
         : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
@@ -310,6 +321,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
           <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
+          <TrialCell row={row} theme={theme} />
         </>
       ) : (
         <>
@@ -343,12 +355,210 @@ function UserRow({ row, tab, theme, busy, onImpersonate }) {
         </>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+        {tab === "brands" && (
+          <Btn size="sm" variant="outline" onClick={onGrantTrial}>
+            Trial
+          </Btn>
+        )}
         <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
-          View as user ↗
+          View ↗
         </Btn>
       </div>
     </div>
+  );
+}
+
+function TrialCell({ row, theme }) {
+  // Show the most useful piece of info per state:
+  //   no plan set       → "—"
+  //   has plan, no activation_date → "Granted: <plan> <Nd>" (waiting for brand to click Start)
+  //   activated, future expiration → "Active: <plan> · ends <date>"
+  //   expired                      → "Expired: <plan>" with muted color
+  // Snapshot "now" once on mount. The expired-vs-active state doesn't need to
+  // be reactive within a single page view, and useState's lazy init keeps the
+  // render pure.
+  const [now] = useState(() => Date.now());
+  const plan = row.trial_plan_name || "";
+  const days = row.trial_days || 0;
+  const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
+    ? new Date(row.trial_activation_date) : null;
+  const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
+    ? new Date(row.trial_expiration_date) : null;
+  const isExpired = expires && expires.getTime() <= now;
+
+  if (!plan && !days) {
+    return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
+  }
+
+  let label;
+  let color = theme.textMid;
+  if (!activated && plan) {
+    label = `Granted · ${plan} ${days}d`;
+    color = theme.textMid;
+  } else if (activated && !isExpired) {
+    label = `Active · ${plan}`;
+    color = "#10B981";
+  } else if (isExpired) {
+    label = `Expired · ${plan}`;
+    color = "#EF4444";
+  } else {
+    label = `${plan} ${days}d`;
+  }
+
+  return (
+    <div style={{ minWidth: 0, fontSize: 12, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={expires ? `Expires ${expires.toLocaleString()}` : ""}>
+      {label}
+      {expires && !isExpired && activated && (
+        <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
+          ends {friendlyDate(row.trial_expiration_date)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TRIAL_PLANS = [
+  { value: "starter", label: "Starter" },
+  { value: "grow",    label: "Grow" },
+  { value: "scale",   label: "Scale" },
+];
+
+function GrantTrialModal({ row, isDev, onClose, onGranted }) {
+  const { theme, mode } = useTheme();
+  const [plan, setPlan] = useState("grow");
+  const [days, setDays] = useState(14);
+  const [billingInterval, setBillingInterval] = useState("monthly");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  // Reset form whenever a new row opens the modal. Pre-fill from current trial
+  // values if there's anything sensible to carry over (helps "re-grant the
+  // same thing" become one click). Keyed on user_id so opening the modal for
+  // a different brand re-syncs the form.
+  const userId = row?.user_id;
+  const initialPlan = row?.trial_plan_name;
+  const initialDays = row?.trial_days;
+  const initialInterval = row?.trial_interval;
+  useEffect(() => {
+    if (!userId) return;
+    setPlan(initialPlan && TRIAL_PLANS.some(p => p.value === initialPlan) ? initialPlan : "grow");
+    setDays(Number(initialDays) > 0 ? Number(initialDays) : 14);
+    setBillingInterval(initialInterval === "annual" ? "annual" : "monthly");
+    setNote("");
+    setError("");
+  }, [userId, initialPlan, initialDays, initialInterval]);
+
+  if (!row) return null;
+
+  const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
+    ? new Date(row.trial_expiration_date) : null;
+  const isExpired = expires && expires.getTime() <= Date.now();
+
+  async function handleSubmit() {
+    setError("");
+    setSubmitting(true);
+    try {
+      await api.grantTrial(row.user_id, { plan, days: Number(days), interval: billingInterval, note: note.trim() || undefined });
+      onGranted();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const labelStyle = { display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4, color: theme.textMuted, marginBottom: 6 };
+  const selectStyle = {
+    width: "100%", boxSizing: "border-box", background: theme.bg,
+    border: `1.5px solid ${theme.border}`, borderRadius: 8, color: theme.text,
+    fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none",
+  };
+
+  return (
+    <Modal open={!!row} onClose={onClose} title={`Grant trial — ${row.store_name || row.email}`} width={520}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Context strip — current trial state */}
+        <div style={{
+          fontSize: 12, color: theme.textMid, padding: "10px 12px",
+          background: theme.surfaceAlt, borderRadius: 8, border: `1px solid ${theme.border}`,
+        }}>
+          <div><b>Brand:</b> {row.email}</div>
+          <div><b>Writing to:</b> {isDev ? "DEV DB" : "PROD DB"}</div>
+          <div style={{ marginTop: 4 }}>
+            <b>Current trial:</b>{" "}
+            {row.trial_plan_name
+              ? <>
+                  {row.trial_plan_name} · {row.trial_days}d · {row.trial_interval || "—"}
+                  {expires && <> · {isExpired ? "expired" : "ends"} {friendlyDate(row.trial_expiration_date)}</>}
+                </>
+              : <span style={{ color: theme.textMuted }}>none set</span>
+            }
+          </div>
+        </div>
+
+        {/* Shopify caveat — v1 surfaces it as a warning; v2 will check + cancel */}
+        <div style={{
+          fontSize: 12, color: "#92400E",
+          background: mode === "dark" ? "#3D2A05" : "#FFFBEB",
+          border: `1px solid ${mode === "dark" ? "#5B4015" : "#FDE68A"}`,
+          padding: "10px 12px", borderRadius: 8,
+        }}>
+          <b>Heads up:</b> if this brand currently has an active paid Shopify subscription
+          (post-trial), the main app's <code>appSubscriptionCreate</code> may reject the new
+          trial. Cancel the existing subscription on the Shopify side first, or confirm
+          they're on no plan, before telling the brand to click "Start Free Trial".
+        </div>
+
+        <div>
+          <label style={labelStyle}>Plan</label>
+          <select value={plan} onChange={(e) => setPlan(e.target.value)} style={selectStyle}>
+            {TRIAL_PLANS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <label style={labelStyle}>Days</label>
+            <Input type="number" min={1} max={90} value={days}
+              onChange={(e) => setDays(e.target.value === "" ? "" : Math.max(1, Math.min(90, Number(e.target.value))))} />
+          </div>
+          <div>
+            <label style={labelStyle}>Interval</label>
+            <select value={billingInterval} onChange={(e) => setBillingInterval(e.target.value)} style={selectStyle}>
+              <option value="monthly">Monthly</option>
+              <option value="annual">Annual</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>Note (optional, saved to audit log)</label>
+          <Input multiline rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. ‘Re-extended trial after demo call’" />
+        </div>
+
+        {error && (
+          <div style={{
+            fontSize: 12, color: "#EF4444",
+            background: mode === "dark" ? "#3B1111" : "#FEF2F2",
+            border: `1px solid ${mode === "dark" ? "#5B1717" : "#FECACA"}`,
+            padding: "10px 12px", borderRadius: 8,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <Btn size="md" variant="outline" onClick={onClose} disabled={submitting}>Cancel</Btn>
+          <Btn size="md" onClick={handleSubmit} loading={submitting}
+            disabled={!Number.isFinite(Number(days)) || Number(days) < 1}>
+            Grant trial
+          </Btn>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
