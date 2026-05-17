@@ -5,11 +5,17 @@
 //   GET  /stats           — counts grouped by status × brand_group
 //   GET  /runs            — distinct daily-run dates (for the run picker)
 //   POST /stop            — cancel pending touches + add to ai_suppressions
+//   GET  /inbox           — unified manual-triage replies + AI threads
+//   GET  /inbox/manual/:sendId           — full reply detail (body from raw events)
+//   POST /inbox/manual/:sendId/handle    — mark reply handled
+//   POST /inbox/manual/:sendId/unhandle  — undo mark handled
+//   POST /inbox/manual/:sendId/opt-out   — suppress + mark handled
 
 import express from "express";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { cancelPendingTouches } from "../automation/sequencer.js";
+import { normalizeInboundPayload, extractReplyBody } from "../automation/inbound-parser.js";
 
 // Shared scope-window builder. Returns null when scope/run_date imply lifetime.
 // Callers apply the returned .or(...) clause to a Supabase query.
@@ -265,6 +271,329 @@ export function outboundRoutes() {
       }
 
       res.json({ results });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---------- INBOX ----------
+  // Unified inbox: manual-triage replies (email_sends.replied_at) merged with
+  // AI conversation threads (ai_conversations). The frontend renders one list
+  // with a mode badge per row so an operator doesn't have to flip between
+  // "Outbound" and "AI threads" mental models — there's one queue.
+  //
+  // Query:
+  //   mode=all|manual|ai      (default all)
+  //   status=unhandled|handled|all   (default unhandled; only meaningful for manual)
+  //   audience=brand|influencer      (manual only — AI threads aren't tagged)
+  //   campaign_id=<uuid>             (manual only — filters email_sends.campaign_id)
+  //   q=text                         (ilike across to_email/prospect_email/subject)
+  //   limit=number            (default 50, max 200)
+  router.get("/inbox", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const {
+        mode = "all",
+        status = "unhandled",
+        audience,
+        campaign_id: campaignId,
+      } = req.query;
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      const search = (req.query.q || "").toString().trim();
+
+      const wantManual = mode === "all" || mode === "manual";
+      const wantAi = mode === "all" || mode === "ai";
+
+      const rows = [];
+
+      // ----- Manual replies (email_sends.replied_at) -----
+      if (wantManual) {
+        let q = supabase
+          .from("email_sends")
+          .select(`
+            id, campaign_id, to_email, to_name, subject, sent_at, replied_at,
+            handled_at, handled_by_email, audience_type, sender_domain,
+            touch_number, status,
+            email_campaigns!campaign_id ( name, auto_reply )
+          `)
+          .eq("team_id", teamId)
+          .not("replied_at", "is", null)
+          .order("replied_at", { ascending: false })
+          .limit(limit);
+
+        if (status === "unhandled") q = q.is("handled_at", null);
+        else if (status === "handled") q = q.not("handled_at", "is", null);
+        if (audience) q = q.eq("audience_type", audience);
+        if (campaignId) q = q.eq("campaign_id", campaignId);
+        if (search) {
+          const esc = search.replace(/[,()*]/g, " ");
+          q = q.or(`to_email.ilike.%${esc}%,to_name.ilike.%${esc}%,subject.ilike.%${esc}%`);
+        }
+
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+
+        for (const r of data || []) {
+          rows.push({
+            mode: "manual",
+            id: `manual:${r.id}`,
+            send_id: r.id,
+            to_email: r.to_email,
+            to_name: r.to_name,
+            subject: r.subject,
+            campaign_id: r.campaign_id,
+            campaign_name: r.email_campaigns?.name || null,
+            auto_reply: r.email_campaigns?.auto_reply ?? null,
+            audience_type: r.audience_type,
+            sender_domain: r.sender_domain,
+            touch_number: r.touch_number,
+            sent_at: r.sent_at,
+            last_activity_at: r.replied_at,
+            unhandled: !r.handled_at,
+            handled_at: r.handled_at,
+            handled_by_email: r.handled_by_email,
+          });
+        }
+      }
+
+      // ----- AI threads (ai_conversations) -----
+      if (wantAi) {
+        let q = supabase
+          .from("ai_conversations")
+          .select(`
+            id, campaign_id, prospect_email, prospect_name, prospect_company,
+            status, thread_subject, last_inbound_at, last_outbound_at, updated_at,
+            qualification_score,
+            ai_campaigns!campaign_id ( name )
+          `)
+          .eq("team_id", teamId)
+          .order("updated_at", { ascending: false })
+          .limit(limit);
+
+        if (search) {
+          const esc = search.replace(/[,()*]/g, " ");
+          q = q.or(`prospect_email.ilike.%${esc}%,prospect_name.ilike.%${esc}%,thread_subject.ilike.%${esc}%`);
+        }
+
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+
+        for (const c of data || []) {
+          // AI rows are "unhandled" when they need attention: status active or
+          // escalated, and an inbound reply has arrived. Booked / qualified /
+          // dead / opted_out are considered settled.
+          const unhandled =
+            (c.status === "active" || c.status === "escalated") &&
+            !!c.last_inbound_at;
+          rows.push({
+            mode: "ai",
+            id: `ai:${c.id}`,
+            conversation_id: c.id,
+            to_email: c.prospect_email,
+            to_name: c.prospect_name,
+            subject: c.thread_subject,
+            campaign_id: c.campaign_id,
+            campaign_name: c.ai_campaigns?.name || null,
+            ai_status: c.status,
+            qualification_score: c.qualification_score,
+            last_activity_at: c.last_inbound_at || c.updated_at,
+            unhandled,
+          });
+        }
+      }
+
+      // Merge by recency and cap at limit. Done in-memory because we already
+      // capped each source query at `limit` — worst case we sort ~2*limit rows.
+      rows.sort((a, b) => {
+        const at = new Date(a.last_activity_at || 0).getTime();
+        const bt = new Date(b.last_activity_at || 0).getTime();
+        return bt - at;
+      });
+
+      res.json({ rows: rows.slice(0, limit), counts: { returned: Math.min(rows.length, limit), total_fetched: rows.length } });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Full manual-triage detail. The reply body lives in ai_raw_events.payload
+  // (Resend webhook log) — we look it up by `to_email` ↔ inbound `from` plus
+  // a small time window around replied_at, then parse it on the fly.
+  router.get("/inbox/manual/:sendId", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { sendId } = req.params;
+
+      const { data: send, error: sendErr } = await supabase
+        .from("email_sends")
+        .select(`
+          id, campaign_id, to_email, to_name, subject, body, sent_at,
+          replied_at, handled_at, handled_by_email, audience_type,
+          sender_domain, touch_number, status, resend_id,
+          email_campaigns!campaign_id ( name, auto_reply, ai_campaign_id )
+        `)
+        .eq("team_id", teamId)
+        .eq("id", sendId)
+        .maybeSingle();
+      if (sendErr) throw new Error(sendErr.message);
+      if (!send) return res.status(404).json({ error: "send not found" });
+
+      // Find the matching raw event. Heuristic: same team + inbound + within
+      // a 10-min window around replied_at, with from_email matching to_email.
+      // 10 min handles webhook lag without false matches in normal traffic.
+      let reply = null;
+      let rawEventId = null;
+      if (send.replied_at) {
+        const t = new Date(send.replied_at).getTime();
+        const lo = new Date(t - 10 * 60_000).toISOString();
+        const hi = new Date(t + 10 * 60_000).toISOString();
+        const { data: events, error: evErr } = await supabase
+          .from("ai_raw_events")
+          .select("id, payload, created_at, event_type")
+          .eq("team_id", teamId)
+          .gte("created_at", lo)
+          .lte("created_at", hi)
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (evErr) throw new Error(evErr.message);
+
+        const target = (send.to_email || "").toLowerCase();
+        for (const ev of events || []) {
+          const norm = normalizeInboundPayload(ev.payload);
+          if (!norm) continue;
+          if ((norm.from_email || "").toLowerCase() !== target) continue;
+          const body = extractReplyBody(norm);
+          if (!body || !body.trim()) continue;
+          reply = {
+            from_email: norm.from_email,
+            from_name: norm.from_name,
+            subject: norm.subject,
+            body,
+            received_at: ev.created_at,
+            message_id: norm.message_id,
+          };
+          rawEventId = ev.id;
+          break;
+        }
+      }
+
+      // Suppression state (so the UI can show "already opted out" instead of
+      // offering the opt-out action again).
+      const { data: sup } = await supabase
+        .from("ai_suppressions")
+        .select("reason, detail, created_at")
+        .eq("team_id", teamId)
+        .ilike("email", send.to_email)
+        .maybeSingle();
+
+      res.json({
+        send: {
+          id: send.id,
+          campaign_id: send.campaign_id,
+          campaign_name: send.email_campaigns?.name || null,
+          auto_reply: send.email_campaigns?.auto_reply ?? null,
+          ai_campaign_id: send.email_campaigns?.ai_campaign_id || null,
+          to_email: send.to_email,
+          to_name: send.to_name,
+          subject: send.subject,
+          body: send.body,
+          sent_at: send.sent_at,
+          replied_at: send.replied_at,
+          handled_at: send.handled_at,
+          handled_by_email: send.handled_by_email,
+          audience_type: send.audience_type,
+          sender_domain: send.sender_domain,
+          touch_number: send.touch_number,
+          status: send.status,
+          resend_id: send.resend_id,
+        },
+        reply,
+        raw_event_id: rawEventId,
+        suppression: sup || null,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Mark a manual-triage reply as handled. `handled_by_email` is the operator
+  // (req.admin), surfaced in the row so the team can see who cleared what.
+  router.post("/inbox/manual/:sendId/handle", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { sendId } = req.params;
+      const adminEmail = req.admin?.email || null;
+      const { error } = await supabase
+        .from("email_sends")
+        .update({ handled_at: new Date().toISOString(), handled_by_email: adminEmail })
+        .eq("team_id", teamId)
+        .eq("id", sendId);
+      if (error) throw new Error(error.message);
+      res.json({ ok: true, handled_by_email: adminEmail });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Undo handled — clears handled_at + handled_by_email. Useful if an operator
+  // marks a row by mistake; preferable to forcing them to remember the prior
+  // audit value.
+  router.post("/inbox/manual/:sendId/unhandle", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { sendId } = req.params;
+      const { error } = await supabase
+        .from("email_sends")
+        .update({ handled_at: null, handled_by_email: null })
+        .eq("team_id", teamId)
+        .eq("id", sendId);
+      if (error) throw new Error(error.message);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Opt-out combo: upserts the prospect to ai_suppressions, cancels remaining
+  // touches, and stamps handled_at. Saves the operator three clicks for the
+  // common "they said no thanks" case.
+  router.post("/inbox/manual/:sendId/opt-out", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const { sendId } = req.params;
+      const adminEmail = req.admin?.email || null;
+      const note = (req.body?.note || "").toString().slice(0, 500) || "ui inbox opt-out";
+
+      const { data: send, error: sendErr } = await supabase
+        .from("email_sends")
+        .select("id, to_email")
+        .eq("team_id", teamId)
+        .eq("id", sendId)
+        .maybeSingle();
+      if (sendErr) throw new Error(sendErr.message);
+      if (!send) return res.status(404).json({ error: "send not found" });
+
+      const email = (send.to_email || "").toLowerCase().trim();
+      if (!email) return res.status(400).json({ error: "send has no to_email" });
+
+      const { error: supErr } = await supabase
+        .from("ai_suppressions")
+        .upsert(
+          { team_id: teamId, email, reason: "opt_out", detail: note },
+          { onConflict: "team_id,email" }
+        );
+      if (supErr) throw new Error(supErr.message);
+
+      const { cancelled } = await cancelPendingTouches({ teamId, email, reason: "opted_out" });
+
+      const { error: updErr } = await supabase
+        .from("email_sends")
+        .update({ handled_at: new Date().toISOString(), handled_by_email: adminEmail })
+        .eq("team_id", teamId)
+        .eq("id", sendId);
+      if (updErr) throw new Error(updErr.message);
+
+      res.json({ ok: true, cancelled, suppressed: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
