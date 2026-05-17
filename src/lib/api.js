@@ -106,6 +106,17 @@ export const api = {
   stopOutbound: ({ emails, reason }) =>
     request("/outbound/stop", { method: "POST", body: JSON.stringify({ emails, reason }) }),
 
+  // Outbound inbox — unified manual-triage replies + AI threads. Used by /ai/inbox.
+  listOutboundInbox: ({ mode, status, audience, campaignId, q, limit } = {}) =>
+    request(`/outbound/inbox?${buildQs({ mode, status, audience, campaign_id: campaignId, q, limit })}`),
+  getOutboundInboxManual: (sendId) => request(`/outbound/inbox/manual/${sendId}`),
+  handleOutboundInboxManual: (sendId) =>
+    request(`/outbound/inbox/manual/${sendId}/handle`, { method: "POST" }),
+  unhandleOutboundInboxManual: (sendId) =>
+    request(`/outbound/inbox/manual/${sendId}/unhandle`, { method: "POST" }),
+  optOutOutboundInboxManual: (sendId, body = {}) =>
+    request(`/outbound/inbox/manual/${sendId}/opt-out`, { method: "POST", body: JSON.stringify(body) }),
+
   // Outbound campaigns
   listOutboundCampaigns: ({ status, limit, offset, audience } = {}) =>
     request(`/outbound/campaigns?${buildQs({ status, limit, offset, audience })}`),
