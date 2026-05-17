@@ -230,7 +230,7 @@ export default function Sidebar() {
         )}
 
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("Email Outbound", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
+          {moduleHeader("GTM", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
         </div>
         {(aiOpen || !sidebarOpen) && (
           <div style={{
@@ -240,7 +240,7 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {navItem("/ai/campaigns", "Campaigns", path.startsWith("/ai/campaigns"), campaignsIcon)}
+            {navItem("/ai/campaigns", "Outbound", path.startsWith("/ai/campaigns"), campaignsIcon)}
             {navItem("/ai/inbox", "Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
           </div>
         )}
