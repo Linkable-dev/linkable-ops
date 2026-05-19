@@ -192,8 +192,9 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 90px 90px 95px 110px 110px 190px"
+            ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 180px"
             : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
+          gap: 8,
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
           background: theme.surfaceAlt,
@@ -281,7 +282,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 90px 90px 95px 110px 110px 190px"
+        ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 180px"
         : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
