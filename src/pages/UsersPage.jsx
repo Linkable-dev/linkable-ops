@@ -192,7 +192,7 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 1.8fr) minmax(0, 1.8fr) minmax(0, 1.2fr) 100px 110px 130px 200px"
+            ? "44px minmax(0, 1.7fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 100px 100px 170px 200px"
             : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
@@ -208,7 +208,7 @@ export default function UsersPage() {
               <SortHeader theme={theme} sortKey="owner_name"   label="Owner"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="last_sign_in" label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <span>Trial</span>
+              <span>Plan</span>
               <span></span>
             </>
           ) : (
@@ -279,7 +279,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 1.8fr) minmax(0, 1.8fr) minmax(0, 1.2fr) 100px 110px 130px 200px"
+        ? "44px minmax(0, 1.7fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 100px 100px 170px 200px"
         : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
@@ -321,7 +321,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
           <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
-          <TrialCell row={row} theme={theme} />
+          <PlanCell row={row} theme={theme} />
         </>
       ) : (
         <>
@@ -369,49 +369,100 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
   );
 }
 
-function TrialCell({ row, theme }) {
-  // Show the most useful piece of info per state:
-  //   no plan set       → "—"
-  //   has plan, no activation_date → "Granted: <plan> <Nd>" (waiting for brand to click Start)
-  //   activated, future expiration → "Active: <plan> · ends <date>"
-  //   expired                      → "Expired: <plan>" with muted color
-  // Snapshot "now" once on mount. The expired-vs-active state doesn't need to
-  // be reactive within a single page view, and useState's lazy init keeps the
-  // render pure.
+// Maps users.account_id (set by the main app's subscription flow) to a coarse
+// plan tier. Mirrors planNameFromAccountId in main-app payment_service.ts;
+// kept here so ops doesn't have to call main-app code to label rows.
+function paidPlanFromAccountId(accountId) {
+  if (!accountId) return null;
+  if (accountId.includes("shopify_299")) return "Scale";
+  if (accountId.includes("shopify_199")) return "Grow";
+  if (accountId.includes("shopify_99"))  return "Starter";
+  return null; // shopify_free_plan or anything else
+}
+
+// One cell, three colors, three layers of state:
+//   1. paid trial in progress → "Trial · Grow · 10d left" (amber)
+//   2. paid subscription      → "Grow"                    (green)
+//   3. shopify_free_plan      → "Free"                    (muted)
+//   4. empty account_id + no trial → "Legacy free"        (purple)
+//   5. admin granted, not started → "Granted · Grow 30d"  (muted)
+//   6. expired trial          → "Expired · Grow"          (red)
+//
+// Trial signals come from brands.trial_* (admin-granted). Plan signals come
+// from users.account_id (Shopify subscription). The combination matters:
+// a granted trial that the brand activated against a *paid* account_id is
+// the "paid trial" state Luca wants to spot in the table.
+function PlanCell({ row, theme }) {
+  // useState lazy init so re-renders during a sort don't shift the "now"
+  // baseline and flip rows between active/expired mid-render.
   const [now] = useState(() => Date.now());
-  const plan = row.trial_plan_name || "";
-  const days = row.trial_days || 0;
+  const accountId = row.account_id || "";
+  const paidPlan = paidPlanFromAccountId(accountId);
+  const isFreePlan = accountId === "shopify_free_plan";
+
   const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
     ? new Date(row.trial_activation_date) : null;
   const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
     ? new Date(row.trial_expiration_date) : null;
-  const isExpired = expires && expires.getTime() <= now;
-
-  if (!plan && !days) {
-    return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
-  }
+  const trialIsActive = activated && expires && expires.getTime() > now;
+  const trialIsExpired = activated && expires && expires.getTime() <= now;
+  const daysLeft = trialIsActive
+    ? Math.max(0, Math.ceil((expires.getTime() - now) / 86_400_000))
+    : null;
 
   let label;
+  let sub = null;
   let color = theme.textMid;
-  if (!activated && plan) {
-    label = `Granted · ${plan} ${days}d`;
+  let title = "";
+
+  if (paidPlan && trialIsActive) {
+    // Paid trial: brand activated a paid plan but is still inside the trial
+    // window — payment starts at trial_expiration_date.
+    label = `Trial · ${paidPlan}`;
+    sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+    color = "#F59E0B"; // amber
+    title = `Paid trial — payment starts ${expires.toLocaleDateString()}`;
+  } else if (paidPlan) {
+    label = paidPlan;
+    color = "#10B981"; // green
+    title = `Paid plan — account_id ${accountId}`;
+  } else if (isFreePlan) {
+    label = "Free";
     color = theme.textMid;
-  } else if (activated && !isExpired) {
-    label = `Active · ${plan}`;
-    color = "#10B981";
-  } else if (isExpired) {
-    label = `Expired · ${plan}`;
+    title = "On Shopify free plan (account_id = shopify_free_plan)";
+  } else if (!accountId && !activated) {
+    // Empty account_id + no trial activation = grandfathered into using the
+    // app without picking a plan. Luca's "legacy free."
+    label = "Legacy free";
+    color = "#8B5CF6"; // purple
+    title = "No account_id set and no trial activated";
+  } else if (row.trial_plan_name && !activated) {
+    // Admin-granted but brand hasn't clicked Start Free Trial yet.
+    label = `Granted · ${row.trial_plan_name}`;
+    sub = `${row.trial_days || 0}d offer`;
+    color = theme.textMid;
+    title = "Trial granted but not activated";
+  } else if (trialIsExpired) {
+    label = `Expired · ${row.trial_plan_name || "trial"}`;
     color = "#EF4444";
+    title = `Trial expired ${expires.toLocaleDateString()}`;
   } else {
-    label = `${plan} ${days}d`;
+    label = "—";
+    color = theme.textMuted;
   }
 
   return (
-    <div style={{ minWidth: 0, fontSize: 12, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={expires ? `Expires ${expires.toLocaleString()}` : ""}>
+    <div
+      style={{
+        minWidth: 0, fontSize: 12, color, overflow: "hidden",
+        textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}
+      title={title}
+    >
       {label}
-      {expires && !isExpired && activated && (
+      {sub && (
         <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
-          ends {friendlyDate(row.trial_expiration_date)}
+          {sub}
         </div>
       )}
     </div>

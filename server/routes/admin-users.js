@@ -95,6 +95,7 @@ async function listBrands({ q = "", limit = "50", offset = "0" }) {
             u.email,
             u.created     AS user_created,
             u.role,
+            u.account_id,
             b.id          AS brand_id,
             b.store_name,
             b.store_website,
