@@ -192,7 +192,7 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 1.7fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 100px 100px 170px 200px"
+            ? "44px minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) 95px 95px 110px 160px 200px"
             : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
@@ -209,6 +209,7 @@ export default function UsersPage() {
               <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="last_sign_in" label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <span>Plan</span>
+              <span>Trial</span>
               <span></span>
             </>
           ) : (
@@ -279,7 +280,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 1.7fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 100px 100px 170px 200px"
+        ? "44px minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) 95px 95px 110px 160px 200px"
         : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
@@ -322,6 +323,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
           <PlanCell row={row} theme={theme} />
+          <TrialStatusCell row={row} theme={theme} />
         </>
       ) : (
         <>
@@ -380,73 +382,24 @@ function paidPlanFromAccountId(accountId) {
   return null; // shopify_free_plan or anything else
 }
 
-// One cell, six states. Order matters: a pending granted-trial-offer beats
-// the current paid plan in the display because that's what an operator
-// actually needs to spot ("oh, yashylife was given a 90-day Grow trial they
-// never started — let's nudge them"). The current paid plan still shows as
-// a secondary line so context isn't lost.
+// Trial info lives in its own column (TrialStatusCell) so the Plan column
+// can stay clean: it answers one question — what is this brand currently
+// paying for / on?
 //
-//   1. Paid trial in progress      → "Trial · Grow"     · "10 days left"   (amber)
-//   2. Granted, not activated      → "Granted · Grow"   · "90d offer (on Starter)" (blue)
-//   3. Expired trial               → "Expired · Grow"                       (red)
-//   4. Paid subscription           → "Grow" / "Scale"                       (green)
-//   5. Shopify free plan           → "Free"                                 (muted)
-//   6. Empty account_id + no trial → "Legacy free"                          (purple)
+//   Starter / Grow / Scale  (green)   — paid Shopify subscription
+//   Free                    (muted)   — chose shopify_free_plan
+//   Legacy free             (purple)  — empty account_id, never picked a plan
+//   —                                 — anything else (rare; data hole)
 function PlanCell({ row, theme }) {
-  // useState lazy init so re-renders during a sort don't shift the "now"
-  // baseline and flip rows between active/expired mid-render.
-  const [now] = useState(() => Date.now());
   const accountId = row.account_id || "";
   const paidPlan = paidPlanFromAccountId(accountId);
   const isFreePlan = accountId === "shopify_free_plan";
 
-  const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
-    ? new Date(row.trial_activation_date) : null;
-  const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
-    ? new Date(row.trial_expiration_date) : null;
-  const trialIsActive = activated && expires && expires.getTime() > now;
-  const trialIsExpired = activated && expires && expires.getTime() <= now;
-  const daysLeft = trialIsActive
-    ? Math.max(0, Math.ceil((expires.getTime() - now) / 86_400_000))
-    : null;
-  const grantedPending = row.trial_plan_name && !activated;
-
-  // Short label describing what plan the brand pays for right now, used as
-  // the secondary line on "Granted · X" so context isn't lost.
-  const currentPlanLabel = paidPlan
-    ? `on ${paidPlan}`
-    : isFreePlan
-      ? "on Free"
-      : !accountId
-        ? "no current plan"
-        : null;
-
   let label;
-  let sub = null;
   let color = theme.textMid;
   let title = "";
 
-  if (paidPlan && trialIsActive) {
-    // Paid trial: brand activated a paid Shopify subscription with trialDays>0.
-    // No charge until trial_expiration_date — that's the "payment starts" date.
-    label = `Trial · ${paidPlan}`;
-    sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
-    color = "#F59E0B";
-    title = `Paid trial — payment starts ${expires.toLocaleDateString()}`;
-  } else if (grantedPending) {
-    // Admin granted a trial but the brand never clicked Start Free Trial.
-    // Surfaced above the current paid plan because this is the actionable
-    // state (the offer is sitting there unused).
-    label = `Granted · ${row.trial_plan_name}`;
-    const offer = `${row.trial_days || 0}d offer`;
-    sub = currentPlanLabel ? `${offer} · ${currentPlanLabel}` : offer;
-    color = "#3B82F6";
-    title = "Trial granted but not yet activated by the brand";
-  } else if (trialIsExpired) {
-    label = `Expired · ${row.trial_plan_name || "trial"}`;
-    color = "#EF4444";
-    title = `Trial expired ${expires.toLocaleDateString()}`;
-  } else if (paidPlan) {
+  if (paidPlan) {
     label = paidPlan;
     color = "#10B981";
     title = `Paid plan — account_id ${accountId}`;
@@ -454,15 +407,72 @@ function PlanCell({ row, theme }) {
     label = "Free";
     color = theme.textMid;
     title = "On Shopify free plan (account_id = shopify_free_plan)";
-  } else if (!accountId && !activated) {
-    // Grandfathered: never picked a Shopify plan, never trialed. Treated as
-    // free because the app still works for them.
+  } else if (!accountId) {
     label = "Legacy free";
     color = "#8B5CF6";
-    title = "No account_id set and no trial activated";
+    title = "No account_id set — grandfathered free user";
   } else {
     label = "—";
     color = theme.textMuted;
+    title = `Unrecognized account_id: ${accountId}`;
+  }
+
+  return (
+    <div
+      style={{
+        minWidth: 0, fontSize: 12, color, overflow: "hidden",
+        textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}
+      title={title}
+    >
+      {label}
+    </div>
+  );
+}
+
+// Trial state, orthogonal to Plan. Shows the most actionable trial info:
+//
+//   Active · Grow      "10 days left"   (amber)  — paid trial, payment pending
+//   Granted · Grow     "90d offer"      (blue)   — admin granted, brand hasn't activated
+//   Expired · Grow                      (red)    — trial window closed
+//   —                                   (muted)  — no trial ever, or no relevant trial
+//
+// "Active" only fires when the brand both activated *and* sits on a paid
+// account_id, which is the "paid trial countdown" Luca wants to spot in the
+// queue. A bare activation without a paid account_id is unusual (the main
+// app activates by creating a Shopify subscription) so we treat it the same.
+function TrialStatusCell({ row, theme }) {
+  const [now] = useState(() => Date.now());
+  const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
+    ? new Date(row.trial_activation_date) : null;
+  const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
+    ? new Date(row.trial_expiration_date) : null;
+  const trialIsActive = activated && expires && expires.getTime() > now;
+  const trialIsExpired = activated && expires && expires.getTime() <= now;
+  const grantedPending = row.trial_plan_name && !activated;
+
+  let label;
+  let sub = null;
+  let color = theme.textMuted;
+  let title = "";
+
+  if (trialIsActive) {
+    const daysLeft = Math.max(0, Math.ceil((expires.getTime() - now) / 86_400_000));
+    label = `Active · ${row.trial_plan_name || "trial"}`;
+    sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+    color = "#F59E0B";
+    title = `Trial active — payment starts ${expires.toLocaleDateString()}`;
+  } else if (grantedPending) {
+    label = `Granted · ${row.trial_plan_name}`;
+    sub = `${row.trial_days || 0}d offer`;
+    color = "#3B82F6";
+    title = "Trial granted but not yet activated by the brand";
+  } else if (trialIsExpired) {
+    label = `Expired · ${row.trial_plan_name || "trial"}`;
+    color = "#EF4444";
+    title = `Trial expired ${expires.toLocaleDateString()}`;
+  } else {
+    label = "—";
   }
 
   return (
