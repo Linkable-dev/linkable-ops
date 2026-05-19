@@ -192,7 +192,7 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) 95px 95px 110px 160px 200px"
+            ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 90px 90px 95px 110px 110px 190px"
             : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
@@ -209,7 +209,8 @@ export default function UsersPage() {
               <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="last_sign_in" label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <span>Plan</span>
-              <span>Trial</span>
+              <span>Trial plan</span>
+              <span>Time left</span>
               <span></span>
             </>
           ) : (
@@ -280,7 +281,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) 95px 95px 110px 160px 200px"
+        ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 90px 90px 95px 110px 110px 190px"
         : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
@@ -323,7 +324,8 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
           <PlanCell row={row} theme={theme} />
-          <TrialStatusCell row={row} theme={theme} />
+          <TrialPlanCell row={row} theme={theme} />
+          <TrialTimeCell row={row} theme={theme} />
         </>
       ) : (
         <>
@@ -430,65 +432,88 @@ function PlanCell({ row, theme }) {
   );
 }
 
-// Trial state, orthogonal to Plan. Shows the most actionable trial info:
-//
-//   Active · Grow      "10 days left"   (amber)  — paid trial, payment pending
-//   Granted · Grow     "90d offer"      (blue)   — admin granted, brand hasn't activated
-//   Expired · Grow                      (red)    — trial window closed
-//   —                                   (muted)  — no trial ever, or no relevant trial
-//
-// "Active" only fires when the brand both activated *and* sits on a paid
-// account_id, which is the "paid trial countdown" Luca wants to spot in the
-// queue. A bare activation without a paid account_id is unusual (the main
-// app activates by creating a Shopify subscription) so we treat it the same.
-function TrialStatusCell({ row, theme }) {
-  const [now] = useState(() => Date.now());
+// Shared derivation. Returns null when the row has no relevant trial state
+// (no granted offer, no activation history) so cells can render a dash.
+function deriveTrialState(row, now) {
   const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
     ? new Date(row.trial_activation_date) : null;
   const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
     ? new Date(row.trial_expiration_date) : null;
-  const trialIsActive = activated && expires && expires.getTime() > now;
-  const trialIsExpired = activated && expires && expires.getTime() <= now;
-  const grantedPending = row.trial_plan_name && !activated;
 
-  let label;
-  let sub = null;
-  let color = theme.textMuted;
-  let title = "";
-
-  if (trialIsActive) {
+  if (activated && expires && expires.getTime() > now) {
     const daysLeft = Math.max(0, Math.ceil((expires.getTime() - now) / 86_400_000));
-    label = `Active · ${row.trial_plan_name || "trial"}`;
-    sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
-    color = "#F59E0B";
-    title = `Trial active — payment starts ${expires.toLocaleDateString()}`;
-  } else if (grantedPending) {
-    label = `Granted · ${row.trial_plan_name}`;
-    sub = `${row.trial_days || 0}d offer`;
-    color = "#3B82F6";
-    title = "Trial granted but not yet activated by the brand";
-  } else if (trialIsExpired) {
-    label = `Expired · ${row.trial_plan_name || "trial"}`;
-    color = "#EF4444";
-    title = `Trial expired ${expires.toLocaleDateString()}`;
-  } else {
-    label = "—";
+    return {
+      status: "active",
+      planName: row.trial_plan_name || "trial",
+      timeLabel: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`,
+      color: "#F59E0B",
+      title: `Trial active — payment starts ${expires.toLocaleDateString()}`,
+    };
   }
+  if (row.trial_plan_name && !activated) {
+    return {
+      status: "granted",
+      planName: row.trial_plan_name,
+      timeLabel: `${row.trial_days || 0}d offer`,
+      color: "#3B82F6",
+      title: "Trial granted but not yet activated by the brand",
+    };
+  }
+  if (activated && expires && expires.getTime() <= now) {
+    return {
+      status: "expired",
+      planName: row.trial_plan_name || "trial",
+      timeLabel: `expired ${expires.toLocaleDateString()}`,
+      color: "#EF4444",
+      title: `Trial expired ${expires.toLocaleDateString()}`,
+    };
+  }
+  return null;
+}
 
+// Just the trial plan name with a status color so an operator can scan the
+// column and spot which trials are which (Grow trial vs Scale trial, etc).
+// Pairs with TrialTimeCell which carries the "10 days left" string.
+function TrialPlanCell({ row, theme }) {
+  const [now] = useState(() => Date.now());
+  const state = deriveTrialState(row, now);
+  if (!state) {
+    return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
+  }
   return (
     <div
       style={{
-        minWidth: 0, fontSize: 12, color, overflow: "hidden",
-        textOverflow: "ellipsis", whiteSpace: "nowrap",
+        minWidth: 0, fontSize: 12, color: state.color, fontWeight: 500,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
       }}
-      title={title}
+      title={state.title}
     >
-      {label}
-      {sub && (
-        <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
-          {sub}
-        </div>
-      )}
+      {state.planName}
+    </div>
+  );
+}
+
+// Time/countdown information for the trial. Granted = "Nd offer", Active =
+// "N days left", Expired = "expired DATE". The color matches TrialPlanCell
+// so the two columns read as a single visual unit even though they're split.
+function TrialTimeCell({ row, theme }) {
+  const [now] = useState(() => Date.now());
+  const state = deriveTrialState(row, now);
+  if (!state) {
+    return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
+  }
+  return (
+    <div
+      style={{
+        minWidth: 0, fontSize: 12, color: state.color,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}
+      title={state.title}
+    >
+      {state.timeLabel}
+      <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
+        {state.status}
+      </div>
     </div>
   );
 }
