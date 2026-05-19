@@ -384,20 +384,34 @@ function paidPlanFromAccountId(accountId) {
   return null; // shopify_free_plan or anything else
 }
 
-// Trial info lives in its own column (TrialStatusCell) so the Plan column
-// can stay clean: it answers one question — what is this brand currently
-// paying for / on?
+// How many days a brand has to evaluate before we consider them "legacy."
+// Matches the main app's default Shopify-subscription trial period — every
+// paid plan starts with `trialDays: 14`, so 14d is the natural cutoff for
+// "still deciding" vs "has been free forever."
+const SIGNUP_FREE_WINDOW_DAYS = 14;
+
+// Plan = "what are they on right now."
 //
 //   Starter / Grow / Scale  (green)   — paid Shopify subscription
 //   Free                    (muted)   — chose shopify_free_plan
-//   Legacy free             (purple)  — empty account_id, never picked a plan
-//   —                                 — anything else (rare; data hole)
+//   Free trial · Nd left    (amber)   — empty account_id, within 14d of signup
+//   Legacy free             (purple)  — empty account_id, older than 14d
+//   —                                 — unrecognized account_id (data hole)
+//
+// The "Free trial" state is an approximation: we can't see Shopify's
+// subscription createdAt without an API call per brand, so we proxy by
+// signup date — a brand who created an account but hasn't picked a plan
+// is treated as still in their evaluation window. Once that window
+// expires they roll into "Legacy free" so the table doesn't dwell on
+// them.
 function PlanCell({ row, theme }) {
+  const [now] = useState(() => Date.now());
   const accountId = row.account_id || "";
   const paidPlan = paidPlanFromAccountId(accountId);
   const isFreePlan = accountId === "shopify_free_plan";
 
   let label;
+  let sub = null;
   let color = theme.textMid;
   let title = "";
 
@@ -410,9 +424,24 @@ function PlanCell({ row, theme }) {
     color = theme.textMid;
     title = "On Shopify free plan (account_id = shopify_free_plan)";
   } else if (!accountId) {
-    label = "Legacy free";
-    color = "#8B5CF6";
-    title = "No account_id set — grandfathered free user";
+    // No plan picked yet. Split into "still in eval window" vs "legacy"
+    // on signup age so we can tell new sign-ups from grandfathered users.
+    const created = row.user_created ? new Date(row.user_created).getTime() : null;
+    const daysSinceSignup = created ? Math.floor((now - created) / 86_400_000) : null;
+    const inWindow = daysSinceSignup != null && daysSinceSignup < SIGNUP_FREE_WINDOW_DAYS;
+    if (inWindow) {
+      const daysLeft = Math.max(0, SIGNUP_FREE_WINDOW_DAYS - daysSinceSignup);
+      label = "Free trial";
+      sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+      color = "#F59E0B";
+      title = `Signed up ${daysSinceSignup}d ago — within initial 14-day evaluation window`;
+    } else {
+      label = "Legacy free";
+      color = "#8B5CF6";
+      title = daysSinceSignup != null
+        ? `No plan picked; signed up ${daysSinceSignup}d ago (past initial window)`
+        : "No account_id and no signup date";
+    }
   } else {
     label = "—";
     color = theme.textMuted;
@@ -428,6 +457,11 @@ function PlanCell({ row, theme }) {
       title={title}
     >
       {label}
+      {sub && (
+        <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
