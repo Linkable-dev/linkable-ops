@@ -380,18 +380,18 @@ function paidPlanFromAccountId(accountId) {
   return null; // shopify_free_plan or anything else
 }
 
-// One cell, three colors, three layers of state:
-//   1. paid trial in progress → "Trial · Grow · 10d left" (amber)
-//   2. paid subscription      → "Grow"                    (green)
-//   3. shopify_free_plan      → "Free"                    (muted)
-//   4. empty account_id + no trial → "Legacy free"        (purple)
-//   5. admin granted, not started → "Granted · Grow 30d"  (muted)
-//   6. expired trial          → "Expired · Grow"          (red)
+// One cell, six states. Order matters: a pending granted-trial-offer beats
+// the current paid plan in the display because that's what an operator
+// actually needs to spot ("oh, yashylife was given a 90-day Grow trial they
+// never started — let's nudge them"). The current paid plan still shows as
+// a secondary line so context isn't lost.
 //
-// Trial signals come from brands.trial_* (admin-granted). Plan signals come
-// from users.account_id (Shopify subscription). The combination matters:
-// a granted trial that the brand activated against a *paid* account_id is
-// the "paid trial" state Luca wants to spot in the table.
+//   1. Paid trial in progress      → "Trial · Grow"     · "10 days left"   (amber)
+//   2. Granted, not activated      → "Granted · Grow"   · "90d offer (on Starter)" (blue)
+//   3. Expired trial               → "Expired · Grow"                       (red)
+//   4. Paid subscription           → "Grow" / "Scale"                       (green)
+//   5. Shopify free plan           → "Free"                                 (muted)
+//   6. Empty account_id + no trial → "Legacy free"                          (purple)
 function PlanCell({ row, theme }) {
   // useState lazy init so re-renders during a sort don't shift the "now"
   // baseline and flip rows between active/expired mid-render.
@@ -409,6 +409,17 @@ function PlanCell({ row, theme }) {
   const daysLeft = trialIsActive
     ? Math.max(0, Math.ceil((expires.getTime() - now) / 86_400_000))
     : null;
+  const grantedPending = row.trial_plan_name && !activated;
+
+  // Short label describing what plan the brand pays for right now, used as
+  // the secondary line on "Granted · X" so context isn't lost.
+  const currentPlanLabel = paidPlan
+    ? `on ${paidPlan}`
+    : isFreePlan
+      ? "on Free"
+      : !accountId
+        ? "no current plan"
+        : null;
 
   let label;
   let sub = null;
@@ -416,36 +427,39 @@ function PlanCell({ row, theme }) {
   let title = "";
 
   if (paidPlan && trialIsActive) {
-    // Paid trial: brand activated a paid plan but is still inside the trial
-    // window — payment starts at trial_expiration_date.
+    // Paid trial: brand activated a paid Shopify subscription with trialDays>0.
+    // No charge until trial_expiration_date — that's the "payment starts" date.
     label = `Trial · ${paidPlan}`;
     sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
-    color = "#F59E0B"; // amber
+    color = "#F59E0B";
     title = `Paid trial — payment starts ${expires.toLocaleDateString()}`;
+  } else if (grantedPending) {
+    // Admin granted a trial but the brand never clicked Start Free Trial.
+    // Surfaced above the current paid plan because this is the actionable
+    // state (the offer is sitting there unused).
+    label = `Granted · ${row.trial_plan_name}`;
+    const offer = `${row.trial_days || 0}d offer`;
+    sub = currentPlanLabel ? `${offer} · ${currentPlanLabel}` : offer;
+    color = "#3B82F6";
+    title = "Trial granted but not yet activated by the brand";
+  } else if (trialIsExpired) {
+    label = `Expired · ${row.trial_plan_name || "trial"}`;
+    color = "#EF4444";
+    title = `Trial expired ${expires.toLocaleDateString()}`;
   } else if (paidPlan) {
     label = paidPlan;
-    color = "#10B981"; // green
+    color = "#10B981";
     title = `Paid plan — account_id ${accountId}`;
   } else if (isFreePlan) {
     label = "Free";
     color = theme.textMid;
     title = "On Shopify free plan (account_id = shopify_free_plan)";
   } else if (!accountId && !activated) {
-    // Empty account_id + no trial activation = grandfathered into using the
-    // app without picking a plan. Luca's "legacy free."
+    // Grandfathered: never picked a Shopify plan, never trialed. Treated as
+    // free because the app still works for them.
     label = "Legacy free";
-    color = "#8B5CF6"; // purple
+    color = "#8B5CF6";
     title = "No account_id set and no trial activated";
-  } else if (row.trial_plan_name && !activated) {
-    // Admin-granted but brand hasn't clicked Start Free Trial yet.
-    label = `Granted · ${row.trial_plan_name}`;
-    sub = `${row.trial_days || 0}d offer`;
-    color = theme.textMid;
-    title = "Trial granted but not activated";
-  } else if (trialIsExpired) {
-    label = `Expired · ${row.trial_plan_name || "trial"}`;
-    color = "#EF4444";
-    title = `Trial expired ${expires.toLocaleDateString()}`;
   } else {
     label = "—";
     color = theme.textMuted;
