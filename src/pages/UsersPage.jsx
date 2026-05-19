@@ -13,6 +13,7 @@ const TABS = [["brands", "Brands"], ["creators", "Creators"]];
 const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
 const TEXT_SORT_KEYS = new Set([
   "store_name", "email", "owner_name", "creator_name", "instagram_username",
+  "trial_plan_name",
 ]);
 
 function ownerName(row) {
@@ -35,6 +36,38 @@ function sortValue(row, key) {
     }
     case "user_created":
     case "last_sign_in":         return row[key] ? new Date(row[key]).getTime() : 0;
+    // Numeric plan rank — higher = "more paying". Lets desc sort surface
+    // Scale → Grow → Starter → Free → Free trial → Legacy free.
+    case "plan": {
+      const accountId = row.account_id || "";
+      if (accountId.includes("shopify_299")) return 100;
+      if (accountId.includes("shopify_199")) return 90;
+      if (accountId.includes("shopify_99"))  return 80;
+      if (accountId === "shopify_free_plan") return 50;
+      if (!accountId) {
+        const created = row.user_created ? new Date(row.user_created).getTime() : 0;
+        const daysSinceSignup = created ? Math.floor((Date.now() - created) / 86_400_000) : 9999;
+        return daysSinceSignup < 14 ? 40 : 10; // current free trial vs legacy
+      }
+      return 0;
+    }
+    case "trial_plan_name":      return (row.trial_plan_name || "").toLowerCase();
+    // Numeric "urgency" of the trial state. Active = days remaining (paid
+    // trial countdown), Granted = offer length, Expired/none push to the
+    // bottom so desc sort shows the most actionable rows first.
+    case "trial_time_left": {
+      const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
+        ? new Date(row.trial_activation_date).getTime() : null;
+      const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
+        ? new Date(row.trial_expiration_date).getTime() : null;
+      const now = Date.now();
+      if (activated && expires && expires > now) {
+        return Math.max(0, Math.ceil((expires - now) / 86_400_000));
+      }
+      if (row.trial_plan_name && !activated) return Number(row.trial_days) || 0;
+      if (activated && expires && expires <= now) return -1;
+      return -2;
+    }
     default:                     return row[key] ?? "";
   }
 }
@@ -208,10 +241,10 @@ export default function UsersPage() {
               <SortHeader theme={theme} sortKey="email"        label="Email"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="owner_name"   label="Owner"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="last_sign_in" label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <span>Plan</span>
-              <span>Trial plan</span>
-              <span>Time left</span>
+              <SortHeader theme={theme} sortKey="last_sign_in"     label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="plan"              label="Plan"         sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="trial_plan_name"   label="Trial plan"   sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader theme={theme} sortKey="trial_time_left"   label="Time left"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <span></span>
             </>
           ) : (
