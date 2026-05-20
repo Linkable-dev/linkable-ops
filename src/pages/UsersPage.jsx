@@ -418,26 +418,33 @@ function paidPlanFromAccountId(accountId) {
   return null; // shopify_free_plan or anything else
 }
 
-// How many days a brand has to evaluate before we consider them "legacy."
+// How many days a brand has to evaluate before they should have a plan.
 // Matches the main app's default Shopify-subscription trial period — every
-// paid plan starts with `trialDays: 14`, so 14d is the natural cutoff for
-// "still deciding" vs "has been free forever."
+// paid plan starts with `trialDays: 14`, so 14d is the natural window.
 const SIGNUP_FREE_WINDOW_DAYS = 14;
+
+// LIN-856 (main repo commit c7c1a03b, 2025-11-20) introduced the Shopify
+// subscription flow. Brands created before this date pre-date paid plans
+// entirely — empty account_id on them is genuinely "Legacy free." After
+// this date, a brand without an account_id should have one (they had to
+// pick a plan at signup) — so empty = data anomaly, not "legacy."
+const PAID_PLANS_LAUNCH_TS = Date.UTC(2025, 10, 20); // 2025-11-20
 
 // Plan = "what are they on right now."
 //
-//   Starter / Grow / Scale  (green)   — paid Shopify subscription
-//   Free                    (muted)   — chose shopify_free_plan
-//   Free trial · Nd left    (amber)   — empty account_id, within 14d of signup
-//   Legacy free             (purple)  — empty account_id, older than 14d
-//   —                                 — unrecognized account_id (data hole)
+//   Starter / Grow / Scale   (green)   — paid Shopify subscription
+//   Free                     (muted)   — chose shopify_free_plan
+//   Free trial · Nd left     (amber)   — empty account_id, within 14d of signup
+//   Legacy free              (purple)  — empty account_id AND signed up BEFORE paid plans existed
+//   No record ⚠              (red)     — empty account_id AND signed up AFTER paid plans (anomaly)
+//   —                                  — unrecognized account_id
 //
-// The "Free trial" state is an approximation: we can't see Shopify's
-// subscription createdAt without an API call per brand, so we proxy by
-// signup date — a brand who created an account but hasn't picked a plan
-// is treated as still in their evaluation window. Once that window
-// expires they roll into "Legacy free" so the table doesn't dwell on
-// them.
+// "No record" is the important one to spot: paid plans launched 2025-11-20,
+// so a brand created after that date must have picked a plan at signup.
+// An empty account_id post-launch means either the Shopify confirmation
+// flow didn't write back to our DB (return-URL handler skipped) or the
+// brand started checkout but never confirmed — in either case the row
+// needs human review, not a "free" label that hides the problem.
 function PlanCell({ row, theme }) {
   const [now] = useState(() => Date.now());
   const accountId = row.account_id || "";
@@ -458,22 +465,26 @@ function PlanCell({ row, theme }) {
     color = theme.textMid;
     title = "On Shopify free plan (account_id = shopify_free_plan)";
   } else if (!accountId) {
-    // No plan picked yet. Split into "still in eval window" vs "legacy"
-    // on signup age so we can tell new sign-ups from grandfathered users.
     const created = row.user_created ? new Date(row.user_created).getTime() : null;
     const daysSinceSignup = created ? Math.floor((now - created) / 86_400_000) : null;
+    const signedUpBeforeLaunch = created != null && created < PAID_PLANS_LAUNCH_TS;
     const inWindow = daysSinceSignup != null && daysSinceSignup < SIGNUP_FREE_WINDOW_DAYS;
+
     if (inWindow) {
       const daysLeft = Math.max(0, SIGNUP_FREE_WINDOW_DAYS - daysSinceSignup);
       label = "Free trial";
       sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
       color = "#F59E0B";
       title = `Signed up ${daysSinceSignup}d ago — within initial 14-day evaluation window`;
-    } else {
+    } else if (signedUpBeforeLaunch) {
       label = "Legacy free";
       color = "#8B5CF6";
+      title = `Signed up before paid plans launched (2025-11-20) — grandfathered`;
+    } else {
+      label = "No record ⚠";
+      color = "#EF4444";
       title = daysSinceSignup != null
-        ? `No plan picked; signed up ${daysSinceSignup}d ago (past initial window)`
+        ? `Signed up ${daysSinceSignup}d ago — after paid plans launched, but no account_id on file. Likely a failed Shopify confirmation; investigate.`
         : "No account_id and no signup date";
     }
   } else {
