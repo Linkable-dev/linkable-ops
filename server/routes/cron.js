@@ -12,7 +12,6 @@ import { runDailyOutbound } from "../automation/run-daily-200.js";
 import { runDailyInfluencer } from "../automation/run-daily-influencer.js";
 import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discovery.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
-import { runWarmup } from "../automation/warmup-agent.js";
 import { supabase } from "../lib/supabase.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
@@ -182,39 +181,9 @@ export function cronRoutes() {
       const batch = Math.min(Math.max(parseInt(req.query.batch) || 200, 10), 500);
       const dryRun = req.query.dry === "1" || req.query.dry === "true";
       const discovery = await autoTopUpDiscovery({ teamId, threshold, batch, dryRun });
-
-      // Piggyback warmup on the daily auto-discover tick so we don't burn a
-      // second Vercel cron slot. Warmup is idempotent — re-running on the
-      // same day tops up to the day's target, never exceeds it.
-      let warmup = null;
-      try {
-        warmup = await runWarmup({ teamId, dryRun });
-      } catch (e) {
-        console.error("/cron/auto-discover warmup error:", e);
-        warmup = { error: e.message };
-      }
-
-      res.json({ discovery, warmup });
+      res.json({ discovery });
     } catch (err) {
       console.error("/cron/auto-discover error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Standalone warmup trigger so you can fire it manually from the terminal
-  // without waiting for the daily auto-discover cron. Same handler, same
-  // idempotency. Useful for testing changes or topping up after a missed day.
-  //
-  // Query params: ?dry=1
-  router.get("/run-warmup", async (req, res) => {
-    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
-    try {
-      const teamId = await getDefaultTeamId();
-      const dryRun = req.query.dry === "1" || req.query.dry === "true";
-      const result = await runWarmup({ teamId, dryRun });
-      res.json(result);
-    } catch (err) {
-      console.error("/cron/run-warmup error:", err);
       res.status(500).json({ error: err.message });
     }
   });
