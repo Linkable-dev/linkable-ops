@@ -95,8 +95,12 @@ export function opsRoutes() {
           GROUP BY l.product_id
         ),
         sample_agg AS (
+          -- Counts are cumulative funnel stages: a sample that has shipped has also
+          -- passed the "accepted" stage, so 'shipped' counts toward samples_accepted too.
+          -- (shipped ⊆ accepted). Without this, shipping a sample drains samples_accepted
+          -- back to 0, breaking the left-to-right funnel.
           SELECT sr.product_id,
-                 COUNT(DISTINCT sr.influencer_user_id) FILTER (WHERE sr.status = 'accepted') AS samples_accepted,
+                 COUNT(DISTINCT sr.influencer_user_id) FILTER (WHERE sr.status IN ('accepted', 'shipped')) AS samples_accepted,
                  COUNT(DISTINCT sr.influencer_user_id) FILTER (WHERE sr.status = 'shipped')  AS products_shipped
           FROM sample_requests sr
           WHERE sr.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "sr.deleted")}
