@@ -9,6 +9,7 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
 
   const [schema, setSchema] = useState([]);
   const [formData, setFormData] = useState({});
+  const [originalData, setOriginalData] = useState({});
   const [fkOptions, setFkOptions] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -30,6 +31,7 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
         if (!isNew) {
           const row = await api.getRow(table, id);
           setFormData(row);
+          setOriginalData(row);
         } else {
           const initial = {};
           s.forEach((col) => {
@@ -50,15 +52,29 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
     try {
       const payload = { ...formData };
       schema.forEach((col) => {
-        if (shouldHideInForm(col, isNew)) delete payload[col.column_name];
-        if (payload[col.column_name] === "") {
-          if (col.is_nullable === "YES") payload[col.column_name] = null;
-          else delete payload[col.column_name];
+        const name = col.column_name;
+        // Never send columns the form manages on the DB's behalf (auto PKs, defaulted timestamps).
+        if (shouldHideInForm(col, isNew)) { delete payload[name]; return; }
+        let v = payload[name];
+        // Empty string -> null for nullable cols; otherwise drop it so we never
+        // overwrite a stored value (or a NOT NULL column) with null/empty.
+        if (v === "" || v === null || v === undefined) {
+          if (col.is_nullable === "YES" && v !== undefined) {
+            payload[name] = null; v = null;
+          } else {
+            delete payload[name]; return;
+          }
         }
+        // On edit, only send columns the user actually changed. Untouched columns
+        // are left out entirely, so the DB never has to accept a value it would
+        // reject — generated/identity columns, auto-updated timestamps, NOT NULL
+        // columns holding a legacy null, etc. This makes the form safe for any table.
+        if (!isNew && valuesEqual(v, originalData[name])) delete payload[name];
       });
       if (isNew) {
         await api.createRow(table, payload);
       } else {
+        if (Object.keys(payload).length === 0) { onCancel(); return; }
         await api.updateRow(table, id, payload);
       }
       onSaved();
@@ -129,6 +145,18 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
  * - created_at / updated_at / deleted_at with defaults (now(), CURRENT_TIMESTAMP)
  * - Any column with column_default containing "now()" or "CURRENT_TIMESTAMP"
  */
+// Compare a form value against the originally-loaded row value to decide whether
+// the user changed it. Handles the type drift between the DB driver and form inputs
+// (numeric returned as a string vs. a JS number, jsonb as an object, etc.).
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a == null && b == null;
+  if (typeof a === "object" || typeof b === "object") {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+  }
+  return String(a) === String(b);
+}
+
 function shouldHideInForm(col, isNew) {
   const def = (col.column_default || "").toLowerCase();
   const name = col.column_name.toLowerCase();
