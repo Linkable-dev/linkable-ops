@@ -46,6 +46,8 @@ export const api = {
     request(`/tables/${table}/rows/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteRow: (table, id) =>
     request(`/tables/${table}/rows/${id}`, { method: "DELETE" }),
+  deleteRows: (table, ids) =>
+    request(`/tables/${table}/rows`, { method: "DELETE", body: JSON.stringify({ ids }) }),
 
   // FK helpers
   getFkOptions: (table) => request(`/tables/${table}/fk-options`),

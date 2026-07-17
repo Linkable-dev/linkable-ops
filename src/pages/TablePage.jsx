@@ -73,6 +73,9 @@ export default function TablePage() {
   const [showFilters, setShowFilters] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [fkLabels, setFkLabels] = useState({});
   // Column widths: { colName: width }
   const [colWidths, setColWidths] = useState({});
@@ -131,6 +134,8 @@ export default function TablePage() {
     setSearch(""); setSortBy(""); setSortDir("asc"); setPage(1);
     setFilters({}); setShowFilters(false); setFkLabels({}); setColWidths({});
   }, [table]);
+  // Selection is page/filter scoped — clear it whenever the visible row set changes
+  useEffect(() => { setSelectedIds(new Set()); }, [table, page, pageSize, search, sortBy, sortDir, filters]);
 
   const handleSort = (col) => {
     if (sortBy === col) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -153,6 +158,39 @@ export default function TablePage() {
     try { await api.deleteRow(table, deleteConfirm); setDeleteConfirm(null); fetchData(); }
     catch (err) { console.error(err); }
     finally { setDeleting(null); }
+  };
+
+  const toggleRowSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const pageRowIds = pk ? data.rows.map((r) => r[pk]) : [];
+  const allPageSelected = pageRowIds.length > 0 && pageRowIds.every((id) => selectedIds.has(id));
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds((prev) => {
+      if (allPageSelected) {
+        const next = new Set(prev);
+        pageRowIds.forEach((id) => next.delete(id));
+        return next;
+      }
+      return new Set([...prev, ...pageRowIds]);
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      await api.deleteRows(table, [...selectedIds]);
+      setBulkDeleteConfirm(false);
+      setSelectedIds(new Set());
+      fetchData();
+    } catch (err) { console.error(err); }
+    finally { setBulkDeleting(false); }
   };
 
   const openNew = () => { setEditId(null); setModalOpen(true); };
@@ -198,9 +236,31 @@ export default function TablePage() {
     <div>
       {/* Top bar */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div style={{ fontSize: 12, color: theme.textMuted }}>
-          {data.total.toLocaleString()} records &middot; {schema.length} columns
-        </div>
+        {selectedIds.size > 0 ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: theme.text }}>
+              {selectedIds.size.toLocaleString()} selected
+            </div>
+            <button onClick={() => setSelectedIds(new Set())} style={{
+              padding: "5px 10px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 500,
+              background: theme.accentLight, color: theme.textMid, cursor: "pointer", fontFamily: "inherit",
+            }}>Clear</button>
+            <button onClick={() => setBulkDeleteConfirm(true)} style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6,
+              border: "none", fontSize: 12, fontWeight: 600, background: "#EF4444", color: "#fff",
+              cursor: "pointer", fontFamily: "inherit",
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+              </svg>
+              Delete Selected
+            </button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: theme.textMuted }}>
+            {data.total.toLocaleString()} records &middot; {schema.length} columns
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => setShowFilters(!showFilters)} style={{
             display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px",
@@ -288,6 +348,16 @@ export default function TablePage() {
           <table style={{ borderCollapse: "collapse", fontSize: 13, width: "max-content", minWidth: "100%" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${theme.border}`, background: theme.surfaceAlt }}>
+                {pk && (
+                  <th style={{ padding: "10px 8px", width: 36, minWidth: 36 }}>
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      onChange={toggleSelectAllOnPage}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </th>
+                )}
                 {visibleCols.map((col) => (
                   <th key={col.column_name} style={{
                     textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600,
@@ -322,6 +392,7 @@ export default function TablePage() {
               {loading ? (
                 Array.from({ length: 10 }).map((_, r) => (
                   <tr key={`sk-${r}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                    {pk && <td />}
                     {visibleCols.map((col, c) => (
                       <td key={col.column_name} style={{ padding: "12px 14px" }}>
                         <Skeleton width={`${50 + ((r + c) * 11) % 45}%`} height={11} />
@@ -332,13 +403,26 @@ export default function TablePage() {
                   </tr>
                 ))
               ) : data.rows.length === 0 ? (
-                <tr><td colSpan={visibleCols.length + (hasMore ? 2 : 1)} style={{ textAlign: "center", padding: "48px 0", color: theme.textMuted, fontSize: 13 }}>No records found</td></tr>
+                <tr><td colSpan={visibleCols.length + (hasMore ? 2 : 1) + (pk ? 1 : 0)} style={{ textAlign: "center", padding: "48px 0", color: theme.textMuted, fontSize: 13 }}>No records found</td></tr>
               ) : data.rows.map((row, i) => {
                 const id = pk ? row[pk] : i;
                 return (
-                  <tr key={id} style={{ borderBottom: `1px solid ${theme.border}`, transition: "background 0.1s" }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = theme.accentLight}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                  <tr key={id} style={{
+                    borderBottom: `1px solid ${theme.border}`, transition: "background 0.1s",
+                    background: pk && selectedIds.has(id) ? theme.accentLight : undefined,
+                  }}
+                    onMouseEnter={(e) => { if (!selectedIds.has(id)) e.currentTarget.style.background = theme.accentLight; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = pk && selectedIds.has(id) ? theme.accentLight : "transparent"; }}>
+                    {pk && (
+                      <td style={{ padding: "10px 8px" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(id)}
+                          onChange={() => toggleRowSelected(id)}
+                          style={{ cursor: "pointer" }}
+                        />
+                      </td>
+                    )}
                     {visibleCols.map((col) => (
                       <td key={col.column_name} style={{
                         padding: "10px 14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -434,6 +518,43 @@ export default function TablePage() {
               }}
             >
               {deleting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Delete Confirmation Modal */}
+      <Modal open={bulkDeleteConfirm} onClose={() => setBulkDeleteConfirm(false)} title="Delete Records" width={420}>
+        <div style={{ padding: "4px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+              background: mode === "dark" ? "#3B1111" : "#FEF2F2",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>Are you sure?</div>
+              <div style={{ fontSize: 13, color: theme.textMid, marginTop: 2 }}>
+                {selectedIds.size} record{selectedIds.size === 1 ? "" : "s"} will be permanently deleted. This action cannot be undone.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, paddingTop: 12, borderTop: `1px solid ${theme.border}` }}>
+            <Btn variant="outline" size="sm" onClick={() => setBulkDeleteConfirm(false)}>Cancel</Btn>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              style={{
+                padding: "7px 18px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 600,
+                background: "#EF4444", color: "#fff", cursor: bulkDeleting ? "not-allowed" : "pointer",
+                fontFamily: "inherit", opacity: bulkDeleting ? 0.7 : 1,
+              }}
+            >
+              {bulkDeleting ? "Deleting..." : `Delete ${selectedIds.size}`}
             </button>
           </div>
         </div>

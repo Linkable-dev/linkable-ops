@@ -4,41 +4,13 @@ import { cloudSqlQuery } from "../lib/cloudsql.js";
 export function tableRoutes() {
   const router = express.Router();
 
-  // One-time: rewrite all FK constraints to ON DELETE CASCADE
+  // One-time (well, on-demand): rewrite all non-cascade FK constraints to ON DELETE CASCADE.
+  // Tables added directly in Supabase/psql (bypassing tracked migrations) can end up with
+  // FKs that don't cascade, which breaks deletes on their parent tables. This can be re-run
+  // any time — it's idempotent, it only touches constraints that aren't already CASCADE.
   router.post("/migrate-cascade", async (req, res) => {
     try {
-      await cloudSqlQuery(`
-        DO $$
-        DECLARE
-          r RECORD;
-          col_names TEXT;
-          ref_col_names TEXT;
-        BEGIN
-          FOR r IN
-            SELECT con.conname AS constraint_name, cl.relname AS child_table,
-                   ref.relname AS parent_table, con.conrelid, con.confrelid,
-                   con.conkey, con.confkey
-            FROM pg_constraint con
-            JOIN pg_class cl ON cl.oid = con.conrelid
-            JOIN pg_class ref ON ref.oid = con.confrelid
-            JOIN pg_namespace ns ON ns.oid = cl.relnamespace
-            WHERE con.contype = 'f' AND ns.nspname = 'public'
-              AND con.confdeltype <> 'c'
-          LOOP
-            SELECT string_agg(quote_ident(att.attname), ', ' ORDER BY ord.n)
-              INTO col_names
-              FROM unnest(r.conkey) WITH ORDINALITY AS ord(col, n)
-              JOIN pg_attribute att ON att.attrelid = r.conrelid AND att.attnum = ord.col;
-            SELECT string_agg(quote_ident(att.attname), ', ' ORDER BY ord.n)
-              INTO ref_col_names
-              FROM unnest(r.confkey) WITH ORDINALITY AS ord(col, n)
-              JOIN pg_attribute att ON att.attrelid = r.confrelid AND att.attnum = ord.col;
-            EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', r.child_table, r.constraint_name);
-            EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%s) REFERENCES %I(%s) ON DELETE CASCADE',
-              r.child_table, r.constraint_name, col_names, r.parent_table, ref_col_names);
-          END LOOP;
-        END $$;
-      `);
+      await ensureAllFksCascade();
       res.json({ success: true, message: "All FK constraints now use ON DELETE CASCADE" });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -403,7 +375,7 @@ export function tableRoutes() {
     try {
       const pk = await getPrimaryKey(table);
       if (!pk) return res.status(400).json({ error: "No primary key found" });
-      const result = await cloudSqlQuery(
+      const result = await deleteWithCascadeRetry(
         `DELETE FROM "${table}" WHERE "${pk}" = $1`,
         [id]
       );
@@ -414,7 +386,76 @@ export function tableRoutes() {
     }
   });
 
+  // Bulk delete rows
+  router.delete("/:table/rows", async (req, res) => {
+    const { table } = req.params;
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "ids must be a non-empty array" });
+    }
+    try {
+      const pk = await getPrimaryKey(table);
+      if (!pk) return res.status(400).json({ error: "No primary key found" });
+      const uniqueIds = [...new Set(ids)];
+      const result = await deleteWithCascadeRetry(
+        `DELETE FROM "${table}" WHERE "${pk}" = ANY($1)`,
+        [uniqueIds]
+      );
+      res.json({ success: true, deleted: result.rowCount });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
+}
+
+// Runs a DELETE query; if it fails on a missing ON DELETE CASCADE (FK violation),
+// fixes every non-cascading FK in the schema and retries once. This means deletes
+// keep working even for tables/relationships created outside tracked migrations.
+async function deleteWithCascadeRetry(sql, params) {
+  try {
+    return await cloudSqlQuery(sql, params);
+  } catch (err) {
+    if (err.code !== "23503") throw err; // not a foreign_key_violation
+    await ensureAllFksCascade();
+    return await cloudSqlQuery(sql, params);
+  }
+}
+
+async function ensureAllFksCascade() {
+  await cloudSqlQuery(`
+    DO $$
+    DECLARE
+      r RECORD;
+      col_names TEXT;
+      ref_col_names TEXT;
+    BEGIN
+      FOR r IN
+        SELECT con.conname AS constraint_name, cl.relname AS child_table,
+               ref.relname AS parent_table, con.conrelid, con.confrelid,
+               con.conkey, con.confkey
+        FROM pg_constraint con
+        JOIN pg_class cl ON cl.oid = con.conrelid
+        JOIN pg_class ref ON ref.oid = con.confrelid
+        JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+        WHERE con.contype = 'f' AND ns.nspname = 'public'
+          AND con.confdeltype <> 'c'
+      LOOP
+        SELECT string_agg(quote_ident(att.attname), ', ' ORDER BY ord.n)
+          INTO col_names
+          FROM unnest(r.conkey) WITH ORDINALITY AS ord(col, n)
+          JOIN pg_attribute att ON att.attrelid = r.conrelid AND att.attnum = ord.col;
+        SELECT string_agg(quote_ident(att.attname), ', ' ORDER BY ord.n)
+          INTO ref_col_names
+          FROM unnest(r.confkey) WITH ORDINALITY AS ord(col, n)
+          JOIN pg_attribute att ON att.attrelid = r.confrelid AND att.attnum = ord.col;
+        EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', r.child_table, r.constraint_name);
+        EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%s) REFERENCES %I(%s) ON DELETE CASCADE',
+          r.child_table, r.constraint_name, col_names, r.parent_table, ref_col_names);
+      END LOOP;
+    END $$;
+  `);
 }
 
 async function getPrimaryKey(table) {
