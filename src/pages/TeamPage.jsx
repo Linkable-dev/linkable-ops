@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
@@ -7,6 +7,21 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import { Skeleton } from "../components/ui/Skeleton";
+import {
+  useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter,
+} from "../components/table/tableTools";
+
+// sortKey/filterKey are the server-side ops_admins columns (allow-listed in
+// GET /api/auth/admins). Status derives from last_login, so it stays
+// non-sortable and Last Active carries the last_login sort instead.
+const TEAM_COLUMNS = [
+  { key: "name",       label: "Name",        width: 240, sortKey: "name",       defaultDir: "asc", filterKey: "name" },
+  { key: "email",      label: "Email",       width: 280, sortKey: "email",      defaultDir: "asc", filterKey: "email" },
+  { key: "status",     label: "Status",      width: 120 },
+  { key: "last_login", label: "Last Active", width: 150, sortKey: "last_login", defaultDir: "desc" },
+  { key: "actions",    label: "",            width: 60, resizable: false },
+];
+const TEAM_DEFAULT_WIDTHS = Object.fromEntries(TEAM_COLUMNS.map((c) => [c.key, c.width]));
 
 export default function TeamPage() {
   const themeCtx = useTheme();
@@ -28,17 +43,40 @@ export default function TeamPage() {
   const [pwdError, setPwdError] = useState(null);
   const [pwdSuccess, setPwdSuccess] = useState(false);
 
-  const fetchAdmins = async () => {
+  // Server-side sort + per-column filters. sortBy=null keeps the server's
+  // default order (by created).
+  const [sort, setSort] = useState({ sortBy: null, sortDir: null });
+  const [filters, setFilters] = useState({});
+  const { widths, startResize, resetWidth } = useColumnWidths("team-admins", TEAM_DEFAULT_WIDTHS);
+
+  const handleSort = (key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir));
+  const handleFilter = (key, value) => setFilters((f) => {
+    const next = { ...f };
+    if (value) next[key] = value;
+    else delete next[key];
+    return next;
+  });
+
+  const fetchAdmins = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/admins", {
+      const params = new URLSearchParams();
+      if (sort.sortBy) {
+        params.set("sortBy", sort.sortBy);
+        params.set("sortDir", sort.sortDir);
+      }
+      for (const [k, v] of Object.entries(filters)) params.set(`filter[${k}]`, v);
+      const qs = params.toString();
+      const res = await fetch(`/api/auth/admins${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${await authCtx.getToken()}` },
       });
       if (res.ok) setAdmins(await res.json());
-    } catch {}
+    } catch { /* network error — keep whatever is on screen */ }
     finally { setLoading(false); }
-  };
+    // authCtx isn't memoized by its provider; getToken is safe to close over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, filters]);
 
-  useEffect(() => { fetchAdmins(); }, []);
+  useEffect(() => { fetchAdmins(); }, [fetchAdmins]);
 
   const handleInvite = async (e) => {
     e.preventDefault();
@@ -66,7 +104,7 @@ export default function TeamPage() {
       });
       setDeleteConfirm(null);
       fetchAdmins();
-    } catch {}
+    } catch { /* network error — modal stays open, user can retry */ }
   };
 
 
@@ -121,17 +159,63 @@ export default function TeamPage() {
             ))}
           </div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <colgroup>
+              {TEAM_COLUMNS.map((col) => (
+                <col key={col.key} style={{ width: widths[col.key] }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${t.border}`, background: t.surfaceAlt }}>
-                <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>Name</th>
-                <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>Email</th>
-                <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>Status</th>
-                <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>Last Active</th>
-                <th style={{ padding: "10px 16px", width: 60 }} />
+                {TEAM_COLUMNS.map((col) => (
+                  <th key={col.key} style={{
+                    position: "relative", textAlign: "left", padding: "10px 16px",
+                    fontSize: 11, fontWeight: 600, color: t.textMuted,
+                    textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap",
+                  }}>
+                    {col.sortKey ? (
+                      <SortLabel
+                        theme={t}
+                        label={col.label}
+                        colKey={col.sortKey}
+                        sortBy={sort.sortBy}
+                        sortDir={sort.sortDir}
+                        defaultDir={col.defaultDir}
+                        onSort={handleSort}
+                      />
+                    ) : (
+                      col.label
+                    )}
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
+                    )}
+                  </th>
+                ))}
+              </tr>
+              {/* Per-column filter row (server-side contains match) */}
+              <tr style={{ borderBottom: `1px solid ${t.border}`, background: t.surfaceAlt }}>
+                {TEAM_COLUMNS.map((col) => (
+                  <th key={col.key} style={{ padding: "4px 16px 8px", fontWeight: 400 }}>
+                    {col.filterKey && (
+                      <ColumnFilter
+                        theme={t}
+                        type="text"
+                        value={filters[col.filterKey] || ""}
+                        onCommit={(v) => handleFilter(col.filterKey, v)}
+                      />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
+              {admins.length === 0 && (
+                <tr>
+                  <td colSpan={TEAM_COLUMNS.length} style={{ padding: 24, textAlign: "center", color: t.textMuted }}>
+                    No team members match.
+                  </td>
+                </tr>
+              )}
               {admins.map((a) => (
                 <tr key={a.id} style={{ borderBottom: `1px solid ${t.border}` }}
                   onMouseEnter={(e) => e.currentTarget.style.background = t.accentLight}
@@ -150,7 +234,7 @@ export default function TeamPage() {
                       </div>
                     </div>
                   </td>
-                  <td style={{ padding: "12px 16px", color: t.textMid }}>{a.email}</td>
+                  <td style={{ padding: "12px 16px", color: t.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.email}>{a.email}</td>
                   <td style={{ padding: "12px 16px" }}>
                     {a.last_login ? (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#22C55E", fontWeight: 500 }}>

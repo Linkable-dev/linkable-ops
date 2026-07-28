@@ -60,8 +60,8 @@ export const api = {
   getTableAnalytics: (table) => request(`/analytics/${table}`),
 
   // Operations
-  getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "" } = {}) =>
-    request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir })}`),
+  getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters } = {}) =>
+    request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
 
   // AI conversation manager
@@ -98,8 +98,8 @@ export const api = {
     request(`/conversations/leads?${buildQs({ country, unused, limit })}`),
 
   // Outbound — daily-200 email sequencer dashboard
-  listOutboundSends: ({ group, touch, status, scope, limit, offset, q, campaignId, runDate } = {}) =>
-    request(`/outbound/sends?${buildQs({ group, touch, status, scope, limit, offset, q, campaign_id: campaignId, run_date: runDate })}`),
+  listOutboundSends: ({ group, touch, status, scope, limit, offset, q, campaignId, runDate, sortBy, sortDir } = {}) =>
+    request(`/outbound/sends?${buildQs({ group, touch, status, scope, limit, offset, q, campaign_id: campaignId, run_date: runDate, sortBy, sortDir })}`),
   getOutboundSend: (id) => request(`/outbound/sends/${id}`),
   getOutboundStats: ({ scope, campaignId, runDate } = {}) =>
     request(`/outbound/stats?${buildQs({ scope, campaign_id: campaignId, run_date: runDate })}`),
@@ -120,8 +120,8 @@ export const api = {
     request(`/outbound/inbox/manual/${sendId}/opt-out`, { method: "POST", body: JSON.stringify(body) }),
 
   // Outbound campaigns
-  listOutboundCampaigns: ({ status, limit, offset, audience } = {}) =>
-    request(`/outbound/campaigns?${buildQs({ status, limit, offset, audience })}`),
+  listOutboundCampaigns: ({ status, limit, offset, audience, sortBy, sortDir, filters } = {}) =>
+    request(`/outbound/campaigns?${buildQs({ status, limit, offset, audience, sortBy, sortDir, filters })}`),
   getOutboundCampaignStatusCounts: () => request("/outbound/campaigns/status-counts"),
   createOutboundCampaign: (data) =>
     request("/outbound/campaigns", { method: "POST", body: JSON.stringify(data) }),
@@ -145,8 +145,8 @@ export const api = {
     request("/outbound/storeleads/category-presets"),
   getStoreLeadsCategories: ({ q } = {}) =>
     request(`/outbound/storeleads/categories?${buildQs({ q })}`),
-  listOutboundLeads: ({ q, qualified, limit, offset, country, minRevenue, maxRevenue } = {}) =>
-    request(`/outbound/leads?${buildQs({ q, qualified, limit, offset, country, minRevenue, maxRevenue })}`),
+  listOutboundLeads: ({ q, qualified, limit, offset, country, minRevenue, maxRevenue, sortBy, sortDir } = {}) =>
+    request(`/outbound/leads?${buildQs({ q, qualified, limit, offset, country, minRevenue, maxRevenue, sortBy, sortDir })}`),
   getOutboundLeadCounts: ({ country, minRevenue, maxRevenue } = {}) =>
     request(`/outbound/leads/counts?${buildQs({ country, minRevenue, maxRevenue })}`),
 
@@ -173,10 +173,10 @@ export const api = {
     request(`/outbound/templates/${id}`, { method: "DELETE" }),
 
   // Admin Users — list real users from prod DB and mint impersonation sessions
-  listAdminBrands: ({ q, limit, offset } = {}) =>
-    request(`/admin-users/brands?${buildQs({ q, limit, offset })}`),
-  listAdminCreators: ({ q, limit, offset } = {}) =>
-    request(`/admin-users/creators?${buildQs({ q, limit, offset })}`),
+  listAdminBrands: ({ q, limit, offset, sortBy, sortDir, filters } = {}) =>
+    request(`/admin-users/brands?${buildQs({ q, limit, offset, sortBy, sortDir, filters })}`),
+  listAdminCreators: ({ q, limit, offset, sortBy, sortDir, filters } = {}) =>
+    request(`/admin-users/creators?${buildQs({ q, limit, offset, sortBy, sortDir, filters })}`),
   impersonateUser: (userId) =>
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
   grantTrial: (userId, body) =>

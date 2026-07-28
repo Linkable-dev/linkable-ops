@@ -24,6 +24,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { supabase } from "../lib/supabase.js";
+import { parseColumnFilters } from "../lib/tableQuery.js";
 import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
 import { DEFAULT_OFFERING, DEFAULT_PERSONA, buildContextPrompt } from "../automation/conversation-prompts.js";
 import { SEQUENCE_TEMPLATES } from "../automation/templates.js";
@@ -54,12 +55,27 @@ export function outboundCampaignsRoutes() {
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
       const audience = (req.query.audience || "all").toString();
+
+      // Server-side sort: allow-listed columns only. Unknown sortBy keeps the
+      // default created_at DESC order; omitted sortDir also means DESC.
+      const SORTABLE = ["name", "status", "audience_type", "daily_cap", "auto_reply", "created_at"];
+      const sortValid = SORTABLE.includes(req.query.sortBy);
+      const sortBy = sortValid ? req.query.sortBy : "created_at";
+      const ascending = sortValid && req.query.sortDir === "asc";
+
+      // Column-level filters: filter[column_name]=value. Express's extended
+      // query parser delivers this as a nested req.query.filter object, so we
+      // use the shared parser (handles nested + flat forms). Only `name` is
+      // applied here; unknown keys are ignored.
+      const filters = parseColumnFilters(req.query);
+
       let q = supabase.from("email_campaigns")
         .select("*", { count: "exact" })
         .eq("team_id", teamId);
       if (status !== "all") q = q.eq("status", status);
       if (audience !== "all") q = q.eq("audience_type", audience);
-      q = q.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+      if (filters.name) q = q.ilike("name", `%${filters.name}%`);
+      q = q.order(sortBy, { ascending }).range(offset, offset + limit - 1);
 
       const { data, error, count } = await q;
       if (error) throw new Error(error.message);
@@ -363,6 +379,13 @@ export function outboundCampaignsRoutes() {
       const filters = parseLeadFilters(req);
       const hasRevenueFilter = filters.minRev != null || filters.maxRev != null;
 
+      // Server-side sort: allow-listed columns only; unknown/absent sortBy
+      // keeps the historical default (imported_at DESC).
+      const LEAD_SORTABLE = ["domain", "email", "country_code", "imported_at", "contact_first_name"];
+      const requestedSort = LEAD_SORTABLE.includes(req.query.sortBy) ? req.query.sortBy : null;
+      const sortBy = requestedSort || "imported_at";
+      const ascending = requestedSort ? req.query.sortDir === "asc" : false;
+
       // PostgREST .or() takes a comma-separated filter string; user input has
       // to be sanitised so it can't break the parser. ilike+% gives substring.
       const safeQ = q ? q.replace(/[,()%*]/g, " ").trim() : "";
@@ -383,7 +406,7 @@ export function outboundCampaignsRoutes() {
         if (onlyQualified) query = query.not("email", "is", null);
         if (safeQ) query = query.or(`domain.ilike.%${safeQ}%,email.ilike.%${safeQ}%,contact_first_name.ilike.%${safeQ}%,contact_last_name.ilike.%${safeQ}%`);
         query = applyDbFilters(query, filters)
-          .order("imported_at", { ascending: false })
+          .order(sortBy, { ascending })
           .range(offset, offset + limit - 1);
         const { data, error, count } = await query;
         if (error) throw new Error(error.message);
@@ -396,7 +419,7 @@ export function outboundCampaignsRoutes() {
       if (onlyQualified) query = query.not("email", "is", null);
       if (safeQ) query = query.or(`domain.ilike.%${safeQ}%,email.ilike.%${safeQ}%,contact_first_name.ilike.%${safeQ}%,contact_last_name.ilike.%${safeQ}%`);
       query = applyDbFilters(query, filters)
-        .order("imported_at", { ascending: false })
+        .order(sortBy, { ascending })
         .limit(5000);
 
       const { data, error } = await query;

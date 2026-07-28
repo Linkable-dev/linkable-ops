@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, Skeleton } from "../components/ui/Skeleton";
+import { useColumnWidths, ResizeHandle, ColumnFilter } from "../components/table/tableTools";
 
 const STATUS_COLORS = {
   Invited:           { bg: "#F3E8FF", fg: "#6B21A8", bgDark: "#2A1B47", fgDark: "#C4B5FD" },
@@ -17,6 +18,22 @@ const STATUS_COLORS = {
 const STAGES = ["Invited", "Applied", "Accepted", "Sample Accepted", "Shipped", "Sold"];
 
 const PAGE_SIZE = 25;
+
+// Default column widths in px (roughly the old percent layout at ~1200px).
+// The expand-chevron column is fixed — not resizable.
+const COLUMNS = [
+  { key: "expand",            width: 28, resizable: false },
+  { key: "campaign_name",     width: 260 },
+  { key: "brand_name",        width: 160 },
+  { key: "creators_applied",  width: 85 },
+  { key: "creators_accepted", width: 90 },
+  { key: "samples_accepted",  width: 100 },
+  { key: "products_shipped",  width: 85 },
+  { key: "clicks",            width: 80 },
+  { key: "sales",             width: 80 },
+  { key: "bottleneck",        width: 240 },
+];
+const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
 
 export default function CampaignsOpsPage() {
   const { theme, mode } = useTheme();
@@ -33,6 +50,20 @@ export default function CampaignsOpsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortBy, setSortBy] = useState("created");
   const [sortDir, setSortDir] = useState("desc");
+  const [filters, setFilters] = useState({}); // per-column server-side filters
+
+  const { widths, startResize, resetWidth } = useColumnWidths("ops-campaigns", DEFAULT_WIDTHS);
+  const totalWidth = COLUMNS.reduce((sum, c) => sum + (widths[c.key] || c.width), 0);
+
+  const handleFilter = (key, value) => {
+    setPage(0);
+    setFilters((f) => {
+      const next = { ...f };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+  };
 
   const handleSort = (key) => {
     if (sortBy === key) {
@@ -58,14 +89,14 @@ export default function CampaignsOpsPage() {
     setLoading(true);
     setError(null);
     setExpandedId(null);
-    api.getOpsCampaigns({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: debouncedSearch, sortBy, sortDir })
+    api.getOpsCampaigns({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: debouncedSearch, sortBy, sortDir, filters })
       .then((res) => {
         setCampaigns(res.rows || []);
         setTotal(res.total || 0);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [page, debouncedSearch, sortBy, sortDir]);
+  }, [page, debouncedSearch, sortBy, sortDir, filters]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -144,32 +175,46 @@ export default function CampaignsOpsPage() {
 
       {/* Campaigns table */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
-        <div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", minWidth: totalWidth, borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
             <colgroup>
-              <col style={{ width: 28 }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "13%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "8%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "22%" }} />
+              {COLUMNS.map((c) => (
+                <col key={c.key} style={{ width: widths[c.key] || c.width }} />
+              ))}
             </colgroup>
             <thead>
               <tr style={{ background: theme.bg }}>
                 <Th theme={theme}></Th>
-                <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Campaign</Th>
-                <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Brand</Th>
-                <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Applied</Th>
-                <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Accepted</Th>
-                <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Sample acc.</Th>
-                <Th theme={theme} num sortKey="products_shipped"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Shipped</Th>
-                <Th theme={theme} num sortKey="clicks"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Clicks</Th>
-                <Th theme={theme} num sortKey="sales"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Sales</Th>
-                <Th theme={theme}     sortKey="bottleneck"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort}>Bottleneck</Th>
+                <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "campaign_name", startResize, resetWidth }}>Campaign</Th>
+                <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "brand_name", startResize, resetWidth }}>Brand</Th>
+                <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_applied", startResize, resetWidth }}>Applied</Th>
+                <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_accepted", startResize, resetWidth }}>Accepted</Th>
+                <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "samples_accepted", startResize, resetWidth }}>Sample acc.</Th>
+                <Th theme={theme} num sortKey="products_shipped"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "products_shipped", startResize, resetWidth }}>Shipped</Th>
+                <Th theme={theme} num sortKey="clicks"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "clicks", startResize, resetWidth }}>Clicks</Th>
+                <Th theme={theme} num sortKey="sales"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "sales", startResize, resetWidth }}>Sales</Th>
+                <Th theme={theme}     sortKey="bottleneck"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "bottleneck", startResize, resetWidth }}>Bottleneck</Th>
+              </tr>
+              {/* Per-column filter row (server-side) */}
+              <tr style={{ background: theme.bg }}>
+                <td />
+                <td style={{ padding: "0 12px 10px" }}>
+                  <ColumnFilter
+                    theme={theme}
+                    placeholder="Filter campaign…"
+                    value={filters.campaign_name || ""}
+                    onCommit={(v) => handleFilter("campaign_name", v)}
+                  />
+                </td>
+                <td style={{ padding: "0 12px 10px" }}>
+                  <ColumnFilter
+                    theme={theme}
+                    placeholder="Filter brand…"
+                    value={filters.brand_name || ""}
+                    onCommit={(v) => handleFilter("brand_name", v)}
+                  />
+                </td>
+                <td colSpan={7} />
               </tr>
             </thead>
             <tbody>
@@ -437,11 +482,12 @@ function SampleStatus({ theme, v }) {
   return <span style={{ color: theme.text, fontWeight: 500 }}>{label}</span>;
 }
 
-function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort }) {
+function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resize }) {
   const isSortable = !!sortKey && !!onSort;
   const isActive = isSortable && sortBy === sortKey;
   const arrow = !isActive ? "" : (sortDir === "asc" ? " ↑" : " ↓");
   const baseStyle = {
+    position: "relative", // anchor for the ResizeHandle
     textAlign: num ? "right" : "left",
     padding: sub ? "8px 10px" : "12px 12px",
     fontSize: sub ? 10 : 11, fontWeight: 600,
@@ -459,6 +505,12 @@ function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort }) {
       onMouseLeave={isSortable ? (e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; } : undefined}
     >
       {children}{arrow}
+      {resize && (
+        /* Swallow clicks from the handle so drag/reset never triggers the header sort. */
+        <span onClick={(e) => e.stopPropagation()}>
+          <ResizeHandle colKey={resize.colKey} startResize={resize.startResize} resetWidth={resize.resetWidth} theme={theme} />
+        </span>
+      )}
     </th>
   );
 }

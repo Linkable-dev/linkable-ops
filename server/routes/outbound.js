@@ -64,6 +64,13 @@ export function outboundRoutes() {
       const offset = Math.max(Number(req.query.offset) || 0, 0);
       const search = (req.query.q || "").toString().trim();
 
+      // Server-side sort: allow-listed columns only; unknown/absent sortBy
+      // keeps the historical default (scheduled_at DESC).
+      const SORTABLE = ["scheduled_at", "sent_at", "to_email", "to_name", "subject", "brand_group", "touch_number", "status"];
+      const requestedSort = SORTABLE.includes(req.query.sortBy) ? req.query.sortBy : null;
+      const sortBy = requestedSort || "scheduled_at";
+      const ascending = requestedSort ? req.query.sortDir === "asc" : false;
+
       // count: 'exact' makes Supabase issue a HEAD-style count query alongside
       // the SELECT — one round trip, returns total post-filter for pagination.
       let q = supabase
@@ -73,7 +80,7 @@ export function outboundRoutes() {
           { count: "exact" }
         )
         .eq("team_id", teamId)
-        .order("scheduled_at", { ascending: false })
+        .order(sortBy, { ascending })
         .range(offset, offset + limit - 1);
 
       // When a campaign is specified, trust the campaign_id filter on its own.

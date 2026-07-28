@@ -12,6 +12,7 @@ import { Input } from "../components/ui/Input";
 import { TabBar } from "../components/ui/TabBar";
 import { Pagination } from "../components/ui/Pagination";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
+import { useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter } from "../components/table/tableTools";
 
 const STATUS_TINTS = {
   active:   { bg: "#D1FAE5", fg: "#065F46" },
@@ -45,6 +46,21 @@ const AUDIENCE_TINTS = {
   influencer: { bg: "#E0F2FE", fg: "#075985" },
 };
 
+// Column definitions: key = server sort column (allow-listed in
+// outbound-campaigns.js). Targets is client-computed so it stays unsortable.
+// Widths approximate the previous auto layout.
+const COLUMNS = [
+  { key: "name",          label: "Name",       sortable: true,  defaultDir: "asc",  width: 320 },
+  { key: "audience_type", label: "Audience",   sortable: true,  defaultDir: "asc",  width: 110 },
+  { key: "status",        label: "Status",     sortable: true,  defaultDir: "asc",  width: 100 },
+  { key: "daily_cap",     label: "Daily cap",  sortable: true,  defaultDir: "desc", width: 90 },
+  { key: "auto_reply",    label: "Auto-reply", sortable: true,  defaultDir: "desc", width: 100 },
+  { key: "targets",       label: "Targets",    sortable: false,                     width: 220 },
+  { key: "created_at",    label: "Created",    sortable: true,  defaultDir: "desc", width: 130 },
+];
+const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
+const DEFAULT_SORT = { sortBy: "created_at", sortDir: "desc" };
+
 export default function AiCampaignsPage() {
   const { theme } = useTheme();
   const [campaigns, setCampaigns] = useState([]);
@@ -57,6 +73,17 @@ export default function AiCampaignsPage() {
   const [audience, setAudience] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [sort, setSort] = useState(DEFAULT_SORT);
+  const [filters, setFilters] = useState({});
+
+  const { widths, startResize, resetWidth } = useColumnWidths("ai-campaigns", DEFAULT_WIDTHS);
+  const tableWidth = COLUMNS.reduce((sum, c) => sum + (widths[c.key] || c.width), 0);
+  const handleSort = (key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir));
+  const commitFilter = (col, val) => setFilters((f) => {
+    const next = { ...f };
+    if (val) next[col] = val; else delete next[col];
+    return next;
+  });
 
   const loadCounts = useCallback(() => {
     api.getOutboundCampaignStatusCounts()
@@ -71,15 +98,18 @@ export default function AiCampaignsPage() {
       audience,
       limit: pageSize,
       offset: (page - 1) * pageSize,
+      sortBy: sort.sortBy,
+      sortDir: sort.sortDir,
+      filters,
     })
       .then((res) => { setCampaigns(res.rows || []); setTotal(res.total || 0); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [tab, audience, page, pageSize]);
+  }, [tab, audience, page, pageSize, sort, filters]);
 
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { loadCounts(); }, [loadCounts]);
-  useEffect(() => { setPage(1); }, [tab, audience, pageSize]);
+  useEffect(() => { setPage(1); }, [tab, audience, pageSize, sort, filters]);
 
   return (
     <div>
@@ -125,10 +155,13 @@ export default function AiCampaignsPage() {
 
       {loading && campaigns.length === 0 ? (
         <Card style={{ padding: 0, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ tableLayout: "fixed", width: tableWidth, minWidth: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <colgroup>
+              {COLUMNS.map((col) => <col key={col.key} style={{ width: widths[col.key] }} />)}
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                <Th>Name</Th><Th>Audience</Th><Th>Status</Th><Th>Daily cap</Th><Th>Auto-reply</Th><Th>Targets</Th><Th>Created</Th>
+                {COLUMNS.map((col) => <Th key={col.key}>{col.label}</Th>)}
               </tr>
             </thead>
             <tbody>
@@ -139,23 +172,56 @@ export default function AiCampaignsPage() {
       ) : campaigns.length === 0 ? (
         <Card>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>
-            {tab === "all"
+            {filters.name
+              ? `No campaigns matching "${filters.name}".`
+              : tab === "all"
               ? "No campaigns yet. Create one to start outbound — it'll seed 12 default templates (G1/G2/G3 or C1/C2/C3 × T+0/T+3/T+7/T+12) which you can edit or override with AI-generated drafts."
               : `No campaigns with status "${tab}".`}
           </div>
+          {filters.name && (
+            <div style={{ marginTop: 8 }}>
+              <Btn variant="secondary" onClick={() => setFilters({})}>Clear filter</Btn>
+            </div>
+          )}
         </Card>
       ) : (
         <Card style={{ padding: 0, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ tableLayout: "fixed", width: tableWidth, minWidth: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <colgroup>
+              {COLUMNS.map((col) => <col key={col.key} style={{ width: widths[col.key] }} />)}
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                <Th>Name</Th>
-                <Th>Audience</Th>
-                <Th>Status</Th>
-                <Th>Daily cap</Th>
-                <Th>Auto-reply</Th>
-                <Th>Targets</Th>
-                <Th>Created</Th>
+                {COLUMNS.map((col) => (
+                  <Th key={col.key}>
+                    {col.sortable ? (
+                      <SortLabel
+                        label={col.label}
+                        colKey={col.key}
+                        sortBy={sort.sortBy}
+                        sortDir={sort.sortDir}
+                        onSort={handleSort}
+                        defaultDir={col.defaultDir}
+                        theme={theme}
+                      />
+                    ) : col.label}
+                    <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                  </Th>
+                ))}
+              </tr>
+              <tr style={{ borderBottom: `1px solid ${theme.border}` }}>
+                {COLUMNS.map((col) => (
+                  <td key={col.key} style={{ padding: "4px 8px" }}>
+                    {col.key === "name" && (
+                      <ColumnFilter
+                        value={filters.name || ""}
+                        placeholder="Filter by name…"
+                        onCommit={(v) => commitFilter("name", v)}
+                        theme={theme}
+                      />
+                    )}
+                  </td>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -440,7 +506,7 @@ function Pill({ tint = {}, children }) {
 }
 
 function Th({ children }) {
-  return <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{children}</th>;
+  return <th style={{ position: "relative", padding: "8px 12px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{children}</th>;
 }
 function Td({ children, style = {} }) {
   return <td style={{ padding: "8px 12px", verticalAlign: "top", ...style }}>{children}</td>;

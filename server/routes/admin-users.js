@@ -1,6 +1,10 @@
 import express from "express";
 import { cloudSqlQuery, currentDbTarget } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
+import {
+  parseColumnFilters, orderBySql, filterConditions,
+  textFilter, minNumberFilter, enumFilter,
+} from "../lib/tableQuery.js";
 
 // Mirrors the main app's role enum (see linkable-new/backend/models/enums.py
 // — note `routers/users.py` has stale duplicate constants with INFLUENCER=1
@@ -118,13 +122,81 @@ async function setStartupProgramme(userId, body) {
   return { startup_programme: rows[0].startup_programme };
 }
 
-async function listBrands({ q = "", limit = "50", offset = "0" }) {
+// Plan rank + trial state expressions mirror the UsersPage cells (PlanCell /
+// deriveTrialState) so server-side sort/filter orders rows exactly like the
+// old client-side sort did. Higher plan rank = "more paying".
+const BRAND_PLAN_RANK_SQL = `CASE
+  WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 100
+  WHEN u.account_id LIKE '%shopify_199%' THEN 90
+  WHEN u.account_id LIKE '%shopify_99%'  THEN 80
+  WHEN u.account_id = 'shopify_free_plan' THEN 50
+  WHEN COALESCE(u.account_id, '') = '' AND u.created >= NOW() - INTERVAL '14 days' THEN 40
+  WHEN COALESCE(u.account_id, '') = '' THEN 10
+  ELSE 0
+END`;
+
+// Trial "urgency": active = days remaining, granted = offer length,
+// expired = -1, none = -2 (matches the client's trial_time_left sort rank).
+const BRAND_TRIAL_TIME_SQL = `CASE
+  WHEN b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW()
+    THEN CEIL(EXTRACT(EPOCH FROM (b.trial_expiration_date - NOW())) / 86400)
+  WHEN COALESCE(b.trial_plan_name, '') <> '' AND COALESCE(b.trial_activation_date, '-infinity'::timestamptz) = '-infinity'::timestamptz
+    THEN COALESCE(b.trial_days, 0)
+  WHEN b.trial_activation_date > '-infinity'::timestamptz THEN -1
+  ELSE -2
+END`;
+
+const BRAND_TRIAL_ACTIVE_SQL   = `(b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW())`;
+const BRAND_TRIAL_GRANTED_SQL  = `(COALESCE(b.trial_plan_name, '') <> '' AND COALESCE(b.trial_activation_date, '-infinity'::timestamptz) = '-infinity'::timestamptz)`;
+const BRAND_TRIAL_EXPIRED_SQL  = `(b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date <= NOW())`;
+
+const BRAND_SORTS = {
+  store_name:      `LOWER(COALESCE(b.store_name, ''))`,
+  email:           `LOWER(u.email)`,
+  owner_name:      `LOWER(TRIM(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, '')))`,
+  user_created:    `u.created`,
+  last_sign_in:    `sig.last_sign_in`,
+  plan:            BRAND_PLAN_RANK_SQL,
+  trial_plan_name: `LOWER(COALESCE(b.trial_plan_name, ''))`,
+  trial_time_left: BRAND_TRIAL_TIME_SQL,
+};
+
+// Cutoff mirrors PAID_PLANS_LAUNCH_TS in UsersPage: brands created before
+// paid plans launched are "Legacy free"; after, an empty account_id is a
+// "No record" anomaly.
+const BRAND_FILTERS = {
+  store_name:      textFilter("b.store_name", "b.store_website"),
+  email:           textFilter("u.email"),
+  owner_name:      textFilter(`(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, ''))`),
+  trial_plan_name: textFilter("b.trial_plan_name"),
+  plan: enumFilter({
+    scale:      `(u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%')`,
+    growth:     `(u.account_id LIKE '%shopify_199%' OR u.account_id LIKE '%shopify_99%')`,
+    free:       `u.account_id = 'shopify_free_plan'`,
+    free_trial: `(COALESCE(u.account_id, '') = '' AND u.created >= NOW() - INTERVAL '14 days')`,
+    legacy:     `(COALESCE(u.account_id, '') = '' AND u.created < NOW() - INTERVAL '14 days' AND u.created < '2025-11-20'::timestamptz)`,
+    no_record:  `(COALESCE(u.account_id, '') = '' AND u.created < NOW() - INTERVAL '14 days' AND u.created >= '2025-11-20'::timestamptz)`,
+  }),
+  trial_time_left: enumFilter({
+    active:  BRAND_TRIAL_ACTIVE_SQL,
+    granted: BRAND_TRIAL_GRANTED_SQL,
+    expired: BRAND_TRIAL_EXPIRED_SQL,
+    none:    `NOT (${BRAND_TRIAL_ACTIVE_SQL} OR ${BRAND_TRIAL_GRANTED_SQL} OR ${BRAND_TRIAL_EXPIRED_SQL})`,
+  }),
+};
+
+async function listBrands(query) {
+  const { q = "", limit = "50", offset = "0" } = query;
   const params = [Number(limit) || 50, Number(offset) || 0];
   let where = `u.role = ${ROLE_BRAND} AND u.deleted = ${USER_ACTIVE}`;
   if (q) {
     params.push(`%${q}%`);
     where += ` AND (u.email ILIKE $3 OR b.store_name ILIKE $3 OR b.store_website ILIKE $3 OR b.first_name ILIKE $3 OR b.last_name ILIKE $3)`;
   }
+  for (const cond of filterConditions(parseColumnFilters(query), BRAND_FILTERS, params)) {
+    where += ` AND ${cond}`;
+  }
+  const orderBy = orderBySql(query, BRAND_SORTS, "u.created DESC");
   return cloudSqlQuery(
     `SELECT u.id          AS user_id,
             u.email,
@@ -191,19 +263,47 @@ async function listBrands({ q = "", limit = "50", offset = "0" }) {
             AND o.deleted = ${ENTITY_ACTIVE}
        ) rev ON true
        WHERE ${where}
-       ORDER BY u.created DESC
+       ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
     params,
   );
 }
 
-async function listCreators({ q = "", limit = "50", offset = "0" }) {
+// Followers is a text column that can hold garbage (literally "undefined"),
+// so strip to digits and NULL out anything non-numeric before casting.
+const CREATOR_FOLLOWERS_SQL =
+  `NULLIF(REGEXP_REPLACE(COALESCE(i.instagram_followers_count, ''), '[^0-9]', '', 'g'), '')::bigint`;
+const CREATOR_NAME_SQL =
+  `COALESCE(NULLIF(TRIM(COALESCE(i.first_name, '') || ' ' || COALESCE(i.last_name, '')), ''), i.instagram_name, '')`;
+
+const CREATOR_SORTS = {
+  creator_name:              `LOWER(${CREATOR_NAME_SQL})`,
+  email:                     `LOWER(u.email)`,
+  instagram_username:        `LOWER(REGEXP_REPLACE(COALESCE(i.instagram_username, ''), '^@+', ''))`,
+  instagram_followers_count: CREATOR_FOLLOWERS_SQL,
+  last_sign_in:              `sig.last_sign_in`,
+  user_created:              `u.created`,
+};
+
+const CREATOR_FILTERS = {
+  creator_name:              textFilter(CREATOR_NAME_SQL, "i.instagram_name"),
+  email:                     textFilter("u.email"),
+  instagram_username:        textFilter("i.instagram_username"),
+  instagram_followers_count: minNumberFilter(CREATOR_FOLLOWERS_SQL),
+};
+
+async function listCreators(query) {
+  const { q = "", limit = "50", offset = "0" } = query;
   const params = [Number(limit) || 50, Number(offset) || 0];
   let where = `u.role = ${ROLE_INFLUENCER} AND u.deleted = ${USER_ACTIVE}`;
   if (q) {
     params.push(`%${q}%`);
     where += ` AND (u.email ILIKE $3 OR i.instagram_username ILIKE $3 OR i.first_name ILIKE $3 OR i.last_name ILIKE $3 OR i.instagram_name ILIKE $3)`;
   }
+  for (const cond of filterConditions(parseColumnFilters(query), CREATOR_FILTERS, params)) {
+    where += ` AND ${cond}`;
+  }
+  const orderBy = orderBySql(query, CREATOR_SORTS, "u.created DESC");
   return cloudSqlQuery(
     `SELECT u.id          AS user_id,
             u.email,
@@ -252,7 +352,7 @@ async function listCreators({ q = "", limit = "50", offset = "0" }) {
             AND o.deleted = ${ENTITY_ACTIVE}
        ) rev ON true
        WHERE ${where}
-       ORDER BY u.created DESC
+       ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
     params,
   );

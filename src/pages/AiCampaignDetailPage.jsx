@@ -11,6 +11,7 @@ import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonCard, SkeletonTableRows } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
 import { Pagination } from "../components/ui/Pagination";
+import { useColumnWidths, ResizeHandle, SortLabel, nextSort } from "../components/table/tableTools";
 import { suggestCampaignName } from "../lib/campaign-name";
 
 const GROUP_TINTS = {
@@ -406,6 +407,51 @@ function tdStyle(theme, align, strong) {
 // all / specific date), filters by group + touch + status, surfaces the stop
 // list, and lets the user cancel pending touches per row.
 
+// Shared <colgroup> + sortable/resizable header row for the real-<table>
+// tables on this page (sends + lead pool). Column keys double as the
+// server-side sortBy values.
+function TableColGroup({ cols, widths }) {
+  return (
+    <colgroup>
+      {cols.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}
+    </colgroup>
+  );
+}
+
+function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidth, theme }) {
+  return (
+    <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+      {cols.map((c) => (
+        <th key={c.key} style={{ ...thStyle, position: "relative" }}>
+          {c.sortable ? (
+            <SortLabel
+              label={c.label}
+              colKey={c.key}
+              sortBy={sort.sortBy}
+              sortDir={sort.sortDir}
+              onSort={onSort}
+              defaultDir={c.defaultDir}
+              theme={theme}
+            />
+          ) : c.label}
+          <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+        </th>
+      ))}
+    </tr>
+  );
+}
+
+const SEND_COLS = [
+  { key: "scheduled_at", label: "When", width: 150, sortable: true, defaultDir: "desc" },
+  { key: "brand_group", label: "Group", width: 80, sortable: true, defaultDir: "asc" },
+  { key: "touch_number", label: "Touch", width: 70, sortable: true, defaultDir: "asc" },
+  { key: "to_email", label: "To", width: 210, sortable: true, defaultDir: "asc" },
+  { key: "subject", label: "Subject", width: 280, sortable: true, defaultDir: "asc" },
+  { key: "status", label: "Status", width: 110, sortable: true, defaultDir: "asc" },
+  { key: "actions", label: "Actions", width: 90 },
+];
+const SEND_COL_WIDTHS = Object.fromEntries(SEND_COLS.map((c) => [c.key, c.width]));
+
 function SendsTab({ campaign, theme }) {
   const [stats, setStats] = useState(null);
   const [rows, setRows] = useState([]);
@@ -426,6 +472,11 @@ function SendsTab({ campaign, theme }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
+  // Server-side sort + drag-resizable columns (persisted per table).
+  const [sort, setSort] = useState({ sortBy: "scheduled_at", sortDir: "desc" });
+  const { widths, startResize, resetWidth } = useColumnWidths("ai-sends", SEND_COL_WIDTHS);
+  const handleSort = useCallback((key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir)), []);
+
   const [stopText, setStopText] = useState("");
   const [stopReason, setStopReason] = useState("replied");
   const [stopBusy, setStopBusy] = useState(false);
@@ -441,7 +492,7 @@ function SendsTab({ campaign, theme }) {
 
   // Snap back to page 1 whenever any filter narrows or widens the result set —
   // staying on page 7 of an empty list would be confusing.
-  useEffect(() => { setPage(1); }, [group, touch, status, runSel, q, pageSize, campaign.id]);
+  useEffect(() => { setPage(1); }, [group, touch, status, runSel, q, pageSize, campaign.id, sort]);
 
   // Debounce the search box → `q` so we don't spam the API.
   useEffect(() => {
@@ -462,6 +513,8 @@ function SendsTab({ campaign, theme }) {
         campaignId: campaign.id,
         limit: pageSize,
         offset: (page - 1) * pageSize,
+        sortBy: sort.sortBy,
+        sortDir: sort.sortDir,
       }),
     ])
       .then(([s, r]) => {
@@ -471,7 +524,7 @@ function SendsTab({ campaign, theme }) {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [group, touch, status, q, runParams, campaign.id, page, pageSize]);
+  }, [group, touch, status, q, runParams, campaign.id, page, pageSize, sort]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -611,12 +664,13 @@ function SendsTab({ campaign, theme }) {
       {/* Sends table */}
       {loading && rows.length === 0 ? (
         <Card style={{ padding: 0, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
+            <TableColGroup cols={SEND_COLS} widths={widths} />
             <thead>
-              <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                <th style={sendTh}>When</th><th style={sendTh}>Group</th><th style={sendTh}>Touch</th>
-                <th style={sendTh}>To</th><th style={sendTh}>Subject</th><th style={sendTh}>Status</th><th style={sendTh}>Actions</th>
-              </tr>
+              <SortableHeaderRow
+                cols={SEND_COLS} thStyle={sendTh} sort={sort} onSort={handleSort}
+                startResize={startResize} resetWidth={resetWidth} theme={theme}
+              />
             </thead>
             <tbody>
               <SkeletonTableRows rows={6} cols={7} theme={theme} />
@@ -627,17 +681,13 @@ function SendsTab({ campaign, theme }) {
         <Card><div style={{ color: theme.textMuted, fontSize: 13 }}>No sends match these filters.</div></Card>
       ) : (
         <Card style={{ padding: 0, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
+            <TableColGroup cols={SEND_COLS} widths={widths} />
             <thead>
-              <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                <th style={sendTh}>When</th>
-                <th style={sendTh}>Group</th>
-                <th style={sendTh}>Touch</th>
-                <th style={sendTh}>To</th>
-                <th style={sendTh}>Subject</th>
-                <th style={sendTh}>Status</th>
-                <th style={sendTh}>Actions</th>
-              </tr>
+              <SortableHeaderRow
+                cols={SEND_COLS} thStyle={sendTh} sort={sort} onSort={handleSort}
+                startResize={startResize} resetWidth={resetWidth} theme={theme}
+              />
             </thead>
             <tbody>
               {rows.map((r) => (
@@ -652,10 +702,10 @@ function SendsTab({ campaign, theme }) {
                   <td style={sendTd}><Pill tint={GROUP_TINTS[r.brand_group] || {}}>{r.brand_group || "—"}</Pill></td>
                   <td style={sendTd}>T+{r.touch_number === 1 ? "0" : r.touch_number === 2 ? "3" : r.touch_number === 3 ? "7" : "?"}</td>
                   <td style={sendTd}>
-                    <div style={{ color: theme.text }}>{r.to_name || "—"}</div>
-                    <div style={{ color: theme.textMuted, fontSize: 11 }}>{r.to_email}</div>
+                    <div style={{ color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.to_name || "—"}</div>
+                    <div style={{ color: theme.textMuted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.to_email}</div>
                   </td>
-                  <td style={{ ...sendTd, color: theme.text, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <td style={{ ...sendTd, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {r.subject}
                   </td>
                   <td style={sendTd}>
@@ -1393,6 +1443,17 @@ const runTd = { padding: "8px 16px", verticalAlign: "top" };
 // (country / revenue band) by default — there's a toggle to view the whole
 // team pool when needed.
 
+const LEAD_COLS = [
+  { key: "domain", label: "Domain", width: 170, sortable: true, defaultDir: "asc" },
+  { key: "contact_first_name", label: "Contact", width: 160, sortable: true, defaultDir: "asc" },
+  { key: "email", label: "Email", width: 210, sortable: true, defaultDir: "asc" },
+  { key: "country_code", label: "Country", width: 80, sortable: true, defaultDir: "asc" },
+  { key: "categories", label: "Categories", width: 180 },
+  { key: "lead_status", label: "Status", width: 100 },
+  { key: "imported_at", label: "Added", width: 130, sortable: true, defaultDir: "desc" },
+];
+const LEAD_COL_WIDTHS = Object.fromEntries(LEAD_COLS.map((c) => [c.key, c.width]));
+
 function LeadPoolPanel({ theme, campaign }) {
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState(null);
@@ -1402,6 +1463,11 @@ function LeadPoolPanel({ theme, campaign }) {
   const [pageSize, setPageSize] = useState(25);
   const [onlyQualified, setOnlyQualified] = useState(true);
   const [scopeToCampaign, setScopeToCampaign] = useState(true);
+
+  // Server-side sort + drag-resizable columns (persisted per table).
+  const [sort, setSort] = useState({ sortBy: "imported_at", sortDir: "desc" });
+  const { widths, startResize, resetWidth } = useColumnWidths("ai-leads", LEAD_COL_WIDTHS);
+  const handleSort = useCallback((key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir)), []);
 
   // Filters derived from the campaign's target_filters when scoped.
   const tf = campaign?.target_filters || {};
@@ -1418,19 +1484,21 @@ function LeadPoolPanel({ theme, campaign }) {
       qualified: onlyQualified ? undefined : "false",
       limit: pageSize,
       offset: (page - 1) * pageSize,
+      sortBy: sort.sortBy,
+      sortDir: sort.sortDir,
       ...filterArgs,
     })
       .then((res) => { setRows(res.rows || []); setTotal(res.total || 0); })
       .catch(() => {});
     api.getOutboundLeadCounts(filterArgs).then(setCounts).catch(() => {});
-  }, [q, page, onlyQualified, scopeToCampaign, JSON.stringify(filterArgs)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, page, onlyQualified, scopeToCampaign, sort, JSON.stringify(filterArgs)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = setTimeout(load, 200);
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [q, onlyQualified, scopeToCampaign, pageSize]);
+  useEffect(() => { setPage(1); }, [q, onlyQualified, scopeToCampaign, pageSize, sort]);
 
   return (
     <Card style={{ marginBottom: 16, padding: 0 }}>
@@ -1475,17 +1543,14 @@ function LeadPoolPanel({ theme, campaign }) {
           {q ? "No leads match this search." : "No leads in the pool yet — run discovery first."}
         </div>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
+          <TableColGroup cols={LEAD_COLS} widths={widths} />
           <thead>
-            <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-              <th style={runTh}>Domain</th>
-              <th style={runTh}>Contact</th>
-              <th style={runTh}>Email</th>
-              <th style={runTh}>Country</th>
-              <th style={runTh}>Categories</th>
-              <th style={runTh}>Status</th>
-              <th style={runTh}>Added</th>
-            </tr>
+            <SortableHeaderRow
+              cols={LEAD_COLS} thStyle={runTh} sort={sort} onSort={handleSort}
+              startResize={startResize} resetWidth={resetWidth} theme={theme}
+            />
           </thead>
           <tbody>
             {rows.map((r) => {
@@ -1493,16 +1558,16 @@ function LeadPoolPanel({ theme, campaign }) {
               const fullName = [r.contact_first_name, r.contact_last_name].filter(Boolean).join(" ");
               return (
                 <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                  <td style={runTd}>
+                  <td style={{ ...runTd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <a href={`https://${r.domain}`} target="_blank" rel="noreferrer" style={{ color: theme.text, fontWeight: 500, textDecoration: "none" }}>{r.domain}</a>
                   </td>
                   <td style={runTd}>
                     <div style={{ color: theme.text }}>{fullName || "—"}</div>
                     {r.contact_position && <div style={{ fontSize: 11, color: theme.textMuted }}>{r.contact_position}</div>}
                   </td>
-                  <td style={{ ...runTd, color: r.email ? theme.text : theme.textMuted }}>{r.email || "—"}</td>
+                  <td style={{ ...runTd, color: r.email ? theme.text : theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.email || "—"}</td>
                   <td style={{ ...runTd, color: theme.textMuted }}>{r.country_code || "—"}</td>
-                  <td style={{ ...runTd, color: theme.textMuted, fontSize: 11, maxWidth: 180 }}>
+                  <td style={{ ...runTd, color: theme.textMuted, fontSize: 11 }}>
                     {(r.categories || []).slice(0, 2).map((c) => c.split("/").pop()).join(", ") || "—"}
                   </td>
                   <td style={runTd}>
@@ -1518,6 +1583,7 @@ function LeadPoolPanel({ theme, campaign }) {
             })}
           </tbody>
         </table>
+        </div>
       )}
       {total > 0 && (
         <div style={{ padding: "0 20px" }}>

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { parseColumnFilters, filterConditions, textFilter } from "../lib/tableQuery.js";
 
 // Link status enum (from main proto):
 //   0=unset
@@ -15,6 +16,14 @@ const LINK_INVITED = 1;
 
 // `deleted` uses '-infinity' as sentinel for "not deleted" in this DB.
 const ND = `(deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
+
+// Per-column filters (filter[col]=val). Only plain columns from products/brands:
+// the aggregate columns (applied, shipped, sales, …) would need HAVING against
+// the CTE output, which this query shape doesn't support — deliberately omitted.
+const CAMPAIGN_FILTERS = {
+  campaign_name: textFilter("p.title"),
+  brand_name:    textFilter("b.store_name"),
+};
 
 export function opsRoutes() {
   const router = Router();
@@ -58,18 +67,30 @@ export function opsRoutes() {
       const searchPattern = search ? `%${search}%` : null;
       const searchClause = `($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)`;
 
+      // Per-column filters. Conditions embed positional placeholders, so each
+      // query gets its own params array + its own filterConditions() pass.
+      const columnFilters = parseColumnFilters(req.query);
+
+      const countParams = [searchPattern];
+      const countFilterSql = filterConditions(columnFilters, CAMPAIGN_FILTERS, countParams)
+        .map((c) => ` AND ${c}`).join("");
+
       const { rows: countRows } = await cloudSqlQuery(
         `SELECT COUNT(*)::int AS total
          FROM products p
          LEFT JOIN brands b ON b.id = p.brand_id
-         WHERE ${ND.replace(/deleted/g, "p.deleted")} AND p.status = ${PRODUCT_ACTIVE} AND ${searchClause}`,
-        [searchPattern]
+         WHERE ${ND.replace(/deleted/g, "p.deleted")} AND p.status = ${PRODUCT_ACTIVE} AND ${searchClause}${countFilterSql}`,
+        countParams
       );
       const total = countRows[0]?.total || 0;
 
       // Compute aggregates for ALL matched products (active set is small —
       // ~tens, not thousands), then sort + paginate. Sort key may reference
       // an aggregate so we can't paginate before aggregating.
+      const mainParams = [searchPattern, LINK_ACCEPTED, limit, offset, LINK_INVITED];
+      const baseFilterSql = filterConditions(columnFilters, CAMPAIGN_FILTERS, mainParams)
+        .map((c) => ` AND ${c}`).join("");
+
       const { rows } = await cloudSqlQuery(`
         WITH base AS (
           SELECT p.id, p.title AS campaign_name, b.store_name AS brand_name,
@@ -78,7 +99,7 @@ export function opsRoutes() {
           LEFT JOIN brands b ON b.id = p.brand_id
           WHERE ${ND.replace(/deleted/g, "p.deleted")}
             AND p.status = ${PRODUCT_ACTIVE}
-            AND ($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)
+            AND ($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)${baseFilterSql}
         ),
         link_agg AS (
           -- "Invited" = brand reached out, creator hasn't responded yet (link.status = pending_brand = 1).
@@ -149,7 +170,7 @@ export function opsRoutes() {
         SELECT * FROM enriched
         ORDER BY ${sortColumn} ${sortDir} NULLS LAST, created DESC NULLS LAST
         LIMIT $3 OFFSET $4
-      `, [searchPattern, LINK_ACCEPTED, limit, offset, LINK_INVITED]);
+      `, mainParams);
 
       res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir });
     } catch (e) {

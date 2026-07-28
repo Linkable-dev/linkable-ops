@@ -24,6 +24,25 @@ const HIDDEN_COLUMNS = new Set([
 // Column name patterns to hide
 const HIDDEN_PATTERNS = [/token$/i, /secret$/i, /hash$/i, /_otp$/i];
 
+// Column widths persisted per table in localStorage — same key convention as
+// src/components/table/tableTools.jsx ("ops.tableWidths.<tableId>"), with a
+// "db-" prefix to namespace the generic DB browser's tables.
+const widthsStorageKey = (table) => `ops.tableWidths.db-${table}`;
+
+function loadStoredWidths(table) {
+  try {
+    return JSON.parse(localStorage.getItem(widthsStorageKey(table))) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredWidths(table, widths) {
+  try {
+    localStorage.setItem(widthsStorageKey(table), JSON.stringify(widths));
+  } catch { /* private mode etc. — resizing still works for the session */ }
+}
+
 function shouldHideColumn(col) {
   if (col.is_primary_key) return true;
   if (col.data_type === "uuid" && !col.fk) return true;
@@ -77,8 +96,8 @@ export default function TablePage() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [fkLabels, setFkLabels] = useState({});
-  // Column widths: { colName: width }
-  const [colWidths, setColWidths] = useState({});
+  // Column widths: { colName: width }, seeded from this table's stored widths
+  const [colWidths, setColWidths] = useState(() => loadStoredWidths(table));
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState(null); // null = new, value = editing
@@ -132,7 +151,9 @@ export default function TablePage() {
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
     setSearch(""); setSortBy(""); setSortDir("asc"); setPage(1);
-    setFilters({}); setShowFilters(false); setFkLabels({}); setColWidths({});
+    setFilters({}); setShowFilters(false); setFkLabels({});
+    // Switching tables loads THAT table's stored widths (empty if none saved)
+    setColWidths(loadStoredWidths(table));
   }, [table]);
   // Selection is page/filter scoped — clear it whenever the visible row set changes
   useEffect(() => { setSelectedIds(new Set()); }, [table, page, pageSize, search, sortBy, sortDir, filters]);
@@ -214,6 +235,8 @@ export default function TablePage() {
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
+      // Persist the final widths for this table
+      setColWidths((prev) => { saveStoredWidths(table, prev); return prev; });
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);

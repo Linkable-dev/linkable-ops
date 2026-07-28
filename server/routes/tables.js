@@ -1,5 +1,6 @@
 import express from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { parseColumnFilters } from "../lib/tableQuery.js";
 
 export function tableRoutes() {
   const router = express.Router();
@@ -219,12 +220,11 @@ export function tableRoutes() {
     const sortBy = req.query.sortBy || null;
     const sortDir = req.query.sortDir === "desc" ? "DESC" : "ASC";
     const search = req.query.search || null;
-    // Column-level filters: filter[column_name]=value
-    const filters = {};
-    for (const key of Object.keys(req.query)) {
-      const m = key.match(/^filter\[(.+)\]$/);
-      if (m) filters[m[1]] = req.query[key];
-    }
+    // Column-level filters: filter[column_name]=value. Express 4's default
+    // "extended" (qs) parser delivers these as a nested req.query.filter
+    // object, so the old flat-key regex never matched; parseColumnFilters
+    // handles both the nested and flat forms.
+    const filters = parseColumnFilters(req.query);
 
     try {
       const tableCheck = await cloudSqlQuery(
@@ -298,7 +298,17 @@ export function tableRoutes() {
       );
       const total = parseInt(countResult.rows[0].total);
 
-      const orderClause = sortBy ? `ORDER BY "${sortBy}" ${sortDir} NULLS LAST` : `ORDER BY 1`;
+      // Only sort by real columns of this table (same information_schema check
+      // used for filter columns); otherwise fall back to the default ordering.
+      let validSortBy = null;
+      if (sortBy) {
+        const sortColCheck = await cloudSqlQuery(
+          `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2 AND table_schema = 'public'`,
+          [table, sortBy]
+        );
+        if (sortColCheck.rows.length > 0) validSortBy = sortBy;
+      }
+      const orderClause = validSortBy ? `ORDER BY "${validSortBy}" ${sortDir} NULLS LAST` : `ORDER BY 1`;
       const dataParams = [...params, limit, offset];
       const { rows } = await cloudSqlQuery(
         `SELECT * FROM "${table}" ${whereClause} ${orderClause} LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,

@@ -7,70 +7,63 @@ import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
+import ManageBrandModal from "../components/users/ManageBrandModal";
+import {
+  useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
+} from "../components/table/tableTools";
 
 const TABS = [["brands", "Brands"], ["creators", "Creators"]];
 
 const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
-const TEXT_SORT_KEYS = new Set([
-  "store_name", "email", "owner_name", "creator_name", "instagram_username",
-  "trial_plan_name",
-]);
 
-function ownerName(row) {
-  return [row.first_name, row.last_name].filter(Boolean).join(" ");
-}
-function creatorName(row) {
-  return ownerName(row) || row.instagram_name || "";
-}
+// Sorting and filtering are SERVER-side: `key` must exist in the endpoint's
+// whitelists (BRAND_SORTS/BRAND_FILTERS etc. in server/routes/admin-users.js).
+// `width` is the default px width; the user can drag-resize (persisted in
+// localStorage per table). `fill: true` lets a column absorb leftover space.
+const BRAND_COLUMNS = [
+  { key: "avatar",          label: "",             width: 44,  resizable: false },
+  { key: "store_name",      label: "Store",        width: 170, fill: true, sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "Store / website…" } },
+  { key: "email",           label: "Email",        width: 190, fill: true, sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "Email…" } },
+  { key: "owner_name",      label: "Owner",        width: 120, sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "Name…" } },
+  { key: "user_created",    label: "Joined",       width: 85,  sortable: true, defaultDir: "desc" },
+  { key: "last_sign_in",    label: "Last sign in", width: 95,  sortable: true, defaultDir: "desc" },
+  { key: "plan",            label: "Plan",         width: 95,  sortable: true, defaultDir: "desc",
+    filter: { type: "select", options: [
+      { value: "scale",      label: "Scale" },
+      { value: "growth",     label: "Growth" },
+      { value: "free",       label: "Free" },
+      { value: "free_trial", label: "Free trial" },
+      { value: "legacy",     label: "Legacy free" },
+      { value: "no_record",  label: "No record ⚠" },
+    ] } },
+  { key: "trial_plan_name", label: "Trial plan",   width: 90,  sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "Plan…" } },
+  { key: "trial_time_left", label: "Time left",    width: 100, sortable: true, defaultDir: "desc",
+    filter: { type: "select", options: [
+      { value: "active",  label: "Active" },
+      { value: "granted", label: "Granted" },
+      { value: "expired", label: "Expired" },
+      { value: "none",    label: "No trial" },
+    ] } },
+  { key: "actions",         label: "",             width: 165 },
+];
 
-function sortValue(row, key) {
-  switch (key) {
-    case "store_name":           return (row.store_name || "").toLowerCase();
-    case "email":                return (row.email || "").toLowerCase();
-    case "owner_name":           return ownerName(row).toLowerCase();
-    case "creator_name":         return creatorName(row).toLowerCase();
-    case "instagram_username":   return (row.instagram_username || "").replace(/^@+/, "").toLowerCase();
-    case "instagram_followers_count": {
-      const n = Number(row.instagram_followers_count);
-      return Number.isFinite(n) ? n : -1;
-    }
-    case "user_created":
-    case "last_sign_in":         return row[key] ? new Date(row[key]).getTime() : 0;
-    // Numeric plan rank — higher = "more paying". Lets desc sort surface
-    // Scale → Growth → Free → Free trial → Legacy free.
-    case "plan": {
-      const accountId = row.account_id || "";
-      if (accountId.includes("shopify_499") || accountId.includes("shopify_4970") || accountId.includes("shopify_299")) return 100;
-      if (accountId.includes("shopify_199")) return 90;
-      if (accountId.includes("shopify_99"))  return 80;
-      if (accountId === "shopify_free_plan") return 50;
-      if (!accountId) {
-        const created = row.user_created ? new Date(row.user_created).getTime() : 0;
-        const daysSinceSignup = created ? Math.floor((Date.now() - created) / 86_400_000) : 9999;
-        return daysSinceSignup < 14 ? 40 : 10; // current free trial vs legacy
-      }
-      return 0;
-    }
-    case "trial_plan_name":      return (row.trial_plan_name || "").toLowerCase();
-    // Numeric "urgency" of the trial state. Active = days remaining (paid
-    // trial countdown), Granted = offer length, Expired/none push to the
-    // bottom so desc sort shows the most actionable rows first.
-    case "trial_time_left": {
-      const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
-        ? new Date(row.trial_activation_date).getTime() : null;
-      const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
-        ? new Date(row.trial_expiration_date).getTime() : null;
-      const now = Date.now();
-      if (activated && expires && expires > now) {
-        return Math.max(0, Math.ceil((expires - now) / 86_400_000));
-      }
-      if (row.trial_plan_name && !activated) return Number(row.trial_days) || 0;
-      if (activated && expires && expires <= now) return -1;
-      return -2;
-    }
-    default:                     return row[key] ?? "";
-  }
-}
+const CREATOR_COLUMNS = [
+  { key: "avatar",                    label: "",             width: 44,  resizable: false },
+  { key: "creator_name",              label: "Creator",      width: 180, fill: true, sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "Name…" } },
+  { key: "email",                     label: "Email",        width: 200, fill: true, sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "Email…" } },
+  { key: "instagram_username",        label: "IG Handle",    width: 140, sortable: true, defaultDir: "asc",
+    filter: { type: "text", placeholder: "@handle…" } },
+  { key: "instagram_followers_count", label: "Followers",    width: 100, sortable: true, defaultDir: "desc",
+    filter: { type: "number", placeholder: "≥ …" } },
+  { key: "last_sign_in",              label: "Last sign in", width: 110, sortable: true, defaultDir: "desc" },
+  { key: "actions",                   label: "",             width: 95 },
+];
 
 function avatarFor(row, kind) {
   // Backend pre-signs GCS URLs into signed_logo_pic / signed_profile_pic so
@@ -102,38 +95,36 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [impersonating, setImpersonating] = useState(null); // user_id being acted on
   const [actionError, setActionError] = useState("");
-  const [sortBy, setSortBy] = useState(DEFAULT_SORT.sortBy);
-  const [sortDir, setSortDir] = useState(DEFAULT_SORT.sortDir);
+  const [sort, setSort] = useState(DEFAULT_SORT);
+  const [filters, setFilters] = useState({});
+  const [manageRow, setManageRow] = useState(null); // null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
-  const [startupBusy, setStartupBusy] = useState(null); // user_id being toggled
 
-  const handleSort = (key) => {
-    if (sortBy === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortBy(key);
-      // Text columns default ascending (A→Z); dates and numbers default descending.
-      setSortDir(TEXT_SORT_KEYS.has(key) ? "asc" : "desc");
-    }
-  };
+  const columns = tab === "brands" ? BRAND_COLUMNS : CREATOR_COLUMNS;
+  const { widths, startResize, resetWidth } = useColumnWidths(`admin-${tab}`, useMemo(
+    () => Object.fromEntries(columns.map((c) => [c.key, c.width])),
+    [columns],
+  ));
+  const template = gridTemplate(columns, widths);
+  const hasFilters = Object.keys(filters).length > 0;
 
-  const sortedRows = useMemo(() => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => {
-      const va = sortValue(a, sortBy);
-      const vb = sortValue(b, sortBy);
-      if (va < vb) return -1 * dir;
-      if (va > vb) return 1 * dir;
-      return 0;
+  const handleSort = (key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir));
+
+  const handleFilter = (key, value) => {
+    setFilters((f) => {
+      const next = { ...f };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
     });
-  }, [rows, sortBy, sortDir]);
+  };
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
-      const data = await fn({ q, limit: 100 });
+      const data = await fn({ q, limit: 100, sortBy: sort.sortBy, sortDir: sort.sortDir, filters });
       setRows(data);
     } catch (err) {
       setError(err.message);
@@ -141,26 +132,18 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, q]);
+  }, [tab, q, sort, filters]);
 
-  // Debounce search
+  // Debounce free-text search; sort/filter changes arrive pre-debounced
+  // (ColumnFilter commits after a pause) so they refetch immediately.
   useEffect(() => {
     const t = setTimeout(fetchRows, q ? 300 : 0);
     return () => clearTimeout(t);
   }, [fetchRows, q]);
 
-  async function handleStartupToggle(row) {
-    setActionError("");
-    setStartupBusy(row.user_id);
-    try {
-      const next = !row.startup_programme;
-      await api.setStartupProgramme(row.user_id, next);
-      setRows((rs) => rs.map((r) => (r.user_id === row.user_id ? { ...r, startup_programme: next } : r)));
-    } catch (err) {
-      setActionError(`${row.email}: ${err.message}`);
-    } finally {
-      setStartupBusy(null);
-    }
+  function handleStartupChanged(userId, enabled) {
+    setRows((rs) => rs.map((r) => (r.user_id === userId ? { ...r, startup_programme: enabled } : r)));
+    setManageRow((r) => (r && r.user_id === userId ? { ...r, startup_programme: enabled } : r));
   }
 
   async function handleImpersonate(row) {
@@ -205,8 +188,8 @@ export default function UsersPage() {
       <TabBar tabs={TABS} active={tab} onSelect={(id) => {
         setTab(id);
         setQ("");
-        setSortBy(DEFAULT_SORT.sortBy);
-        setSortDir(DEFAULT_SORT.sortDir);
+        setSort(DEFAULT_SORT);
+        setFilters({});
       }} />
 
       <div style={{ marginBottom: 16, maxWidth: 420 }}>
@@ -237,11 +220,10 @@ export default function UsersPage() {
         borderRadius: 12,
         overflow: "hidden",
       }}>
+        {/* Header row: sort labels + drag-resize handles */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 250px"
-            : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
+          gridTemplateColumns: template,
           gap: 8,
           padding: "10px 16px",
           borderBottom: `1px solid ${theme.border}`,
@@ -249,29 +231,52 @@ export default function UsersPage() {
           fontSize: 11, fontWeight: 600, textTransform: "uppercase",
           letterSpacing: 0.5, color: theme.textMuted,
         }}>
-          <span></span>
-          {tab === "brands" ? (
-            <>
-              <SortHeader theme={theme} sortKey="store_name"   label="Store"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="email"        label="Email"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="owner_name"   label="Owner"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="user_created" label="Joined"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="last_sign_in"     label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="plan"              label="Plan"         sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="trial_plan_name"   label="Trial plan"   sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="trial_time_left"   label="Time left"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <span></span>
-            </>
-          ) : (
-            <>
-              <SortHeader theme={theme} sortKey="creator_name"               label="Creator"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="email"                      label="Email"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="instagram_username"         label="IG Handle"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="instagram_followers_count"  label="Followers"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <SortHeader theme={theme} sortKey="last_sign_in"               label="Last sign in" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <span></span>
-            </>
-          )}
+          {columns.map((col) => (
+            <div key={col.key} style={{ position: "relative", minWidth: 0, whiteSpace: "nowrap" }}>
+              {col.sortable ? (
+                <SortLabel
+                  theme={theme}
+                  label={col.label}
+                  colKey={col.key}
+                  sortBy={sort.sortBy}
+                  sortDir={sort.sortDir}
+                  defaultDir={col.defaultDir}
+                  onSort={handleSort}
+                />
+              ) : (
+                <span>{col.label}</span>
+              )}
+              {col.resizable !== false && (
+                <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Per-column filter row (server-side) */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: template,
+          gap: 8,
+          padding: "6px 16px",
+          borderBottom: `1px solid ${theme.border}`,
+          background: theme.surfaceAlt,
+          alignItems: "center",
+        }}>
+          {columns.map((col) => (
+            <div key={col.key} style={{ minWidth: 0 }}>
+              {col.filter && (
+                <ColumnFilter
+                  theme={theme}
+                  type={col.filter.type}
+                  options={col.filter.options}
+                  placeholder={col.filter.placeholder}
+                  value={filters[col.key] || ""}
+                  onCommit={(v) => handleFilter(col.key, v)}
+                />
+              )}
+            </div>
+          ))}
         </div>
 
         {loading ? (
@@ -286,24 +291,31 @@ export default function UsersPage() {
           </div>
         ) : rows.length === 0 ? (
           <div style={{ padding: 32, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
-            No {tab} found{q ? ` matching "${q}"` : ""}.
+            No {tab} found{q ? ` matching "${q}"` : ""}{hasFilters ? " with the current column filters" : ""}.
           </div>
         ) : (
-          sortedRows.map((row) => (
+          rows.map((row) => (
             <UserRow
               key={row.user_id}
               row={row}
               tab={tab}
               theme={theme}
+              template={template}
               busy={impersonating === row.user_id}
-              startupBusy={startupBusy === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
-              onGrantTrial={() => setTrialModalRow(row)}
-              onStartupToggle={() => handleStartupToggle(row)}
+              onManage={() => setManageRow(row)}
             />
           ))
         )}
       </div>
+
+      <ManageBrandModal
+        row={manageRow}
+        isDev={isDev}
+        onClose={() => setManageRow(null)}
+        onStartupChanged={handleStartupChanged}
+        onGrantTrial={(row) => { setManageRow(null); setTrialModalRow(row); }}
+      />
 
       <GrantTrialModal
         row={trialModalRow}
@@ -321,7 +333,7 @@ export default function UsersPage() {
   );
 }
 
-function UserRow({ row, tab, theme, busy, startupBusy, onImpersonate, onGrantTrial, onStartupToggle }) {
+function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -331,9 +343,7 @@ function UserRow({ row, tab, theme, busy, startupBusy, onImpersonate, onGrantTri
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 250px"
-        : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
+      gridTemplateColumns: template,
       alignItems: "center",
       padding: "10px 16px",
       borderBottom: `1px solid ${theme.border}`,
@@ -368,10 +378,10 @@ function UserRow({ row, tab, theme, busy, startupBusy, onImpersonate, onGrantTri
           <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {[row.first_name, row.last_name].filter(Boolean).join(" ") || <span style={{ color: theme.textMuted }}>—</span>}
           </div>
-          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {friendlyDate(row.user_created)}
           </div>
-          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
           <PlanCell row={row} theme={theme} />
@@ -399,35 +409,29 @@ function UserRow({ row, tab, theme, busy, startupBusy, onImpersonate, onGrantTri
               : <span style={{ color: theme.textMuted }}>—</span>
             }
           </div>
-          <div style={{ fontSize: 12, color: theme.textMid, whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 12, color: theme.textMid, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {row.instagram_followers_count && row.instagram_followers_count !== "undefined"
               ? friendlyNumber(row.instagram_followers_count)
               : <span style={{ color: theme.textMuted }}>—</span>}
           </div>
-          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
         </>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
         {tab === "brands" && (
-          <>
-            <Btn
-              size="sm"
-              variant={row.startup_programme ? "solid" : "outline"}
-              onClick={onStartupToggle}
-              loading={startupBusy}
-              title={row.startup_programme
-                ? "Enrolled in the Startup Programme — first monthly Growth subscription bills $99/mo for 3 months, then $199. Click to remove."
-                : "Enroll in the hidden Startup Programme — first monthly Growth subscription bills $99/mo for 3 months, then $199. Only affects brands who haven't subscribed yet."}
-            >
-              {row.startup_programme ? "Startup ✓" : "Startup"}
-            </Btn>
-            <Btn size="sm" variant="outline" onClick={onGrantTrial}>
-              Trial
-            </Btn>
-          </>
+          <Btn
+            size="sm"
+            variant={row.startup_programme ? "solid" : "outline"}
+            onClick={onManage}
+            title={row.startup_programme
+              ? "Enrolled in the Startup Programme — manage programme & trials"
+              : "Manage Startup Programme enrollment & trials"}
+          >
+            Manage
+          </Btn>
         )}
         <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
           View ↗
@@ -624,24 +628,5 @@ function TrialTimeCell({ row, theme }) {
         {state.status}
       </div>
     </div>
-  );
-}
-
-function SortHeader({ theme, sortKey, label, sortBy, sortDir, onSort }) {
-  const isActive = sortBy === sortKey;
-  const arrow = !isActive ? "" : (sortDir === "asc" ? " ↑" : " ↓");
-  return (
-    <span
-      onClick={() => onSort(sortKey)}
-      style={{
-        cursor: "pointer", userSelect: "none",
-        color: isActive ? theme.text : theme.textMuted,
-        transition: "color 0.12s",
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; }}
-    >
-      {label}{arrow}
-    </span>
   );
 }
