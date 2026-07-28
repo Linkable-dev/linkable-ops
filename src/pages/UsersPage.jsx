@@ -37,10 +37,10 @@ function sortValue(row, key) {
     case "user_created":
     case "last_sign_in":         return row[key] ? new Date(row[key]).getTime() : 0;
     // Numeric plan rank — higher = "more paying". Lets desc sort surface
-    // Scale → Grow → Starter → Free → Free trial → Legacy free.
+    // Scale → Growth → Free → Free trial → Legacy free.
     case "plan": {
       const accountId = row.account_id || "";
-      if (accountId.includes("shopify_299")) return 100;
+      if (accountId.includes("shopify_499") || accountId.includes("shopify_4970") || accountId.includes("shopify_299")) return 100;
       if (accountId.includes("shopify_199")) return 90;
       if (accountId.includes("shopify_99"))  return 80;
       if (accountId === "shopify_free_plan") return 50;
@@ -105,6 +105,7 @@ export default function UsersPage() {
   const [sortBy, setSortBy] = useState(DEFAULT_SORT.sortBy);
   const [sortDir, setSortDir] = useState(DEFAULT_SORT.sortDir);
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
+  const [startupBusy, setStartupBusy] = useState(null); // user_id being toggled
 
   const handleSort = (key) => {
     if (sortBy === key) {
@@ -147,6 +148,20 @@ export default function UsersPage() {
     const t = setTimeout(fetchRows, q ? 300 : 0);
     return () => clearTimeout(t);
   }, [fetchRows, q]);
+
+  async function handleStartupToggle(row) {
+    setActionError("");
+    setStartupBusy(row.user_id);
+    try {
+      const next = !row.startup_programme;
+      await api.setStartupProgramme(row.user_id, next);
+      setRows((rs) => rs.map((r) => (r.user_id === row.user_id ? { ...r, startup_programme: next } : r)));
+    } catch (err) {
+      setActionError(`${row.email}: ${err.message}`);
+    } finally {
+      setStartupBusy(null);
+    }
+  }
 
   async function handleImpersonate(row) {
     setActionError("");
@@ -225,7 +240,7 @@ export default function UsersPage() {
         <div style={{
           display: "grid",
           gridTemplateColumns: tab === "brands"
-            ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 180px"
+            ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 250px"
             : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
           gap: 8,
           padding: "10px 16px",
@@ -281,8 +296,10 @@ export default function UsersPage() {
               tab={tab}
               theme={theme}
               busy={impersonating === row.user_id}
+              startupBusy={startupBusy === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
               onGrantTrial={() => setTrialModalRow(row)}
+              onStartupToggle={() => handleStartupToggle(row)}
             />
           ))
         )}
@@ -304,7 +321,7 @@ export default function UsersPage() {
   );
 }
 
-function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
+function UserRow({ row, tab, theme, busy, startupBusy, onImpersonate, onGrantTrial, onStartupToggle }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -315,7 +332,7 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
     <div style={{
       display: "grid",
       gridTemplateColumns: tab === "brands"
-        ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 180px"
+        ? "44px minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.9fr) 85px 95px 95px 90px 105px 250px"
         : "44px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 120px 130px",
       alignItems: "center",
       padding: "10px 16px",
@@ -395,9 +412,22 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
         {tab === "brands" && (
-          <Btn size="sm" variant="outline" onClick={onGrantTrial}>
-            Trial
-          </Btn>
+          <>
+            <Btn
+              size="sm"
+              variant={row.startup_programme ? "solid" : "outline"}
+              onClick={onStartupToggle}
+              loading={startupBusy}
+              title={row.startup_programme
+                ? "Enrolled in the Startup Programme — first monthly Growth subscription bills $99/mo for 3 months, then $199. Click to remove."
+                : "Enroll in the hidden Startup Programme — first monthly Growth subscription bills $99/mo for 3 months, then $199. Only affects brands who haven't subscribed yet."}
+            >
+              {row.startup_programme ? "Startup ✓" : "Startup"}
+            </Btn>
+            <Btn size="sm" variant="outline" onClick={onGrantTrial}>
+              Trial
+            </Btn>
+          </>
         )}
         <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
           View ↗
@@ -408,13 +438,13 @@ function UserRow({ row, tab, theme, busy, onImpersonate, onGrantTrial }) {
 }
 
 // Maps users.account_id (set by the main app's subscription flow) to a coarse
-// plan tier. Mirrors planNameFromAccountId in main-app payment_service.ts;
-// kept here so ops doesn't have to call main-app code to label rows.
+// plan tier. Mirrors planNameFromAccountId in main-app payment_service.ts —
+// 2026-07 lineup: Scale = $499 family (legacy $299 grandfathers in), Growth =
+// $199 family (legacy Grow/Starter prices map here by price fidelity).
 function paidPlanFromAccountId(accountId) {
   if (!accountId) return null;
-  if (accountId.includes("shopify_299")) return "Scale";
-  if (accountId.includes("shopify_199")) return "Grow";
-  if (accountId.includes("shopify_99"))  return "Starter";
+  if (accountId.includes("shopify_499") || accountId.includes("shopify_4970") || accountId.includes("shopify_299")) return "Scale";
+  if (accountId.includes("shopify_199") || accountId.includes("shopify_99")) return "Growth";
   return null; // shopify_free_plan or anything else
 }
 

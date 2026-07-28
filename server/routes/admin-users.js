@@ -80,7 +80,42 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Enroll/remove a brand in the hidden Startup Programme. The main app reads
+  // brands.startup_programme and gives enrolled brands the introductory price
+  // on their first monthly Growth subscription ($99/mo for 3 months, then
+  // $199) via a Shopify App Billing discount. Body: { enabled: boolean }.
+  // Only affects brands who haven't subscribed yet — the discount applies at
+  // subscription creation, so flipping it after purchase changes nothing.
+  router.post("/:userId/startup-programme", async (req, res) => {
+    try {
+      const out = await setStartupProgramme(req.params.userId, req.body || {});
+      res.json(out);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   return router;
+}
+
+async function setStartupProgramme(userId, body) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  const enabled = Boolean(body.enabled);
+  const { rows } = await cloudSqlQuery(
+    `UPDATE brands
+        SET startup_programme = $2,
+            updated           = NOW()
+      WHERE user_id = $1
+        AND deleted = ${ENTITY_ACTIVE}
+      RETURNING startup_programme`,
+    [userId, enabled],
+  );
+  if (rows.length === 0) {
+    const e = new Error("No active brand found for that user"); e.status = 404; throw e;
+  }
+  return { startup_programme: rows[0].startup_programme };
 }
 
 async function listBrands({ q = "", limit = "50", offset = "0" }) {
@@ -109,6 +144,7 @@ async function listBrands({ q = "", limit = "50", offset = "0" }) {
             b.trial_interval,
             b.trial_activation_date,
             b.trial_expiration_date,
+            b.startup_programme,
             sig.last_sign_in,
             COALESCE(camp.n, 0)::int    AS active_campaigns,
             COALESCE(prom.n, 0)::int    AS active_promoters,

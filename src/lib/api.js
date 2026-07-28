@@ -181,6 +181,8 @@ export const api = {
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
   grantTrial: (userId, body) =>
     request(`/admin-users/${userId}/grant-trial`, { method: "POST", body: JSON.stringify(body) }),
+  setStartupProgramme: (userId, enabled) =>
+    request(`/admin-users/${userId}/startup-programme`, { method: "POST", body: JSON.stringify({ enabled }) }),
 };
 
 // Helpers for formatting
