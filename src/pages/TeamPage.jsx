@@ -159,7 +159,12 @@ export default function TeamPage() {
             ))}
           </div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+          <div style={{ overflowX: "auto" }}>
+          <table style={{
+            width: "100%",
+            minWidth: Object.values(widths).reduce((a, b) => a + b, 0),
+            borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed",
+          }}>
             <colgroup>
               {TEAM_COLUMNS.map((col) => (
                 <col key={col.key} style={{ width: widths[col.key] }} />
@@ -269,6 +274,7 @@ export default function TeamPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 

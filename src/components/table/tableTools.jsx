@@ -156,6 +156,7 @@ export function nextSort({ sortBy, sortDir }, colKey, defaultDir) {
 export function ColumnFilter({ type = "text", value, options, placeholder, onCommit, theme, delay = 350 }) {
   const [draft, setDraft] = useState(value ?? "");
   const [prevValue, setPrevValue] = useState(value);
+  const [focused, setFocused] = useState(false);
   const timer = useRef(null);
 
   // External reset (e.g. tab switch clears filters) → sync the draft.
@@ -167,12 +168,18 @@ export function ColumnFilter({ type = "text", value, options, placeholder, onCom
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
+  // Quiet by default (melts into the header band), visible when it matters:
+  // accent border while focused or when a filter is actually applied.
+  const active = type === "select" ? !!value : !!draft;
+  const accent = theme.accent || theme.text;
   const baseStyle = {
-    width: "100%", boxSizing: "border-box",
-    background: theme.bg, color: theme.text,
-    border: `1px solid ${theme.border}`, borderRadius: 6,
-    fontFamily: "inherit", fontSize: 11, padding: "4px 7px",
-    outline: "none",
+    width: "100%", boxSizing: "border-box", height: 24,
+    background: "transparent",
+    color: active ? theme.text : theme.textMid,
+    border: `1px solid ${focused || active ? accent : theme.border}`,
+    borderRadius: 6,
+    fontFamily: "inherit", fontSize: 11, padding: "0 7px",
+    outline: "none", transition: "border-color 0.12s, color 0.12s",
   };
 
   if (type === "select") {
@@ -180,7 +187,12 @@ export function ColumnFilter({ type = "text", value, options, placeholder, onCom
       <select
         value={value ?? ""}
         onChange={(e) => onCommit(e.target.value)}
-        style={{ ...baseStyle, cursor: "pointer" }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          ...baseStyle, cursor: "pointer",
+          color: active ? theme.text : theme.textMuted,
+        }}
       >
         <option value="">All</option>
         {(options || []).map((o) => (
@@ -195,6 +207,8 @@ export function ColumnFilter({ type = "text", value, options, placeholder, onCom
       value={draft}
       inputMode={type === "number" ? "numeric" : undefined}
       placeholder={placeholder || (type === "number" ? "≥ …" : "Filter…")}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       onChange={(e) => {
         const v = e.target.value;
         setDraft(v);

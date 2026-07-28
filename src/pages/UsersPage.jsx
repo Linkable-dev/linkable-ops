@@ -106,6 +106,10 @@ export default function UsersPage() {
     [columns],
   ));
   const template = gridTemplate(columns, widths);
+  // Grid rows are plain divs, so horizontal overflow needs an explicit
+  // min-width on a shared scroll body: sum of column widths + gaps + padding.
+  const totalWidth = columns.reduce((s, c) => s + (widths[c.key] || c.width), 0)
+    + 8 * (columns.length - 1) + 32;
   const hasFilters = Object.keys(filters).length > 0;
 
   const handleSort = (key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir));
@@ -220,6 +224,8 @@ export default function UsersPage() {
         borderRadius: 12,
         overflow: "hidden",
       }}>
+       <div style={{ overflowX: "auto" }}>
+       <div style={{ minWidth: totalWidth }}>
         {/* Header row: sort labels + drag-resize handles */}
         <div style={{
           display: "grid",
@@ -307,6 +313,8 @@ export default function UsersPage() {
             />
           ))
         )}
+       </div>
+       </div>
       </div>
 
       <ManageBrandModal
