@@ -172,10 +172,12 @@ export function opsRoutes() {
             p.product_status,
             p.created,
             -- Platform + external combined: one number per funnel stage. The
-            -- platform/external split lives in the drill-down (Source column).
+            -- externals_* columns carry the split for tooltips and the funnel pills.
             (COALESCE(la.creators_invited, 0)  + COALESCE(ea.externals_invited, 0))::int  AS creators_invited,
             (COALESCE(la.creators_applied, 0)  + COALESCE(ea.externals_applied, 0))::int  AS creators_applied,
             (COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0))::int AS creators_accepted,
+            COALESCE(ea.externals_invited, 0)::int AS externals_invited,
+            COALESCE(ea.externals_applied, 0)::int AS externals_applied,
             COALESCE(sm.samples_accepted, 0)::int  AS samples_accepted,
             COALESCE(sm.products_shipped, 0)::int  AS products_shipped,
             COALESCE(ca.clicks, 0)::int            AS clicks,

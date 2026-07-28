@@ -247,8 +247,8 @@ export default function CampaignsOpsPage() {
                       </Td>
                       <Td theme={theme} style={{ fontWeight: 500, color: theme.text }}>{c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>}</Td>
                       <Td theme={theme}>{c.brand_name || "—"}</Td>
-                      <Td theme={theme} num>{friendlyNumber(c.creators_invited)}</Td>
-                      <Td theme={theme} num>{friendlyNumber(c.creators_applied)}</Td>
+                      <Td theme={theme} num><SplitCount theme={theme} total={c.creators_invited} ext={c.externals_invited} /></Td>
+                      <Td theme={theme} num><SplitCount theme={theme} total={c.creators_applied} ext={c.externals_applied} /></Td>
                       <Td theme={theme} num>{friendlyNumber(c.creators_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.samples_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.products_shipped)}</Td>
@@ -315,6 +315,25 @@ function PageBtn({ theme, onClick, disabled, children }) {
 
 function CampaignRows({ children }) {
   return <>{children}</>;
+}
+
+// Combined total; when external (email-invited) creators are part of it, a
+// dotted underline + tooltip exposes the platform/external split without
+// cluttering the cell. The full split is visible in the expanded funnel.
+function SplitCount({ theme, total, ext }) {
+  const t = Number(total || 0);
+  const e = Number(ext || 0);
+  if (e === 0) return friendlyNumber(t);
+  return (
+    <span
+      title={`${t - e} platform · ${e} external (email)`}
+      style={{
+        cursor: "help",
+        textDecorationLine: "underline", textDecorationStyle: "dotted",
+        textDecorationColor: theme.textMuted, textUnderlineOffset: 3,
+      }}
+    >{friendlyNumber(t)}</span>
+  );
 }
 
 function computeBottleneck(c) {
@@ -428,11 +447,6 @@ function StageFunnel({ theme, mode, creators }) {
     if (["Shipped", "Sold"].includes(c.status)) counts.Shipped += 1;
     if (c.status === "Sold") counts.Sold += 1;
   }
-  const extParts = [
-    ext.Invited > 0 && `${ext.Invited} invited`,
-    ext.Applied > 0 && `${ext.Applied} applied`,
-  ].filter(Boolean);
-
   const linearStages = ["Accepted", "Sample Accepted", "Shipped", "Sold"];
   const pillStyle = (s) => ({
     display: "inline-flex", alignItems: "center", gap: 6,
@@ -442,41 +456,56 @@ function StageFunnel({ theme, mode, creators }) {
     fontSize: 11, fontWeight: 600,
     whiteSpace: "nowrap",
   });
+  // External entries get the same colors as their platform counterpart but a
+  // dashed outline instead of a fill, so the two sources read apart at a glance.
+  const extPillStyle = (s) => ({
+    ...pillStyle(s),
+    background: "transparent",
+    border: `1.5px dashed ${mode === "dark" ? STATUS_COLORS[s].fgDark : STATUS_COLORS[s].fg}`,
+    padding: "2.5px 8.5px",
+  });
+
+  // One entry pill per source × entry stage, all merging into Accepted.
+  const entries = [
+    { key: "inv",     label: "Invited",          count: counts.Invited - ext.Invited, style: pillStyle("Invited") },
+    ...(ext.Invited > 0 ? [{ key: "ext-inv", label: "External invited", count: ext.Invited, style: extPillStyle("Invited") }] : []),
+    { key: "app",     label: "Applied",          count: counts.Applied - ext.Applied, style: pillStyle("Applied") },
+    ...(ext.Applied > 0 ? [{ key: "ext-app", label: "External applied", count: ext.Applied, style: extPillStyle("Applied") }] : []),
+  ];
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-          <span style={pillStyle("Invited")}>Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span></span>
-          <span style={pillStyle("Applied")}>Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span></span>
-        </div>
-        <EntryMergeConnector color={theme.textMuted} />
-
-        {linearStages.map((s, i) => (
-          <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={pillStyle(s)}>{s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span></span>
-            {i < linearStages.length - 1 && <span style={{ color: theme.textMuted }}>→</span>}
-          </div>
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+        {entries.map((e) => (
+          <span key={e.key} style={e.style}>{e.label} <span style={{ opacity: 0.8 }}>· {e.count}</span></span>
         ))}
       </div>
-      {extParts.length > 0 && (
-        <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6 }}>
-          Includes external creators (invited by email, not yet on Linkable): {extParts.join(" · ")}
+      <EntryMergeConnector color={theme.textMuted} count={entries.length} />
+
+      {linearStages.map((s, i) => (
+        <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={pillStyle(s)}>{s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span></span>
+          {i < linearStages.length - 1 && <span style={{ color: theme.textMuted }}>→</span>}
         </div>
-      )}
+      ))}
     </div>
   );
 }
 
-function EntryMergeConnector({ color }) {
-  // Two curves from the entry pills (left, top and bottom) converge into a short
+function EntryMergeConnector({ color, count = 2 }) {
+  // One curve per entry pill (left, vertically stacked) converging into a short
   // horizontal segment with a chevron, pointing into the Accepted pill on the right.
+  const spacing = 27; // pill height (~23px) + column gap (4px)
+  const height = count * spacing;
+  const cy = height / 2;
+  const ys = Array.from({ length: count }, (_, i) => spacing / 2 + i * spacing);
   return (
-    <svg width="36" height="48" viewBox="0 0 36 48" fill="none" style={{ flexShrink: 0 }} aria-hidden="true">
-      <path d="M 0 12 Q 18 12, 24 24" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <path d="M 0 36 Q 18 36, 24 24" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <path d="M 24 24 L 30 24" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <path d="M 28 21 L 32 24 L 28 27" stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width="36" height={height} viewBox={`0 0 36 ${height}`} fill="none" style={{ flexShrink: 0 }} aria-hidden="true">
+      {ys.map((y) => (
+        <path key={y} d={`M 0 ${y} Q 18 ${y}, 24 ${cy}`} stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      ))}
+      <path d={`M 24 ${cy} L 30 ${cy}`} stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <path d={`M 28 ${cy - 3} L 32 ${cy} L 28 ${cy + 3}`} stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
