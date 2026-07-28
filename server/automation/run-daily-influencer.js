@@ -63,7 +63,8 @@ async function todaySentCount(teamId) {
 //     niches:          ["beauty","wellness"],     // matched substring on niche
 //     min_followers:   10000,
 //     max_followers:   200000,
-//     min_engagement:  0.02                        // fraction
+//     min_engagement:  0.02,                       // fraction
+//     list_tag:        "brandx-jul26"              // CSV-uploaded list only
 //   }
 async function fetchFreshCreatorsByGroup({ teamId, perGroupQuota, targetFilters = {} }) {
   const totalNeeded = perGroupQuota.C1 + perGroupQuota.C2 + perGroupQuota.C3;
@@ -76,6 +77,11 @@ async function fetchFreshCreatorsByGroup({ teamId, perGroupQuota, targetFilters 
     .not("email", "is", null)
     .not("first_name", "is", null)
     .gte("creator_score", MIN_SEND_SCORE);
+
+  // Per-brand campaigns pin their audience to an uploaded CSV list — with a
+  // list_tag set, only creators from that upload are eligible.
+  const listTag = (targetFilters.list_tag || "").toString().trim();
+  if (listTag) q = q.eq("list_tag", listTag);
 
   const countries = (targetFilters.countries || [])
     .map((c) => c?.toString().trim().toUpperCase())

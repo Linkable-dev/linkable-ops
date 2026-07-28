@@ -2,7 +2,7 @@
 // Keeps the AI module pure and the route handlers thin.
 
 import { supabase } from "../lib/supabase.js";
-import { DEFAULT_OFFERING, DEFAULT_PERSONA } from "./conversation-prompts.js";
+import { DEFAULT_OFFERING, DEFAULT_PERSONA, DEFAULT_CREATOR_PERSONA } from "./conversation-prompts.js";
 
 let _defaultTeamIdCache = null;
 export async function getDefaultTeamId() {
@@ -37,19 +37,25 @@ export async function getCampaign(id, teamId) {
   return data;
 }
 
-export async function createCampaign({ teamId, name, offering, persona, contextPrompt, firstMessagePrompt, goal, goalLink, replyModel, firstMessageModel }) {
+export async function createCampaign({ teamId, name, offering, persona, contextPrompt, firstMessagePrompt, goal, goalLink, replyModel, firstMessageModel, audienceType, brandName, knowledgeBase }) {
   const row = {
     team_id: teamId,
     name,
     status: "draft",
     offering: { ...DEFAULT_OFFERING, ...(offering || {}) },
-    persona: { ...DEFAULT_PERSONA, ...(persona || {}) },
+    persona: {
+      ...(audienceType === "influencer" ? DEFAULT_CREATOR_PERSONA : DEFAULT_PERSONA),
+      ...(persona || {}),
+    },
     context_prompt: contextPrompt,
     first_message_prompt: firstMessagePrompt,
     goal: goal || "book a 15-min intro call",
     goal_link: goalLink || process.env.LINKABLE_CALENDAR_URL || null,
     reply_model: replyModel || "claude-sonnet-4-6",
     first_message_model: firstMessageModel || "claude-haiku-4-5-20251001",
+    audience_type: audienceType === "influencer" ? "influencer" : "brand",
+    brand_name: brandName || null,
+    knowledge_base: knowledgeBase || null,
   };
   const { data, error } = await supabase.from("ai_campaigns").insert(row).select("*").single();
   if (error) throw new Error(error.message);

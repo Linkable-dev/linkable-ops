@@ -152,11 +152,13 @@ export const api = {
 
   // Influencer (creator) prospect pool — separate table, but lives under
   // /outbound since it's part of the same campaign system as brand outbound.
-  listOutboundCreators: ({ q, qualified, limit, offset, country, minFollowers, maxFollowers, minEngagement } = {}) =>
-    request(`/outbound/creators?${buildQs({ q, qualified, limit, offset, country, minFollowers, maxFollowers, minEngagement })}`),
+  listOutboundCreators: ({ q, qualified, limit, offset, country, minFollowers, maxFollowers, minEngagement, listTag } = {}) =>
+    request(`/outbound/creators?${buildQs({ q, qualified, limit, offset, country, minFollowers, maxFollowers, minEngagement, listTag })}`),
   getOutboundCreatorCounts: () => request("/outbound/creators/counts"),
   syncOutboundCreators: (body = {}) =>
     request("/outbound/creators/sync", { method: "POST", body: JSON.stringify(body) }),
+  importOutboundCreators: (body) =>
+    request("/outbound/creators/import", { method: "POST", body: JSON.stringify(body) }),
 
   // Outbound templates
   listOutboundTemplates: (campaignId) =>

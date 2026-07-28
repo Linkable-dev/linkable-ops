@@ -69,6 +69,7 @@ export default function AiCampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [tab, setTab] = useState("all");
   const [audience, setAudience] = useState("all");
   const [page, setPage] = useState(1);
@@ -120,13 +121,20 @@ export default function AiCampaignsPage() {
             Email outbound campaigns — brand or influencer. Each one targets a slice of its audience pool and runs a 4-touch sequence with A/B templates.
           </p>
         </div>
-        <Btn onClick={() => setCreating(true)}>+ New campaign</Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn variant="secondary" onClick={() => setImporting((v) => !v)}>Import creators CSV</Btn>
+          <Btn onClick={() => setCreating(true)}>+ New campaign</Btn>
+        </div>
       </div>
 
       {error && (
         <Card style={{ borderColor: "#DC2626", marginBottom: 12 }}>
           <div style={{ color: "#DC2626", fontSize: 13 }}>{error}</div>
         </Card>
+      )}
+
+      {importing && (
+        <ImportCreatorsCsvCard theme={theme} onClose={() => setImporting(false)} />
       )}
 
       {creating && (
@@ -310,6 +318,14 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
   const [minEngagement, setMinEngagement] = useState(0.02);
   const [niches, setNiches] = useState("beauty, fashion, lifestyle, wellness");
 
+  // Per-brand agent fields (influencer only). With brandName + knowledgeBase
+  // set and auto-reply on, the AI answers creator questions from the KB and
+  // steers interested creators to the campaign page URL.
+  const [brandName, setBrandName] = useState("");
+  const [campaignPageUrl, setCampaignPageUrl] = useState("");
+  const [knowledgeBase, setKnowledgeBase] = useState("");
+  const [listTag, setListTag] = useState("");
+
   const [autoReply, setAutoReply] = useState(false);
   const [aiCampaignId, setAiCampaignId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -334,6 +350,7 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
             max_followers: Number(maxFollowers) || undefined,
             min_engagement: Number(minEngagement) || undefined,
             niches: niches.split(",").map((s) => s.trim()).filter(Boolean),
+            list_tag: listTag.trim() || undefined,
           }
         : {
             countries: countries.split(",").map((s) => s.trim()).filter(Boolean),
@@ -349,6 +366,9 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
         target_filters,
         auto_reply: autoReply,
         ai_campaign_id: aiCampaignId || null,
+        brand_name: audienceType === "influencer" ? (brandName.trim() || null) : null,
+        campaign_page_url: audienceType === "influencer" ? (campaignPageUrl.trim() || null) : null,
+        knowledge_base: audienceType === "influencer" ? (knowledgeBase.trim() || null) : null,
       };
       await api.createOutboundCampaign(body);
       onCreated();
@@ -412,6 +432,26 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
             <Field label="Min engagement rate (e.g. 0.02 = 2%)" theme={theme}>
               <Input type="number" step="0.005" value={minEngagement} onChange={(e) => setMinEngagement(e.target.value)} />
             </Field>
+            <Field label="Brand (outreach on behalf of)" theme={theme}>
+              <Input value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="e.g. Glow Skincare" />
+            </Field>
+            <Field label="Campaign page URL (apply CTA)" theme={theme}>
+              <Input value={campaignPageUrl} onChange={(e) => setCampaignPageUrl(e.target.value)} placeholder="https://app.linkable.link/campaigns/…" />
+            </Field>
+            <Field label="Creator list tag (from CSV import — empty = whole pool)" theme={theme}>
+              <Input value={listTag} onChange={(e) => setListTag(e.target.value)} placeholder="e.g. glow-jul26" />
+            </Field>
+            <Field label="Knowledge base (the AI answers creator questions ONLY from this)" theme={theme} colSpan={2}>
+              <textarea
+                value={knowledgeBase} onChange={(e) => setKnowledgeBase(e.target.value)}
+                placeholder={"What the collab is (products, deliverables, timeline)\nCompensation model (gifted / flat / % per attributed sale)\nWho qualifies, shipping countries, content guidelines\nFAQ: exclusivity, usage rights, payment timing…"}
+                rows={6}
+                style={{
+                  width: "100%", padding: "8px 12px", borderRadius: 8, fontFamily: "inherit", fontSize: 13,
+                  border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text, resize: "vertical",
+                }}
+              />
+            </Field>
           </>
         )}
 
@@ -431,12 +471,12 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
         <Field label="Reply mode" theme={theme} colSpan={2}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.text }}>
             <input type="checkbox" checked={autoReply} onChange={(e) => setAutoReply(e.target.checked)} />
-            Auto-reply with AI (requires linked AI campaign)
+            Auto-reply with AI (a reply agent is created automatically; paste an ai_campaigns UUID only to reuse an existing one)
           </label>
           {autoReply && (
             <Input
               value={aiCampaignId} onChange={(e) => setAiCampaignId(e.target.value)}
-              placeholder="ai_campaigns.id (UUID)" style={{ marginTop: 8 }}
+              placeholder="ai_campaigns.id (UUID) — optional" style={{ marginTop: 8 }}
             />
           )}
         </Field>
@@ -449,6 +489,84 @@ function CreateCampaignCard({ theme, onCancel, onCreated }) {
             : "Create + seed 12 brand templates"}
         </Btn>
         <Btn onClick={onCancel} variant="secondary">Cancel</Btn>
+      </div>
+    </Card>
+  );
+}
+
+// CSV upload into creator_prospects. The file is read client-side and posted
+// as raw text; the server parses, scores, and upserts by email. A list tag
+// segments the upload so a per-brand campaign can target exactly this list.
+function ImportCreatorsCsvCard({ theme, onClose }) {
+  const [csvText, setCsvText] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [listTag, setListTag] = useState("");
+  const [defaultNiche, setDefaultNiche] = useState("");
+  const [defaultCountry, setDefaultCountry] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [result, setResult] = useState(null);
+
+  function onFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => setCsvText(reader.result || "");
+    reader.onerror = () => setErr("Could not read file");
+    reader.readAsText(file);
+  }
+
+  async function submit() {
+    if (!csvText.trim()) { setErr("Pick a CSV file first"); return; }
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const res = await api.importOutboundCreators({
+        csv: csvText,
+        list_tag: listTag.trim() || null,
+        default_niche: defaultNiche.trim() || null,
+        default_country: defaultCountry.trim() || null,
+      });
+      setResult(res);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4, color: theme.text }}>Import creators CSV</div>
+      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>
+        Header row required. Recognized columns: email (required), first_name / name, last_name, instagram / handle, followers, engagement (2% as 0.02 or 2), niche, country, city. Re-uploading the same emails updates them.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <Field label="CSV file" theme={theme}>
+          <input type="file" accept=".csv,text/csv" onChange={onFile} style={{ fontSize: 13, color: theme.text }} />
+          {fileName && <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>{fileName} · {csvText.split("\n").length - 1} lines</div>}
+        </Field>
+        <Field label="List tag (campaigns target this via 'Creator list tag')" theme={theme}>
+          <Input value={listTag} onChange={(e) => setListTag(e.target.value)} placeholder="e.g. glow-jul26" />
+        </Field>
+        <Field label="Default niche (used when the CSV has none)" theme={theme}>
+          <Input value={defaultNiche} onChange={(e) => setDefaultNiche(e.target.value)} placeholder="e.g. beauty" />
+        </Field>
+        <Field label="Default country (ISO-2, used when the CSV has none)" theme={theme}>
+          <Input value={defaultCountry} onChange={(e) => setDefaultCountry(e.target.value)} placeholder="e.g. US" />
+        </Field>
+      </div>
+      {err && <div style={{ color: "#DC2626", fontSize: 12, marginBottom: 8 }}>{err}</div>}
+      {result && (
+        <div style={{ fontSize: 12, color: theme.text, marginBottom: 8 }}>
+          Imported {result.imported}/{result.total_rows} rows
+          {result.list_tag ? ` into list "${result.list_tag}"` : ""} — {result.sendable} sendable (score ≥ 6 + first name),
+          {" "}{result.skipped_invalid_email} invalid emails, {result.skipped_duplicate_in_file} in-file duplicates.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={submit} loading={busy}>Import</Btn>
+        <Btn onClick={onClose} variant="secondary">Close</Btn>
       </div>
     </Card>
   );

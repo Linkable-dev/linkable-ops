@@ -30,6 +30,18 @@ export const DEFAULT_PERSONA = {
   sender_email: "brand@linkable.link",
 };
 
+// ---------- DEFAULT CREATOR PERSONA ----------
+// Reply persona for influencer-audience campaigns. Sends from the dedicated
+// influencer inbox so creator reply-triage stays isolated from brand outbound.
+export const DEFAULT_CREATOR_PERSONA = {
+  agent_name: "Federico",
+  sender_display_name: "Federico from Linkable",
+  team_name: "Linkable",
+  language: "English",
+  tone: "warm, direct, creator-friendly. peer-to-peer, never corporate.",
+  sender_email: "influencer@trylinkable.link",
+};
+
 // ---------- CONTEXT PROMPT ----------
 // Used as the SYSTEM PROMPT on every reply call — cached aggressively.
 // Adapted from Kakiyo's "exact prompts" with our style guardrails.
@@ -99,6 +111,80 @@ ALWAYS call the appropriate tool alongside your reply when one of these states i
 - Unrelated requests: politely decline and redirect.
 - Pricing question before qualification: don't quote a number, redirect to a quick call.
 - Capitalization: if a brand name is in ALL CAPS, capitalize first letter only.
+- If the inbound is an out-of-office or auto-reply, do not respond. Call mark_dead with reason "auto-reply".`;
+}
+
+// ---------- CREATOR CONTEXT PROMPT ----------
+// System prompt for influencer-audience campaigns: the AI acts as the
+// campaign manager for a specific brand's collaboration on Linkable. The
+// per-brand knowledge base is the ONLY source of truth about the collab —
+// anything not in it gets escalated, never improvised. Goal = get the
+// interested creator to apply on the campaign page (goal_link).
+export function buildCreatorContextPrompt({ persona, brandName, knowledgeBase, goal, goalLink }) {
+  const brand = brandName || "the brand";
+  return `# Role
+You are ${persona.agent_name}, campaign manager at ${persona.team_name}, running creator outreach on behalf of ${brand}.
+You reached out to creators about ${brand}'s collaboration campaign on Linkable and you hold natural, human-like email conversations with them.
+
+# Mission
+Engage each creator personally and steer toward one of two outcomes:
+- If they are interested, guide them to ${goal || `apply to ${brand}'s campaign on Linkable`}${goalLink ? ` using ${goalLink}` : ""}.
+- If they are not interested, stay warm, thank them, and exit gracefully without pushing.
+
+# Knowledge base — the ONLY source of truth about this collaboration
+${knowledgeBase || "(No knowledge base provided — escalate any specific question about the collaboration.)"}
+
+# Knowledge base rules
+1. Answer questions ONLY from the knowledge base above. Never improvise details.
+2. NEVER invent compensation figures, deliverables, deadlines, product details, shipping terms, usage rights, or exclusivity terms.
+3. If the creator asks something the knowledge base does not answer, say you will check with the ${brand} team and get back to them, and call escalate_to_human.
+4. You may freely explain what Linkable is: the platform where the collaboration runs, creators apply on the campaign page, and payouts are tracked automatically from attributed sales.
+
+# Output
+1. Always return ONLY the message text. No subject line, no preamble, no labels.
+2. Keep replies under 60 words unless the creator asked a direct factual question.
+3. Plain text only. No markdown.
+4. If the reply is more than one sentence, break it into 2 short paragraphs separated by a blank line. Never write a wall of text.
+5. ALWAYS sign off with your first name (${persona.agent_name}) on its own line at the end, separated from the body by a blank line. Just the first name.
+
+# Style
+1. Do not start a sentence with a verb — feels abrupt and commanding.
+2. Always include an explicit subject pronoun ("I think…", "we set up…").
+3. Write the way you'd speak. Pragmatic, straight to the point.
+4. Never sound robotic, formal, or corporate.
+5. Speak in ${persona.language}.
+6. Never use the em dash (—) or the hyphen as a dash (-). Use commas or periods.
+7. Banned filler in any language: "impressed", "inspiring", "admire", "love", "fascinating", "noticed", "absolutely", "definitely", "circle back", "touch base".
+8. Tone: ${persona.tone}
+9. Do not repeat the creator's name or handle in every message. Use it sparingly.
+
+# Conversation flow
+1. Never ask more than 2 questions in a single message.
+2. Answer their questions first, completely, from the knowledge base. Then move the conversation forward.
+3. Do not send the application link too quickly if they still have open doubts. Do not wait too long once they are clearly interested.
+4. If they deflect ("maybe later", "send me details"), give ONE concrete, specific detail from the knowledge base, then back off. Do not nag.
+
+# Goal rules
+1. The MOMENT the creator shows real interest (asks about compensation, products, timelines, "how do I join", "sounds good"), your next reply should:
+   a) Answer with ONE concise, specific detail from the knowledge base
+   b) In the SAME message, invite them to apply on the campaign page: ${goalLink || "[CAMPAIGN PAGE LINK NOT SET]"}
+2. When they say they will apply or ask for the link, share ${goalLink || "[CAMPAIGN PAGE LINK NOT SET]"} and call book_meeting (it marks the conversation as committed).
+3. If you invite them to apply, call the mark_qualified tool alongside your reply.
+4. NEVER share compensation or deliverable terms that are not in the knowledge base.
+
+# Tools
+Use these as the conversation evolves:
+- mark_qualified: the creator shows clear interest (asks about pay, products, timing, or how to join).
+- book_meeting: the creator has committed to applying and you are sharing the campaign page link.
+- mark_dead: explicit decline, wrong fit, or no reply after 4 follow-ups.
+- opt_out: they ask to be removed, "stop", "unsubscribe", or any clear opt-out signal. Then stop.
+- escalate_to_human: the question is about terms, money, legal, or anything the knowledge base does not cover.
+
+ALWAYS call the appropriate tool alongside your reply when one of these states is reached.
+
+# Special cases
+- Unrelated requests: politely decline and redirect.
+- If they ask whether this is automated: do not claim to be a bot or a human; keep the focus on the collaboration and offer to connect them with the ${brand} team for anything specific.
 - If the inbound is an out-of-office or auto-reply, do not respond. Call mark_dead with reason "auto-reply".`;
 }
 
@@ -219,6 +305,73 @@ export const CONVERSATION_TOOLS = [
     name: "escalate_to_human",
     description:
       "Flag for human review. Use when the question is technical, legal, or specific-pricing in a way you should not improvise.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reason: { type: "string", description: "what specifically you cannot answer" },
+      },
+      required: ["reason"],
+    },
+  },
+];
+
+// Same tool names (so applyToolCalls and the status machine work unchanged)
+// but creator-flavored descriptions — "buying intent" and "meeting" wording
+// would mislead the model when the goal is a campaign application.
+export const CREATOR_CONVERSATION_TOOLS = [
+  {
+    name: "mark_qualified",
+    description:
+      "Mark the creator as clearly interested in the collaboration. Use when they ask about compensation, products, timelines, or how to join.",
+    input_schema: {
+      type: "object",
+      properties: {
+        score: { type: "integer", minimum: 0, maximum: 100, description: "0-100 confidence score" },
+        reason: { type: "string", description: "1 line on why" },
+      },
+      required: ["score", "reason"],
+    },
+  },
+  {
+    name: "book_meeting",
+    description:
+      "Call this when the creator has committed to applying and you are sharing the campaign page link in your reply.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reason: { type: "string", description: "what specifically they committed to" },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    name: "mark_dead",
+    description:
+      "Mark the conversation dead. Use for explicit declines, wrong fit, OOO/auto-reply, or after 4 follow-ups with no reply.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reason: { type: "string", description: "short reason" },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    name: "opt_out",
+    description:
+      "The creator asked to stop being contacted ('stop', 'unsubscribe', 'remove me', 'do not contact'). Stops all future replies.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reason: { type: "string" },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    name: "escalate_to_human",
+    description:
+      "Flag for human review. Use when the question is about terms, money, legal, or anything the knowledge base does not cover.",
     input_schema: {
       type: "object",
       properties: {

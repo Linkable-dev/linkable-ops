@@ -26,7 +26,14 @@ import { dirname, join } from "path";
 import { supabase } from "../lib/supabase.js";
 import { parseColumnFilters } from "../lib/tableQuery.js";
 import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
-import { DEFAULT_OFFERING, DEFAULT_PERSONA, buildContextPrompt } from "../automation/conversation-prompts.js";
+import {
+  DEFAULT_OFFERING,
+  DEFAULT_PERSONA,
+  DEFAULT_CREATOR_PERSONA,
+  buildContextPrompt,
+  buildCreatorContextPrompt,
+} from "../automation/conversation-prompts.js";
+import { scoreCreator } from "../automation/creator-scoring.js";
 import { SEQUENCE_TEMPLATES } from "../automation/templates.js";
 import { CREATOR_SEQUENCE_TEMPLATES } from "../automation/creator-templates.js";
 import { CATEGORY_PRESETS } from "../automation/lead-discovery.js";
@@ -40,6 +47,98 @@ try {
   STORELEADS_CATEGORIES = JSON.parse(readFileSync(join(here, "..", "data", "storeleads-categories.json"), "utf-8"));
 } catch (e) {
   console.warn("storeleads-categories.json not loaded:", e.message);
+}
+
+// Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes
+// ("") and CRLF. Returns array of rows (arrays of strings). Good enough for
+// operator-exported creator lists; not a general-purpose parser.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field); field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.length > 1 || row[0] !== "") rows.push(row);
+      row = [];
+    } else field += ch;
+  }
+  row.push(field);
+  if (row.length > 1 || row[0] !== "") rows.push(row);
+  return rows;
+}
+
+// "12,400" / "12.4k" / "1.2M" → integer follower count.
+function parseCount(raw) {
+  const s = (raw || "").toString().trim().toLowerCase().replace(/,/g, "");
+  if (!s) return NaN;
+  const m = s.match(/^([\d.]+)\s*([km])?$/);
+  if (!m) return NaN;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return NaN;
+  if (m[2] === "k") return Math.round(n * 1_000);
+  if (m[2] === "m") return Math.round(n * 1_000_000);
+  return Math.round(n);
+}
+
+// Create the ai_campaigns row that will handle replies for an email campaign.
+// Audience-aware: influencer campaigns get the per-brand creator persona
+// (knowledge-base answers, CTA = campaign page); brand campaigns keep the
+// original sales persona (CTA = calendar link).
+async function createLinkedAiCampaign(teamId, emailCampaign) {
+  const isInfluencer = emailCampaign.audience_type === "influencer";
+  if (isInfluencer) {
+    const persona = { ...DEFAULT_CREATOR_PERSONA };
+    const goal = emailCampaign.brand_name
+      ? `apply to ${emailCampaign.brand_name}'s campaign on Linkable`
+      : "apply to the campaign on Linkable";
+    const goalLink = emailCampaign.campaign_page_url || null;
+    return createAiCampaign({
+      teamId,
+      name: `${emailCampaign.name} — replies`,
+      persona,
+      contextPrompt: buildCreatorContextPrompt({
+        persona,
+        brandName: emailCampaign.brand_name,
+        knowledgeBase: emailCampaign.knowledge_base,
+        goal,
+        goalLink,
+      }),
+      firstMessagePrompt: "(sequencer templates open the thread; replies only)",
+      goal,
+      goalLink,
+      audienceType: "influencer",
+      brandName: emailCampaign.brand_name || null,
+      knowledgeBase: emailCampaign.knowledge_base || null,
+    });
+  }
+  const offering = { ...DEFAULT_OFFERING };
+  const persona = { ...DEFAULT_PERSONA };
+  const goal = "book a 15-min intro call";
+  const goalLink = process.env.LINKABLE_CALENDAR_URL || null;
+  const ctx = emailCampaign.brief
+    ? `${buildContextPrompt({ offering, persona, goal, goalLink })}\n\nCampaign brief:\n${emailCampaign.brief}`
+    : buildContextPrompt({ offering, persona, goal, goalLink });
+  return createAiCampaign({
+    teamId,
+    name: `${emailCampaign.name} — replies`,
+    offering,
+    persona,
+    contextPrompt: ctx,
+    firstMessagePrompt: "(generated per-prospect by buildFirstMessagePrompt)",
+    goal,
+    goalLink,
+  });
 }
 
 export function outboundCampaignsRoutes() {
@@ -116,20 +215,40 @@ export function outboundCampaignsRoutes() {
         sender_from: body.sender_from || (audienceType === "influencer"
           ? "Federico from Linkable <influencer@trylinkable.link>"
           : "Federico from Linkable <brand@linkable.link>"),
+        // Influencer replies MUST land on the Resend-inbound domain so the
+        // webhook fires and the AI agent takes over — trylinkable.link MX is
+        // still Zoho, so an address there would swallow replies silently.
         reply_to: body.reply_to || (audienceType === "influencer"
-          ? "influencer@trylinkable.link"
+          ? "replies@reply.linkable.link"
           : "brand@linkable.link"),
         auto_reply: !!body.auto_reply,
         ai_campaign_id: body.ai_campaign_id || null,
         brief: body.brief || null,
+        brand_name: body.brand_name || null,
+        knowledge_base: body.knowledge_base || null,
+        campaign_page_url: body.campaign_page_url || null,
       };
 
-      const { data: campaign, error } = await supabase
+      const { data: inserted, error } = await supabase
         .from("email_campaigns")
         .insert(insertRow)
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+
+      // Auto-provision the reply agent when auto_reply is on and no explicit
+      // ai_campaigns row was passed — same behavior as the PUT toggle path.
+      let campaign = inserted;
+      if (inserted.auto_reply && !inserted.ai_campaign_id) {
+        const aiCampaign = await createLinkedAiCampaign(teamId, inserted);
+        const { data: linked, error: linkErr } = await supabase
+          .from("email_campaigns")
+          .update({ ai_campaign_id: aiCampaign.id })
+          .eq("team_id", teamId).eq("id", inserted.id)
+          .select("*").single();
+        if (linkErr) throw new Error(linkErr.message);
+        campaign = linked;
+      }
 
       // Seed the audience-appropriate default templates linked to this campaign.
       const templates = await seedDefaultTemplates(teamId, campaign.id, audienceType);
@@ -164,7 +283,7 @@ export function outboundCampaignsRoutes() {
   router.put("/campaigns/:id", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const allowed = ["name", "status", "target_filters", "daily_cap", "sender_from", "reply_to", "auto_reply", "ai_campaign_id", "brief", "config", "sender_pool_tag", "audience_type"];
+      const allowed = ["name", "status", "target_filters", "daily_cap", "sender_from", "reply_to", "auto_reply", "ai_campaign_id", "brief", "config", "sender_pool_tag", "audience_type", "brand_name", "knowledge_base", "campaign_page_url"];
       const patch = {};
       for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
       if (Object.keys(patch).length === 0) {
@@ -177,26 +296,11 @@ export function outboundCampaignsRoutes() {
       // this email campaign so the conversation runner has somewhere to thread.
       if (patch.auto_reply === true && !patch.ai_campaign_id) {
         const { data: current } = await supabase
-          .from("email_campaigns").select("id,name,brief,ai_campaign_id")
+          .from("email_campaigns")
+          .select("id,name,brief,ai_campaign_id,audience_type,brand_name,knowledge_base,campaign_page_url")
           .eq("team_id", teamId).eq("id", req.params.id).maybeSingle();
         if (current && !current.ai_campaign_id) {
-          const offering = { ...DEFAULT_OFFERING };
-          const persona = { ...DEFAULT_PERSONA };
-          const goal = "book a 15-min intro call";
-          const goalLink = process.env.LINKABLE_CALENDAR_URL || null;
-          const ctx = current.brief
-            ? `${buildContextPrompt({ offering, persona, goal, goalLink })}\n\nCampaign brief:\n${current.brief}`
-            : buildContextPrompt({ offering, persona, goal, goalLink });
-          const aiCampaign = await createAiCampaign({
-            teamId,
-            name: `${current.name} — replies`,
-            offering,
-            persona,
-            contextPrompt: ctx,
-            firstMessagePrompt: "(generated per-prospect by buildFirstMessagePrompt)",
-            goal,
-            goalLink,
-          });
+          const aiCampaign = await createLinkedAiCampaign(teamId, { ...current, ...patch });
           patch.ai_campaign_id = aiCampaign.id;
         }
       }
@@ -207,6 +311,27 @@ export function outboundCampaignsRoutes() {
         .eq("team_id", teamId).eq("id", req.params.id)
         .select("*").single();
       if (error) throw new Error(error.message);
+
+      // Mirror the per-brand knowledge fields onto the linked reply agent so
+      // the operator edits one form and the agent picks it up on the next
+      // reply. goal_link doubles as the campaign-page CTA for creators.
+      const kbTouched = ["brand_name", "knowledge_base", "campaign_page_url"].some((k) => k in patch);
+      if (data.ai_campaign_id && kbTouched) {
+        const aiPatch = {};
+        if ("brand_name" in patch) aiPatch.brand_name = patch.brand_name || null;
+        if ("knowledge_base" in patch) aiPatch.knowledge_base = patch.knowledge_base || null;
+        if ("campaign_page_url" in patch && data.audience_type === "influencer") {
+          aiPatch.goal_link = patch.campaign_page_url || null;
+        }
+        if (Object.keys(aiPatch).length) {
+          const { error: aiErr } = await supabase
+            .from("ai_campaigns")
+            .update(aiPatch)
+            .eq("team_id", teamId).eq("id", data.ai_campaign_id);
+          if (aiErr) console.error("ai_campaigns KB sync failed:", aiErr.message);
+        }
+      }
+
       res.json({ campaign: data });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -472,10 +597,12 @@ export function outboundCampaignsRoutes() {
       let query = supabase
         .from("creator_prospects")
         .select(
-          "id,email,first_name,last_name,instagram_username,instagram_name,followers_count,engagement_rate,niche,country,city,creator_score,creator_score_breakdown,emailed,emailed_at,imported_at,last_synced_at",
+          "id,email,first_name,last_name,instagram_username,instagram_name,followers_count,engagement_rate,niche,country,city,creator_score,creator_score_breakdown,emailed,emailed_at,imported_at,last_synced_at,list_tag,source",
           { count: "exact" }
         )
         .eq("team_id", teamId);
+      const listTag = (req.query.listTag || "").toString().trim();
+      if (listTag) query = query.eq("list_tag", listTag);
 
       if (onlyQualified) query = query.not("email", "is", null);
       if (safeQ) {
@@ -542,6 +669,113 @@ export function outboundCampaignsRoutes() {
         log: (s) => lines.push(s),
       });
       res.json({ ...stats, log: lines });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Manual CSV list upload. Body: { csv: "<raw csv text>", list_tag?,
+  // default_niche?, default_country? }. Header row required; recognized
+  // columns (case/space-insensitive): email, first_name/firstname/name,
+  // last_name, instagram/handle/username, followers/followers_count,
+  // engagement/engagement_rate/er, niche/category, country, city.
+  // Rows upsert on (team_id, source='csv', source_id=lower(email)) so
+  // re-uploading a corrected file is safe. Each row is ICP-scored on the
+  // way in; list_tag lets a per-brand campaign target exactly this list
+  // via target_filters.list_tag.
+  router.post("/creators/import", async (req, res) => {
+    try {
+      const teamId = await getDefaultTeamId();
+      const csv = (req.body?.csv || "").toString();
+      if (!csv.trim()) return res.status(400).json({ error: "csv (string) required" });
+      const listTag = (req.body?.list_tag || "").toString().trim() || null;
+      const defaultNiche = (req.body?.default_niche || "").toString().trim() || null;
+      const defaultCountry = (req.body?.default_country || "").toString().trim().toUpperCase() || null;
+
+      const rows = parseCsv(csv);
+      if (rows.length < 2) return res.status(400).json({ error: "csv needs a header row + at least 1 data row" });
+
+      const header = rows[0].map((h) => h.toLowerCase().replace(/[\s-]+/g, "_").trim());
+      const col = (names) => header.findIndex((h) => names.includes(h));
+      const idx = {
+        email: col(["email", "e_mail", "mail"]),
+        firstName: col(["first_name", "firstname", "nome"]),
+        lastName: col(["last_name", "lastname", "cognome"]),
+        name: col(["name", "full_name", "display_name"]),
+        instagram: col(["instagram", "instagram_username", "handle", "username", "ig"]),
+        followers: col(["followers", "followers_count", "follower_count"]),
+        engagement: col(["engagement", "engagement_rate", "er"]),
+        niche: col(["niche", "category", "vertical"]),
+        country: col(["country", "country_code"]),
+        city: col(["city"]),
+      };
+      if (idx.email === -1) return res.status(400).json({ error: `no email column found in header: ${header.join(", ")}` });
+
+      const seen = new Set();
+      const upserts = [];
+      let invalid = 0, dupes = 0;
+      for (const r of rows.slice(1)) {
+        const email = (r[idx.email] || "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { invalid++; continue; }
+        if (seen.has(email)) { dupes++; continue; }
+        seen.add(email);
+
+        let firstName = idx.firstName >= 0 ? (r[idx.firstName] || "").trim() : "";
+        let lastName = idx.lastName >= 0 ? (r[idx.lastName] || "").trim() : "";
+        if (!firstName && idx.name >= 0) {
+          const parts = (r[idx.name] || "").trim().split(/\s+/);
+          firstName = parts[0] || "";
+          lastName = lastName || parts.slice(1).join(" ");
+        }
+
+        const instagram = idx.instagram >= 0
+          ? (r[idx.instagram] || "").trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/\/.*$/, "")
+          : "";
+        const followers = idx.followers >= 0 ? parseCount(r[idx.followers]) : null;
+        let engagement = idx.engagement >= 0 ? parseFloat((r[idx.engagement] || "").replace("%", "")) : NaN;
+        // Accept both fractions (0.03) and percents (3 or "3%").
+        if (Number.isFinite(engagement) && engagement > 1) engagement = engagement / 100;
+
+        const prospect = {
+          team_id: teamId,
+          source: "csv",
+          source_id: email,
+          email,
+          first_name: firstName || null,
+          last_name: lastName || null,
+          instagram_username: instagram || null,
+          followers_count: Number.isFinite(followers) ? followers : null,
+          engagement_rate: Number.isFinite(engagement) ? engagement : null,
+          niche: (idx.niche >= 0 && (r[idx.niche] || "").trim()) || defaultNiche,
+          country: (idx.country >= 0 && (r[idx.country] || "").trim().toUpperCase()) || defaultCountry,
+          city: (idx.city >= 0 && (r[idx.city] || "").trim()) || null,
+          list_tag: listTag,
+          last_synced_at: new Date().toISOString(),
+        };
+        const { score, breakdown } = scoreCreator(prospect);
+        prospect.creator_score = score;
+        prospect.creator_score_breakdown = breakdown;
+        prospect.scored_at = new Date().toISOString();
+        upserts.push(prospect);
+      }
+
+      let imported = 0;
+      for (let i = 0; i < upserts.length; i += 500) {
+        const batch = upserts.slice(i, i + 500);
+        const { error } = await supabase
+          .from("creator_prospects")
+          .upsert(batch, { onConflict: "team_id,source,source_id" });
+        if (error) throw new Error(`upsert batch ${i / 500 + 1}: ${error.message}`);
+        imported += batch.length;
+      }
+
+      const sendable = upserts.filter((p) => p.creator_score >= 6 && p.first_name).length;
+      res.json({
+        total_rows: rows.length - 1,
+        imported,
+        sendable,
+        skipped_invalid_email: invalid,
+        skipped_duplicate_in_file: dupes,
+        list_tag: listTag,
+      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

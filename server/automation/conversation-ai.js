@@ -9,8 +9,10 @@
 import { claudeMessage, cachedSystem, tokenStats } from "../lib/anthropic.js";
 import {
   buildContextPrompt,
+  buildCreatorContextPrompt,
   buildFirstMessagePrompt,
   CONVERSATION_TOOLS,
+  CREATOR_CONVERSATION_TOOLS,
 } from "./conversation-prompts.js";
 
 // ---------- STYLE GUARDS ----------
@@ -111,12 +113,23 @@ function tryParse(s) {
 //   { direction: "in"|"out", body: string }
 // in chronological order. We map to assistant/user roles for the LLM.
 export async function generateReply({ campaign, conversation, history, apiKey }) {
-  const system = buildContextPrompt({
-    offering: campaign.offering,
-    persona: campaign.persona,
-    goal: campaign.goal,
-    goalLink: campaign.goal_link,
-  });
+  // Influencer-audience campaigns run the per-brand creator persona: answers
+  // come from the campaign's knowledge base and the CTA is the campaign page.
+  const isCreatorCampaign = campaign.audience_type === "influencer";
+  const system = isCreatorCampaign
+    ? buildCreatorContextPrompt({
+        persona: campaign.persona,
+        brandName: campaign.brand_name,
+        knowledgeBase: campaign.knowledge_base,
+        goal: campaign.goal,
+        goalLink: campaign.goal_link,
+      })
+    : buildContextPrompt({
+        offering: campaign.offering,
+        persona: campaign.persona,
+        goal: campaign.goal,
+        goalLink: campaign.goal_link,
+      });
 
   const messages = history.map((m) => ({
     role: m.direction === "out" ? "assistant" : "user",
@@ -149,7 +162,7 @@ Status: ${conversation.status}. Qualification score so far: ${conversation.quali
     model: campaign.reply_model || "claude-sonnet-4-6",
     system: cachedSystem(system),
     messages,
-    tools: CONVERSATION_TOOLS,
+    tools: isCreatorCampaign ? CREATOR_CONVERSATION_TOOLS : CONVERSATION_TOOLS,
     maxTokens: 600,
     temperature: 0.7,
     apiKey,

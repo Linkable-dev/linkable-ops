@@ -77,7 +77,11 @@ function scoreEmail(email) {
 // reply rates per source later.
 export function scoreCreator(p) {
   const source = p.source || (p.raw_data && p.raw_data.provider) || null;
-  const isBioMined = source === "bio_mining";
+  // CSV uploads often carry only email + name + handle. When follower data
+  // is missing the standard formula can never clear MIN_SEND_SCORE, so those
+  // rows score on the completeness path like bio-mined creators do.
+  const isBioMined = source === "bio_mining" ||
+    (source === "csv" && !Number.isFinite(Number(p.followers_count)));
 
   if (isBioMined) {
     return scoreBioMinedCreator(p);
