@@ -25,7 +25,8 @@ const COLUMNS = [
   { key: "expand",            width: 28, resizable: false },
   { key: "campaign_name",     width: 260 },
   { key: "brand_name",        width: 160 },
-  { key: "creators_applied",  width: 85 },
+  { key: "creators_invited",  width: 100 },
+  { key: "creators_applied",  width: 100 },
   { key: "creators_accepted", width: 90 },
   { key: "samples_accepted",  width: 100 },
   { key: "products_shipped",  width: 85 },
@@ -122,7 +123,7 @@ export default function CampaignsOpsPage() {
     } else if (filter === "no-sales") {
       list = list.filter((c) => c.products_shipped > 0 && c.sales === 0);
     } else if (filter === "no-applications") {
-      list = list.filter((c) => Number(c.creators_applied) === 0);
+      list = list.filter((c) => Number(c.creators_applied) + Number(c.externals_applied || 0) === 0);
     }
     return list;
   }, [campaigns, filter]);
@@ -187,6 +188,7 @@ export default function CampaignsOpsPage() {
                 <Th theme={theme}></Th>
                 <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "campaign_name", startResize, resetWidth }}>Campaign</Th>
                 <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "brand_name", startResize, resetWidth }}>Brand</Th>
+                <Th theme={theme} num sortKey="creators_invited"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_invited", startResize, resetWidth }}>Invited</Th>
                 <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_applied", startResize, resetWidth }}>Applied</Th>
                 <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_accepted", startResize, resetWidth }}>Accepted</Th>
                 <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "samples_accepted", startResize, resetWidth }}>Sample acc.</Th>
@@ -214,13 +216,13 @@ export default function CampaignsOpsPage() {
                     onCommit={(v) => handleFilter("brand_name", v)}
                   />
                 </td>
-                <td colSpan={7} />
+                <td colSpan={8} />
               </tr>
             </thead>
             <tbody>
-              {loading && <SkeletonTableRows rows={8} cols={10} theme={theme} />}
+              {loading && <SkeletonTableRows rows={8} cols={11} theme={theme} />}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={10} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No campaigns match.</td></tr>
+                <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No campaigns match.</td></tr>
               )}
               {filtered.map((c) => {
                 const isOpen = expandedId === c.id;
@@ -245,7 +247,8 @@ export default function CampaignsOpsPage() {
                       </Td>
                       <Td theme={theme} style={{ fontWeight: 500, color: theme.text }}>{c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>}</Td>
                       <Td theme={theme}>{c.brand_name || "—"}</Td>
-                      <Td theme={theme} num>{friendlyNumber(c.creators_applied)}</Td>
+                      <Td theme={theme} num><CountWithExt theme={theme} value={c.creators_invited} ext={c.externals_invited} /></Td>
+                      <Td theme={theme} num><CountWithExt theme={theme} value={c.creators_applied} ext={c.externals_applied} /></Td>
                       <Td theme={theme} num>{friendlyNumber(c.creators_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.samples_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.products_shipped)}</Td>
@@ -257,7 +260,7 @@ export default function CampaignsOpsPage() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={10} style={{ padding: 0, background: mode === "dark" ? "#0d0d0d" : "#FAFAFA", borderTop: `1px solid ${theme.border}` }}>
+                        <td colSpan={11} style={{ padding: 0, background: mode === "dark" ? "#0d0d0d" : "#FAFAFA", borderTop: `1px solid ${theme.border}` }}>
                           <CreatorTable
                             theme={theme}
                             mode={mode}
@@ -314,9 +317,21 @@ function CampaignRows({ children }) {
   return <>{children}</>;
 }
 
+// Platform count with a muted "+N ext" suffix for external (email-invited,
+// not-yet-Linkable) creators, shown only when there are any.
+function CountWithExt({ theme, value, ext }) {
+  const e = Number(ext || 0);
+  return (
+    <>
+      {friendlyNumber(value)}
+      {e > 0 && <span style={{ color: theme.textMuted, fontSize: 11, marginLeft: 4 }}>+{friendlyNumber(e)} ext</span>}
+    </>
+  );
+}
+
 function computeBottleneck(c) {
-  const invited = Number(c.creators_invited || 0);
-  const applied = Number(c.creators_applied || 0);
+  const invited = Number(c.creators_invited || 0) + Number(c.externals_invited || 0);
+  const applied = Number(c.creators_applied || 0) + Number(c.externals_applied || 0);
   const accepted = Number(c.creators_accepted || 0);
   const samplesAccepted = Number(c.samples_accepted || 0);
   const shipped = Number(c.products_shipped || 0);
@@ -376,6 +391,7 @@ function CreatorTable({ theme, mode, creators, loading }) {
         <thead>
           <tr style={{ color: theme.textMuted, textAlign: "left" }}>
             <Th theme={theme} sub>Creator</Th>
+            <Th theme={theme} sub>Source</Th>
             <Th theme={theme} sub>Status</Th>
             <Th theme={theme} sub>Sample status</Th>
             <Th theme={theme} sub num>Clicks</Th>
@@ -391,10 +407,11 @@ function CreatorTable({ theme, mode, creators, loading }) {
                   <span style={{ marginLeft: 6, color: theme.textMuted, fontWeight: 400 }}>@{cr.instagram_username}</span>
                 )}
               </Td>
+              <Td theme={theme}><SourceBadge theme={theme} source={cr.source} /></Td>
               <Td theme={theme}><StatusPill theme={theme} mode={mode} status={cr.status} /></Td>
-              <Td theme={theme}><SampleStatus theme={theme} v={cr.sample_request_status} /></Td>
-              <Td theme={theme} num>{friendlyNumber(cr.clicks)}</Td>
-              <Td theme={theme} num style={{ fontWeight: cr.sales > 0 ? 600 : 400, color: cr.sales > 0 ? theme.text : theme.textMuted }}>{friendlyNumber(cr.sales)}</Td>
+              <Td theme={theme}>{cr.source === "external" ? <span style={{ color: theme.textMuted }}>—</span> : <SampleStatus theme={theme} v={cr.sample_request_status} />}</Td>
+              <Td theme={theme} num>{cr.source === "external" ? <span style={{ color: theme.textMuted }}>—</span> : friendlyNumber(cr.clicks)}</Td>
+              <Td theme={theme} num style={{ fontWeight: cr.sales > 0 ? 600 : 400, color: cr.sales > 0 ? theme.text : theme.textMuted }}>{cr.source === "external" ? "—" : friendlyNumber(cr.sales)}</Td>
             </tr>
           ))}
         </tbody>
@@ -405,12 +422,16 @@ function CreatorTable({ theme, mode, creators, loading }) {
 
 function StageFunnel({ theme, mode, creators }) {
   const counts = STAGES.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
+  // Entry counts for external (email-invited, not-yet-Linkable) creators are
+  // tracked separately; the linear stages from Accepted on count everyone.
+  const ext = { Invited: 0, Applied: 0 };
   for (const c of creators) {
     // Invited (brand-initiated) and Applied (creator-initiated) are parallel sources;
     // a creator is in exactly one. Both converge at Accepted, which the linear funnel
     // continues from.
-    if (c.status === "Invited") counts.Invited += 1;
-    else counts.Applied += 1;
+    const entry = c.source === "external" ? ext : counts;
+    if (c.status === "Invited") entry.Invited += 1;
+    else entry.Applied += 1;
     if (["Accepted", "Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts.Accepted += 1;
     if (["Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts["Sample Accepted"] += 1;
     if (["Shipped", "Sold"].includes(c.status)) counts.Shipped += 1;
@@ -430,8 +451,14 @@ function StageFunnel({ theme, mode, creators }) {
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-        <span style={pillStyle("Invited")}>Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span></span>
-        <span style={pillStyle("Applied")}>Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span></span>
+        <span style={pillStyle("Invited")}>
+          Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span>
+          {ext.Invited > 0 && <span style={{ opacity: 0.65 }}>+{ext.Invited} ext</span>}
+        </span>
+        <span style={pillStyle("Applied")}>
+          Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span>
+          {ext.Applied > 0 && <span style={{ opacity: 0.65 }}>+{ext.Applied} ext</span>}
+        </span>
       </div>
       <EntryMergeConnector color={theme.textMuted} />
 
@@ -467,6 +494,19 @@ function StatusPill({ theme, mode, status }) {
       background: mode === "dark" ? c.bgDark : c.bg,
       color: mode === "dark" ? c.fgDark : c.fg,
     }}>{status}</span>
+  );
+}
+
+function SourceBadge({ theme, source }) {
+  const isExt = source === "external";
+  return (
+    <span style={{
+      display: "inline-block", padding: "2px 8px", borderRadius: 10,
+      fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4,
+      border: `1px solid ${theme.border}`,
+      color: isExt ? theme.textMuted : theme.textMid,
+      background: isExt ? "transparent" : theme.accentLight,
+    }}>{isExt ? "External" : "Platform"}</span>
   );
 }
 

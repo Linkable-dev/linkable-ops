@@ -115,6 +115,17 @@ export function opsRoutes() {
           WHERE l.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "l.deleted")}
           GROUP BY l.product_id
         ),
+        ext_agg AS (
+          -- External creators (not yet Linkable users) invited to the campaign by
+          -- email. Same status enum family as links: pending_brand = invited; once
+          -- the creator responds the row moves off pending_brand and counts as applied.
+          SELECT ecl.product_id,
+                 COUNT(*) FILTER (WHERE ecl.status = $5)                    AS externals_invited,
+                 COUNT(*) FILTER (WHERE ecl.status IS DISTINCT FROM $5)     AS externals_applied
+          FROM external_creator_links ecl
+          WHERE ecl.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "ecl.deleted")}
+          GROUP BY ecl.product_id
+        ),
         sample_agg AS (
           -- Counts are cumulative funnel stages: a sample that has shipped has also
           -- passed the "accepted" stage, so 'shipped' counts toward samples_accepted too.
@@ -143,6 +154,8 @@ export function opsRoutes() {
             p.created,
             COALESCE(la.creators_invited, 0)::int  AS creators_invited,
             COALESCE(la.creators_applied, 0)::int  AS creators_applied,
+            COALESCE(ea.externals_invited, 0)::int AS externals_invited,
+            COALESCE(ea.externals_applied, 0)::int AS externals_applied,
             COALESCE(la.creators_accepted, 0)::int AS creators_accepted,
             COALESCE(sm.samples_accepted, 0)::int  AS samples_accepted,
             COALESCE(sm.products_shipped, 0)::int  AS products_shipped,
@@ -155,15 +168,16 @@ export function opsRoutes() {
               WHEN COALESCE(sm.samples_accepted, 0) > 0
                    AND COALESCE(sm.products_shipped, 0) < COALESCE(sm.samples_accepted, 0) THEN 3 -- danger: shipping
               WHEN COALESCE(sm.products_shipped, 0) < COALESCE(la.creators_accepted, 0) THEN 3    -- danger: shipping
-              WHEN COALESCE(la.creators_applied, 0) = 0
-                   AND COALESCE(la.creators_invited, 0) = 0 THEN 2                                -- warn: no outreach
-              WHEN COALESCE(la.creators_applied, 0) = 0 THEN 1                                    -- info: awaiting invite responses
+              WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0
+                   AND COALESCE(la.creators_invited, 0) + COALESCE(ea.externals_invited, 0) = 0 THEN 2 -- warn: no outreach
+              WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0 THEN 1     -- info: awaiting invite responses
               WHEN COALESCE(la.creators_accepted, 0) = 0 THEN 2                                   -- warn: no accepts
               WHEN COALESCE(sa.sales, 0) = 0 THEN 1                                               -- info: no sales
               ELSE 0                                                                              -- healthy
             END AS bottleneck_severity
           FROM base p
           LEFT JOIN link_agg la    ON la.product_id = p.id
+          LEFT JOIN ext_agg ea     ON ea.product_id = p.id
           LEFT JOIN sample_agg sm  ON sm.product_id = p.id
           LEFT JOIN sales_agg sa   ON sa.product_id = p.id
         )
@@ -209,6 +223,22 @@ export function opsRoutes() {
         ORDER BY l.created DESC NULLS LAST
       `, [id]);
 
+      // External creators (not yet Linkable users) invited to this campaign by
+      // email. They live in external_creator_links, which the links query above
+      // can't see; without this they'd be invisible in the ops view.
+      const { rows: extRows } = await cloudSqlQuery(`
+        SELECT
+          ecl.id                                                                                    AS link_id,
+          ecl.status                                                                                AS link_status,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ec.first_name, ec.last_name)), ''),
+                   ec.username, ec.instagram_username, 'Unknown creator')                           AS creator_name,
+          ec.instagram_username                                                                     AS instagram_username
+        FROM external_creator_links ecl
+        LEFT JOIN external_creators ec ON ec.id = ecl.external_creator_id
+        WHERE ecl.product_id = $1 AND ${ND.replace(/deleted/g, "ecl.deleted")}
+        ORDER BY ecl.created DESC NULLS LAST
+      `, [id]);
+
       const result = rows.map((r) => {
         const srStatus = r.sample_request_status; // 'pending' | 'accepted' | 'shipped' | other | null
         let status = "Applied";
@@ -220,12 +250,31 @@ export function opsRoutes() {
         return {
           ...r,
           status,
+          source: "platform",
           // Kept for any consumer still reading the booleans:
           sample_requested: srStatus != null,
           sample_shipped: srStatus === "shipped",
         };
       });
-      res.json(result);
+
+      const extResult = extRows.map((r) => {
+        let status = "Applied";
+        if (r.link_status === LINK_ACCEPTED) status = "Accepted";
+        else if (r.link_status === LINK_INVITED) status = "Invited";
+        return {
+          ...r,
+          status,
+          source: "external",
+          clicks: 0,
+          sales: 0,
+          revenue: 0,
+          sample_request_status: null,
+          sample_requested: false,
+          sample_shipped: false,
+        };
+      });
+
+      res.json([...result, ...extResult]);
     } catch (e) {
       console.error("[ops/creators]", e);
       res.status(500).json({ error: e.message });
