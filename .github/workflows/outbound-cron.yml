@@ -1,0 +1,31 @@
+# Poller for time-sensitive outbound crons that don't fit in Vercel Hobby's
+# 2-cron limit (auto-discover + run-daily-outbound already use both slots).
+#
+#   run-due    — sends AI conversation replies scheduled with 2-15 min jitter;
+#                without a frequent poller they'd sit until the next daily cron.
+#   follow-ups — daily nudge pass over stale AI conversations.
+#
+# GitHub Actions schedule granularity is ~5 min best-effort, which is fine:
+# reply jitter is 2-15 min by design, so worst case a reply lands a few
+# minutes late and still reads human.
+name: outbound-cron
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"    # drain due AI replies
+    - cron: "30 9 * * 1-5"   # weekday follow-ups pass
+  workflow_dispatch: {}
+
+jobs:
+  cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drain due AI replies
+        run: |
+          curl -sf --max-time 55 \
+            "https://linkable-ops.vercel.app/api/cron/run-due?secret=${{ secrets.CRON_SECRET }}"
+      - name: Follow-ups (weekday morning schedule only)
+        if: github.event.schedule == '30 9 * * 1-5'
+        run: |
+          curl -sf --max-time 55 \
+            "https://linkable-ops.vercel.app/api/cron/follow-ups?secret=${{ secrets.CRON_SECRET }}"
