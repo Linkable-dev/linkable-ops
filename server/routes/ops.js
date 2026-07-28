@@ -101,16 +101,34 @@ export function opsRoutes() {
             AND p.status = ${PRODUCT_ACTIVE}
             AND ($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)${baseFilterSql}
         ),
+        link_best AS (
+          -- One row per creator per product. A creator can hold several links on the
+          -- same campaign (re-invites, apply-after-invite); counting rows would
+          -- overstate the funnel and disagree with the drill-down. Keep the most
+          -- advanced link (accepted > applied/other > invited), latest as tiebreak.
+          SELECT DISTINCT ON (l.product_id, COALESCE(l.influencer_user_id::text, l.id::text))
+                 l.product_id, l.status
+          FROM links l
+          WHERE l.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "l.deleted")}
+          ORDER BY l.product_id, COALESCE(l.influencer_user_id::text, l.id::text),
+                   CASE l.status WHEN $2 THEN 0 WHEN $5 THEN 2 ELSE 1 END,
+                   l.created DESC NULLS LAST
+        ),
         link_agg AS (
           -- "Invited" = brand reached out, creator hasn't responded yet (link.status = pending_brand = 1).
           -- "Applied" = creator-initiated or further along (anything except pending_brand). Once an
           -- invited creator responds, status moves off pending_brand and they count as Applied.
-          SELECT l.product_id,
-                 COUNT(DISTINCT l.influencer_user_id) FILTER (WHERE l.status = $5)           AS creators_invited,
-                 COUNT(DISTINCT COALESCE(l.influencer_user_id::text, l.id::text))
-                   FILTER (WHERE l.status IS DISTINCT FROM $5)                               AS creators_applied,
-                 COUNT(DISTINCT l.influencer_user_id) FILTER (WHERE l.status = $2)           AS creators_accepted,
-                 COALESCE(SUM(l.clicks_counter), 0)                                          AS clicks
+          SELECT lb.product_id,
+                 COUNT(*) FILTER (WHERE lb.status = $5)                  AS creators_invited,
+                 COUNT(*) FILTER (WHERE lb.status IS DISTINCT FROM $5)   AS creators_applied,
+                 COUNT(*) FILTER (WHERE lb.status = $2)                  AS creators_accepted
+          FROM link_best lb
+          GROUP BY lb.product_id
+        ),
+        clicks_agg AS (
+          -- Clicks sum over ALL links (not the deduped set): every link a creator
+          -- holds tracks real traffic.
+          SELECT l.product_id, COALESCE(SUM(l.clicks_counter), 0) AS clicks
           FROM links l
           WHERE l.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "l.deleted")}
           GROUP BY l.product_id
@@ -121,7 +139,8 @@ export function opsRoutes() {
           -- the creator responds the row moves off pending_brand and counts as applied.
           SELECT ecl.product_id,
                  COUNT(*) FILTER (WHERE ecl.status = $5)                    AS externals_invited,
-                 COUNT(*) FILTER (WHERE ecl.status IS DISTINCT FROM $5)     AS externals_applied
+                 COUNT(*) FILTER (WHERE ecl.status IS DISTINCT FROM $5)     AS externals_applied,
+                 COUNT(*) FILTER (WHERE ecl.status = $2)                    AS externals_accepted
           FROM external_creator_links ecl
           WHERE ecl.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "ecl.deleted")}
           GROUP BY ecl.product_id
@@ -152,14 +171,14 @@ export function opsRoutes() {
             p.brand_name,
             p.product_status,
             p.created,
-            COALESCE(la.creators_invited, 0)::int  AS creators_invited,
-            COALESCE(la.creators_applied, 0)::int  AS creators_applied,
-            COALESCE(ea.externals_invited, 0)::int AS externals_invited,
-            COALESCE(ea.externals_applied, 0)::int AS externals_applied,
-            COALESCE(la.creators_accepted, 0)::int AS creators_accepted,
+            -- Platform + external combined: one number per funnel stage. The
+            -- platform/external split lives in the drill-down (Source column).
+            (COALESCE(la.creators_invited, 0)  + COALESCE(ea.externals_invited, 0))::int  AS creators_invited,
+            (COALESCE(la.creators_applied, 0)  + COALESCE(ea.externals_applied, 0))::int  AS creators_applied,
+            (COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0))::int AS creators_accepted,
             COALESCE(sm.samples_accepted, 0)::int  AS samples_accepted,
             COALESCE(sm.products_shipped, 0)::int  AS products_shipped,
-            COALESCE(la.clicks, 0)::int            AS clicks,
+            COALESCE(ca.clicks, 0)::int            AS clicks,
             COALESCE(sa.sales, 0)::int             AS sales,
             COALESCE(sa.revenue, 0)                AS revenue,
             -- Bottleneck severity: mirrors computeBottleneck() on the client.
@@ -167,16 +186,18 @@ export function opsRoutes() {
             CASE
               WHEN COALESCE(sm.samples_accepted, 0) > 0
                    AND COALESCE(sm.products_shipped, 0) < COALESCE(sm.samples_accepted, 0) THEN 3 -- danger: shipping
-              WHEN COALESCE(sm.products_shipped, 0) < COALESCE(la.creators_accepted, 0) THEN 3    -- danger: shipping
+              WHEN COALESCE(sm.products_shipped, 0)
+                   < COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0) THEN 3 -- danger: shipping
               WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0
                    AND COALESCE(la.creators_invited, 0) + COALESCE(ea.externals_invited, 0) = 0 THEN 2 -- warn: no outreach
               WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0 THEN 1     -- info: awaiting invite responses
-              WHEN COALESCE(la.creators_accepted, 0) = 0 THEN 2                                   -- warn: no accepts
+              WHEN COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0) = 0 THEN 2   -- warn: no accepts
               WHEN COALESCE(sa.sales, 0) = 0 THEN 1                                               -- info: no sales
               ELSE 0                                                                              -- healthy
             END AS bottleneck_severity
           FROM base p
           LEFT JOIN link_agg la    ON la.product_id = p.id
+          LEFT JOIN clicks_agg ca  ON ca.product_id = p.id
           LEFT JOIN ext_agg ea     ON ea.product_id = p.id
           LEFT JOIN sample_agg sm  ON sm.product_id = p.id
           LEFT JOIN sales_agg sa   ON sa.product_id = p.id
@@ -198,29 +219,47 @@ export function opsRoutes() {
   router.get("/campaigns/:id/creators", async (req, res) => {
     try {
       const { id } = req.params;
+      // One row per creator, not per link: creators can hold several links on the
+      // same campaign (re-invites, apply-after-invite). We show the most advanced
+      // link's status and aggregate clicks/sales/sample state across all their
+      // links, so the funnel here matches the campaign-level aggregates exactly.
       const { rows } = await cloudSqlQuery(`
+        WITH nd AS (
+          SELECT l.*, COALESCE(l.influencer_user_id::text, l.id::text) AS creator_key
+          FROM links l
+          WHERE l.product_id = $1 AND ${ND.replace(/deleted/g, "l.deleted")}
+        ),
+        best AS (
+          SELECT DISTINCT ON (creator_key) *
+          FROM nd
+          ORDER BY creator_key,
+                   CASE status WHEN ${LINK_ACCEPTED} THEN 0 WHEN ${LINK_INVITED} THEN 2 ELSE 1 END,
+                   created DESC NULLS LAST
+        )
         SELECT
-          l.id                                                                                               AS link_id,
-          l.influencer_user_id,
-          l.status                                                                                            AS link_status,
-          COALESCE(l.clicks_counter, 0)                                                                       AS clicks,
+          b.id                                                                                               AS link_id,
+          b.influencer_user_id,
+          b.status                                                                                            AS link_status,
+          (SELECT COALESCE(SUM(l2.clicks_counter), 0) FROM nd l2 WHERE l2.creator_key = b.creator_key)        AS clicks,
           COALESCE(NULLIF(TRIM(CONCAT_WS(' ', i.first_name, i.last_name)), ''),
                    i.instagram_username, i.username, 'Unknown creator')                                       AS creator_name,
           i.instagram_username                                                                                AS instagram_username,
           sr_latest.status                                                                                    AS sample_request_status,
-          (SELECT COUNT(*) FROM orders o WHERE o.link_id = l.id AND ${ND.replace(/deleted/g, "o.deleted")})                        AS sales,
-          (SELECT COALESCE(SUM(o.shopify_amount), 0) FROM orders o WHERE o.link_id = l.id AND ${ND.replace(/deleted/g, "o.deleted")}) AS revenue
-        FROM links l
-        LEFT JOIN influencers i ON i.user_id = l.influencer_user_id
+          (SELECT COUNT(*) FROM orders o JOIN nd l2 ON l2.id = o.link_id
+            WHERE l2.creator_key = b.creator_key AND ${ND.replace(/deleted/g, "o.deleted")})                  AS sales,
+          (SELECT COALESCE(SUM(o.shopify_amount), 0) FROM orders o JOIN nd l2 ON l2.id = o.link_id
+            WHERE l2.creator_key = b.creator_key AND ${ND.replace(/deleted/g, "o.deleted")})                  AS revenue
+        FROM best b
+        LEFT JOIN influencers i ON i.user_id = b.influencer_user_id
         LEFT JOIN LATERAL (
           SELECT sr.status
           FROM sample_requests sr
-          WHERE sr.link_id = l.id AND ${ND.replace(/deleted/g, "sr.deleted")}
+          JOIN nd l2 ON l2.id = sr.link_id
+          WHERE l2.creator_key = b.creator_key AND ${ND.replace(/deleted/g, "sr.deleted")}
           ORDER BY sr.created DESC NULLS LAST
           LIMIT 1
         ) sr_latest ON true
-        WHERE l.product_id = $1 AND ${ND.replace(/deleted/g, "l.deleted")}
-        ORDER BY l.created DESC NULLS LAST
+        ORDER BY b.created DESC NULLS LAST
       `, [id]);
 
       // External creators (not yet Linkable users) invited to this campaign by

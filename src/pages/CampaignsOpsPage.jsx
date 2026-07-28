@@ -123,7 +123,7 @@ export default function CampaignsOpsPage() {
     } else if (filter === "no-sales") {
       list = list.filter((c) => c.products_shipped > 0 && c.sales === 0);
     } else if (filter === "no-applications") {
-      list = list.filter((c) => Number(c.creators_applied) + Number(c.externals_applied || 0) === 0);
+      list = list.filter((c) => Number(c.creators_applied) === 0);
     }
     return list;
   }, [campaigns, filter]);
@@ -247,8 +247,8 @@ export default function CampaignsOpsPage() {
                       </Td>
                       <Td theme={theme} style={{ fontWeight: 500, color: theme.text }}>{c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>}</Td>
                       <Td theme={theme}>{c.brand_name || "—"}</Td>
-                      <Td theme={theme} num><CountWithExt theme={theme} value={c.creators_invited} ext={c.externals_invited} /></Td>
-                      <Td theme={theme} num><CountWithExt theme={theme} value={c.creators_applied} ext={c.externals_applied} /></Td>
+                      <Td theme={theme} num>{friendlyNumber(c.creators_invited)}</Td>
+                      <Td theme={theme} num>{friendlyNumber(c.creators_applied)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.creators_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.samples_accepted)}</Td>
                       <Td theme={theme} num>{friendlyNumber(c.products_shipped)}</Td>
@@ -317,21 +317,9 @@ function CampaignRows({ children }) {
   return <>{children}</>;
 }
 
-// Platform count with a muted "+N ext" suffix for external (email-invited,
-// not-yet-Linkable) creators, shown only when there are any.
-function CountWithExt({ theme, value, ext }) {
-  const e = Number(ext || 0);
-  return (
-    <>
-      {friendlyNumber(value)}
-      {e > 0 && <span style={{ color: theme.textMuted, fontSize: 11, marginLeft: 4 }}>+{friendlyNumber(e)} ext</span>}
-    </>
-  );
-}
-
 function computeBottleneck(c) {
-  const invited = Number(c.creators_invited || 0) + Number(c.externals_invited || 0);
-  const applied = Number(c.creators_applied || 0) + Number(c.externals_applied || 0);
+  const invited = Number(c.creators_invited || 0);
+  const applied = Number(c.creators_applied || 0);
   const accepted = Number(c.creators_accepted || 0);
   const samplesAccepted = Number(c.samples_accepted || 0);
   const shipped = Number(c.products_shipped || 0);
@@ -422,21 +410,28 @@ function CreatorTable({ theme, mode, creators, loading }) {
 
 function StageFunnel({ theme, mode, creators }) {
   const counts = STAGES.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
-  // Entry counts for external (email-invited, not-yet-Linkable) creators are
-  // tracked separately; the linear stages from Accepted on count everyone.
+  // External (email-invited, not-yet-Linkable) creators count in every stage like
+  // everyone else; we track their share separately just for the footnote.
   const ext = { Invited: 0, Applied: 0 };
   for (const c of creators) {
     // Invited (brand-initiated) and Applied (creator-initiated) are parallel sources;
     // a creator is in exactly one. Both converge at Accepted, which the linear funnel
     // continues from.
-    const entry = c.source === "external" ? ext : counts;
-    if (c.status === "Invited") entry.Invited += 1;
-    else entry.Applied += 1;
+    if (c.status === "Invited") counts.Invited += 1;
+    else counts.Applied += 1;
+    if (c.source === "external") {
+      if (c.status === "Invited") ext.Invited += 1;
+      else ext.Applied += 1;
+    }
     if (["Accepted", "Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts.Accepted += 1;
     if (["Sample Accepted", "Shipped", "Sold"].includes(c.status)) counts["Sample Accepted"] += 1;
     if (["Shipped", "Sold"].includes(c.status)) counts.Shipped += 1;
     if (c.status === "Sold") counts.Sold += 1;
   }
+  const extParts = [
+    ext.Invited > 0 && `${ext.Invited} invited`,
+    ext.Applied > 0 && `${ext.Applied} applied`,
+  ].filter(Boolean);
 
   const linearStages = ["Accepted", "Sample Accepted", "Shipped", "Sold"];
   const pillStyle = (s) => ({
@@ -449,25 +444,26 @@ function StageFunnel({ theme, mode, creators }) {
   });
 
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-        <span style={pillStyle("Invited")}>
-          Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span>
-          {ext.Invited > 0 && <span style={{ opacity: 0.65 }}>+{ext.Invited} ext</span>}
-        </span>
-        <span style={pillStyle("Applied")}>
-          Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span>
-          {ext.Applied > 0 && <span style={{ opacity: 0.65 }}>+{ext.Applied} ext</span>}
-        </span>
-      </div>
-      <EntryMergeConnector color={theme.textMuted} />
-
-      {linearStages.map((s, i) => (
-        <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={pillStyle(s)}>{s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span></span>
-          {i < linearStages.length - 1 && <span style={{ color: theme.textMuted }}>→</span>}
+    <div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+          <span style={pillStyle("Invited")}>Invited <span style={{ opacity: 0.8 }}>· {counts.Invited}</span></span>
+          <span style={pillStyle("Applied")}>Applied <span style={{ opacity: 0.8 }}>· {counts.Applied}</span></span>
         </div>
-      ))}
+        <EntryMergeConnector color={theme.textMuted} />
+
+        {linearStages.map((s, i) => (
+          <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={pillStyle(s)}>{s} <span style={{ opacity: 0.8 }}>· {counts[s]}</span></span>
+            {i < linearStages.length - 1 && <span style={{ color: theme.textMuted }}>→</span>}
+          </div>
+        ))}
+      </div>
+      {extParts.length > 0 && (
+        <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6 }}>
+          Includes external creators (invited by email, not yet on Linkable): {extParts.join(" · ")}
+        </div>
+      )}
     </div>
   );
 }
