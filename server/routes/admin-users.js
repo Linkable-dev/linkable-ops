@@ -1,5 +1,5 @@
 import express from "express";
-import { cloudSqlQuery, currentDbTarget } from "../lib/cloudsql.js";
+import { cloudSqlQuery, currentDbTarget, getCloudSqlPool } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
 import {
   parseColumnFilters, orderBySql, filterConditions,
@@ -99,7 +99,92 @@ export function adminUsersRoutes() {
     }
   });
 
+  // DEV-ONLY: hard-wipe a brand and all its data so the account can re-onboard
+  // from scratch. Refuses on prod — this is a test-data reset, not a
+  // production tool. Guarded again server-side so a forged x-db-target=prod
+  // can't reach it.
+  router.post("/:userId/wipe", async (req, res) => {
+    try {
+      const out = await wipeBrand(req.params.userId, req.admin, req.dbTarget || "prod");
+      res.json(out);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   return router;
+}
+
+// DEV-ONLY hard delete of a brand + everything hanging off it, in one
+// transaction (children before parents, so a partial delete can never commit).
+// Order is FK-safe; each step's row count is returned for the operator.
+async function wipeBrand(userId, admin, dbTarget) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  if (dbTarget !== "dev") {
+    const e = new Error("Brand wipe is only allowed on the dev database"); e.status = 403; throw e;
+  }
+
+  const pool = await getCloudSqlPool("dev");
+  const client = await pool.connect();
+  try {
+    const { rows: found } = await client.query(
+      `SELECT b.id AS brand_id, b.store_name, u.email
+         FROM users u LEFT JOIN brands b ON b.user_id = u.id
+        WHERE u.id = $1`,
+      [userId],
+    );
+    if (!found.length) {
+      const e = new Error("User not found on the dev database"); e.status = 404; throw e;
+    }
+    const { brand_id: brandId, store_name: storeName, email } = found[0];
+
+    // Product-children first, then brand-side rows referencing the user, then
+    // products, brand and user. `products WHERE user_id` subquery resolves for
+    // every product step because products themselves are deleted only at #18.
+    const steps = [
+      ["campaign_matches", "DELETE FROM campaign_matches WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["product_variants", "DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["product_files", "DELETE FROM product_files WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["sample_requests", "DELETE FROM sample_requests WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["invitations", "DELETE FROM invitations WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["short_links", "DELETE FROM short_links WHERE created_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["links", "DELETE FROM links WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["chats", "DELETE FROM chats WHERE brand_user_id = $1"],
+      ["external_creator_invites", "DELETE FROM external_creator_invites WHERE brand_user_id = $1"],
+      ["external_creator_links", "DELETE FROM external_creator_links WHERE brand_user_id = $1"],
+      ["external_creator_chats", "DELETE FROM external_creator_chats WHERE brand_user_id = $1"],
+      ["payouts", "DELETE FROM payouts WHERE brand_id = $1"],
+      ["payout_settings", "DELETE FROM payout_settings WHERE brand_id = $1"],
+      ["brand_fee_rates", "DELETE FROM brand_fee_rates WHERE brand_id = $1"],
+      ["brand_email_notifications", "DELETE FROM brand_email_notifications WHERE brand_user_id = $1"],
+      ["brand_referrals", "DELETE FROM brand_referrals WHERE referrer_user_id = $1 OR referee_user_id = $1"],
+      ["referrals", "DELETE FROM referrals WHERE referrer_user_id = $1 OR referee_user_id = $1"],
+      ["products", "DELETE FROM products WHERE user_id = $1"],
+      ["brands", "DELETE FROM brands WHERE user_id = $1"],
+      ["users", "DELETE FROM users WHERE id = $1"],
+    ];
+
+    await client.query("BEGIN");
+    const deleted = {};
+    for (const [label, sql] of steps) {
+      const r = await client.query(sql, [userId]);
+      deleted[label] = r.rowCount;
+    }
+    await client.query("COMMIT");
+
+    console.log(
+      `[brand-wipe] admin=${admin?.email || "?"} dev user=${userId} brand=${brandId || "-"} ` +
+      `store=${JSON.stringify(storeName)} deleted=${JSON.stringify(deleted)}`,
+    );
+    return { user_id: userId, brand_id: brandId, store_name: storeName, email, target_db: "dev", deleted };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function setStartupProgramme(userId, body) {

@@ -322,6 +322,7 @@ export default function UsersPage() {
         isDev={isDev}
         onClose={() => setManageRow(null)}
         onStartupChanged={handleStartupChanged}
+        onWiped={fetchRows}
         onGrantTrial={(row) => { setManageRow(null); setTrialModalRow(row); }}
       />
 

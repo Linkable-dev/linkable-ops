@@ -185,6 +185,10 @@ export const api = {
     request(`/admin-users/${userId}/grant-trial`, { method: "POST", body: JSON.stringify(body) }),
   setStartupProgramme: (userId, enabled) =>
     request(`/admin-users/${userId}/startup-programme`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  // DEV-ONLY hard wipe of a brand + all its data. Server refuses unless the
+  // request targets the dev DB.
+  wipeBrand: (userId) =>
+    request(`/admin-users/${userId}/wipe`, { method: "POST" }),
 };
 
 // Helpers for formatting

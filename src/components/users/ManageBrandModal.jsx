@@ -17,12 +17,15 @@ import { Btn } from "../ui/Button";
 import { planLabel } from "../trials/planConfig";
 import { friendlyDate } from "../../lib/api";
 
-export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged, onGrantTrial }) {
+export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged, onGrantTrial, onWiped }) {
   const { theme, mode } = useTheme();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [wiping, setWiping] = useState(false);
+  const [wipeConfirm, setWipeConfirm] = useState("");
+  const [wipeResult, setWipeResult] = useState(null);
 
-  useEffect(() => { setError(""); }, [row?.user_id]);
+  useEffect(() => { setError(""); setWipeConfirm(""); setWipeResult(null); }, [row?.user_id]);
 
   if (!row) return null;
 
@@ -38,6 +41,26 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Type-to-confirm target: the store name (falls back to email) so an operator
+  // can't wipe the wrong brand by reflex.
+  const wipeExpected = (row.store_name || row.email || "").trim();
+  const wipeArmed = wipeConfirm.trim().toLowerCase() === wipeExpected.toLowerCase() && wipeExpected !== "";
+
+  async function wipeBrand() {
+    if (!wipeArmed) return;
+    setError("");
+    setWiping(true);
+    try {
+      const out = await api.wipeBrand(row.user_id);
+      setWipeResult(out);
+      onWiped?.(); // refresh the list; the modal stays open showing the result
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setWiping(false);
     }
   }
 
@@ -117,6 +140,58 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
             </Btn>
           </div>
         </div>
+
+        {/* Danger zone — dev only. Hard-wipes the brand + all its data so the
+            account can re-onboard from scratch. */}
+        {isDev && (
+          <div style={{ ...sectionStyle, borderColor: mode === "dark" ? "#5B1717" : "#FECACA" }}>
+            <div style={{ ...titleStyle, color: "#EF4444" }}>Danger zone — wipe brand (dev only)</div>
+            <div style={hintStyle}>
+              Permanently deletes this brand and everything hanging off it —
+              campaigns, variants, AI matches, payout settings, and the brand +
+              user rows. Irreversible. Use to reset a test account for a clean
+              re-onboard.
+            </div>
+            {wipeResult ? (
+              <div style={{
+                marginTop: 10, fontSize: 12, color: mode === "dark" ? "#86EFAC" : "#14532D",
+                background: mode === "dark" ? "#0B3A2A" : "#DCFCE7",
+                border: `1px solid ${mode === "dark" ? "#14532D" : "#BBF7D0"}`,
+                padding: "10px 12px", borderRadius: 8,
+              }}>
+                Wiped <strong>{wipeResult.store_name || wipeResult.email}</strong>.{" "}
+                {Object.entries(wipeResult.deleted || {})
+                  .filter(([, n]) => n > 0)
+                  .map(([t, n]) => `${t}: ${n}`)
+                  .join(" · ") || "nothing to delete"}
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                <input
+                  value={wipeConfirm}
+                  onChange={(e) => setWipeConfirm(e.target.value)}
+                  placeholder={`Type "${wipeExpected}" to confirm`}
+                  disabled={wiping}
+                  style={{
+                    flex: 1, minWidth: 0, fontSize: 12, padding: "8px 10px",
+                    borderRadius: 8, border: `1px solid ${theme.border}`,
+                    background: theme.surface, color: theme.text,
+                  }}
+                />
+                <Btn
+                  size="sm"
+                  color="#DC2626"
+                  onClick={wipeBrand}
+                  loading={wiping}
+                  disabled={!wipeArmed}
+                  style={{ flexShrink: 0 }}
+                >
+                  Wipe brand
+                </Btn>
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div style={{
