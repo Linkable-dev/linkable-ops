@@ -179,6 +179,12 @@ export const api = {
     request(`/admin-users/brands?${buildQs({ q, limit, offset, sortBy, sortDir, filters })}`),
   listAdminCreators: ({ q, limit, offset, sortBy, sortDir, filters } = {}) =>
     request(`/admin-users/creators?${buildQs({ q, limit, offset, sortBy, sortDir, filters })}`),
+  // Soft-deleted brands still within the 30-day recovery window.
+  listDeletedBrands: ({ q, limit, offset } = {}) =>
+    request(`/admin-users/deleted-brands?${buildQs({ q, limit, offset })}`),
+  // Undo a soft-delete (reactivates the brand + cancels the scheduled purge).
+  restoreBrand: (userId) =>
+    request(`/admin-users/${userId}/restore`, { method: "POST" }),
   impersonateUser: (userId) =>
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
   grantTrial: (userId, body) =>

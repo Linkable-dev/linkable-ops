@@ -63,6 +63,22 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Soft-deleted brands still inside the 30-day recovery window (the main app's
+  // DeleteUserAccount sets users.deleted=NOW() + deletion_scheduled_for; a
+  // nightly job hard-deletes them once the schedule elapses). These rows are
+  // hidden from /brands (which lists only active users) — this is where an
+  // operator finds a brand to restore before it's purged for good.
+  router.get("/deleted-brands", async (req, res) => {
+    try {
+      const { rows } = await listDeletedBrands(req.query);
+      const signed = await signedUrls(rows.map((r) => r.logo_pic_name || ""));
+      rows.forEach((r, i) => { r.signed_logo_pic = signed[i]; });
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post("/:userId/impersonate", async (req, res) => {
     try {
       const out = await impersonateUser(req.params.userId, req.admin);
@@ -106,6 +122,18 @@ export function adminUsersRoutes() {
   router.post("/:userId/wipe", async (req, res) => {
     try {
       const out = await wipeBrand(req.params.userId, req.admin, req.dbTarget || "prod");
+      res.json(out);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  // Undo a soft-delete before the nightly purge runs. Unlike wipe this IS a
+  // production tool — recovering a real brand a user (or Shopify uninstall)
+  // deleted is the whole point. Mirrors the main app's RestoreUserAccount.
+  router.post("/:userId/restore", async (req, res) => {
+    try {
+      const out = await restoreBrand(req.params.userId, req.admin, req.dbTarget || "prod");
       res.json(out);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
@@ -179,6 +207,98 @@ async function wipeBrand(userId, admin, dbTarget) {
       `store=${JSON.stringify(storeName)} deleted=${JSON.stringify(deleted)}`,
     );
     return { user_id: userId, brand_id: brandId, store_name: storeName, email, target_db: "dev", deleted };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Reverse a soft-delete. Runs in one transaction, mirroring the main app's
+// RestoreUserAccount (service-grpc/services/users_service.go): clear the user's
+// deletion sentinel + schedule, then re-activate the brand (and any influencer)
+// profile rows. Ended links/collaborations are NOT reactivated — same as the
+// main app; the brand re-onboards its links from the restored dashboard.
+// Allowed on prod: recovering a real brand before purge is the point.
+async function restoreBrand(userId, admin, dbTarget) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+
+  const pool = await getCloudSqlPool(dbTarget);
+  const client = await pool.connect();
+  try {
+    // Capture pre-restore state for the audit log + operator feedback. The
+    // active check runs in SQL (don't trust JS parsing of 'infinity').
+    const { rows: found } = await client.query(
+      `SELECT u.email,
+              u.deletion_scheduled_for,
+              u.deletion_reason,
+              (u.deleted = ${USER_ACTIVE})                      AS already_active,
+              (u.deletion_scheduled_for IS NOT NULL
+                 AND u.deletion_scheduled_for <= NOW())         AS purge_overdue,
+              b.id         AS brand_id,
+              b.store_name
+         FROM users u
+         LEFT JOIN brands b ON b.user_id = u.id
+        WHERE u.id = $1 AND u.role = ${ROLE_BRAND}`,
+      [userId],
+    );
+    if (!found.length) {
+      const e = new Error("Brand user not found"); e.status = 404; throw e;
+    }
+    const pre = found[0];
+    if (pre.already_active) {
+      const e = new Error("Brand is already active — nothing to restore"); e.status = 409; throw e;
+    }
+
+    await client.query("BEGIN");
+    const uRes = await client.query(
+      `UPDATE users
+          SET deleted                = ${USER_ACTIVE},
+              deletion_scheduled_for = NULL,
+              deletion_reason        = ''
+        WHERE id = $1 AND deleted <> ${USER_ACTIVE}`,
+      [userId],
+    );
+    // 0 rows means the purge job or a concurrent restore beat us to it.
+    if (uRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      const e = new Error("Brand is no longer soft-deleted (already restored or purged)"); e.status = 409; throw e;
+    }
+    const bRes = await client.query(
+      `UPDATE brands
+          SET deleted = ${ENTITY_ACTIVE}, updated = NOW()
+        WHERE user_id = $1 AND deleted <> ${ENTITY_ACTIVE}`,
+      [userId],
+    );
+    // Defensive: a brand user shouldn't have an influencer row, but if the
+    // account was ever both, keep the two profiles in sync like the main app.
+    await client.query(
+      `UPDATE influencers
+          SET deleted = ${ENTITY_ACTIVE}
+        WHERE user_id = $1 AND deleted <> ${ENTITY_ACTIVE}`,
+      [userId],
+    );
+    await client.query("COMMIT");
+
+    console.log(
+      `[brand-restore] admin=${admin?.email || "?"} db=${dbTarget} user=${userId} ` +
+      `brand=${pre.brand_id || "-"} store=${JSON.stringify(pre.store_name)} ` +
+      `was_scheduled_for=${pre.deletion_scheduled_for ? new Date(pre.deletion_scheduled_for).toISOString() : "-"} ` +
+      `purge_overdue=${pre.purge_overdue} reason=${JSON.stringify(pre.deletion_reason || "")}`,
+    );
+    return {
+      user_id: userId,
+      brand_id: pre.brand_id,
+      store_name: pre.store_name,
+      email: pre.email,
+      target_db: dbTarget,
+      brands_restored: bRes.rowCount,
+      was_scheduled_for: pre.deletion_scheduled_for,
+      purge_overdue: pre.purge_overdue,
+    };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
@@ -350,6 +470,49 @@ async function listBrands(query) {
        WHERE ${where}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
+    params,
+  );
+}
+
+// Soft-deleted brands (users.deleted <> 'infinity'). Deliberately lighter than
+// listBrands — no revenue/click/campaign rollups, since a purge-bound row's
+// stats aren't actionable. Ordered by urgency (soonest scheduled purge first).
+// Brand join is unfiltered because a soft-deleted brand's `b.deleted` is a real
+// timestamp, not the ENTITY_ACTIVE sentinel.
+async function listDeletedBrands(query) {
+  const { q = "", limit = "100", offset = "0" } = query;
+  const params = [Number(limit) || 100, Number(offset) || 0];
+  let where = `u.role = ${ROLE_BRAND} AND u.deleted <> ${USER_ACTIVE}`;
+  if (q) {
+    params.push(`%${q}%`);
+    where += ` AND (u.email ILIKE $3 OR b.store_name ILIKE $3 OR b.store_website ILIKE $3 OR b.first_name ILIKE $3 OR b.last_name ILIKE $3)`;
+  }
+  return cloudSqlQuery(
+    `SELECT u.id          AS user_id,
+            u.email,
+            u.created     AS user_created,
+            u.role,
+            u.account_id,
+            u.deleted     AS user_deleted,
+            u.deletion_scheduled_for,
+            u.deletion_reason,
+            CASE WHEN u.deletion_scheduled_for IS NULL THEN NULL
+                 ELSE GREATEST(0, CEIL(EXTRACT(EPOCH FROM (u.deletion_scheduled_for - NOW())) / 86400))::int
+            END           AS days_until_purge,
+            (u.deletion_scheduled_for IS NOT NULL AND u.deletion_scheduled_for <= NOW()) AS purge_overdue,
+            b.id          AS brand_id,
+            b.store_name,
+            b.store_website,
+            b.first_name,
+            b.last_name,
+            b.logo_pic_name,
+            b.location,
+            b.niche
+       FROM users u
+       LEFT JOIN brands b ON b.user_id = u.id
+      WHERE ${where}
+      ORDER BY u.deletion_scheduled_for ASC NULLS LAST, u.deleted DESC
+      LIMIT $1 OFFSET $2`,
     params,
   );
 }

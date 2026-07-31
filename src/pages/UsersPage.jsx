@@ -12,7 +12,7 @@ import {
   useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
 } from "../components/table/tableTools";
 
-const TABS = [["brands", "Brands"], ["creators", "Creators"]];
+const TABS = [["brands", "Brands"], ["creators", "Creators"], ["deleted", "Deleted"]];
 
 const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
 
@@ -49,6 +49,18 @@ const BRAND_COLUMNS = [
       { value: "none",    label: "No trial" },
     ] } },
   { key: "actions",         label: "",             width: 165 },
+];
+
+// Soft-deleted brands awaiting the nightly purge. No sort/filter (the endpoint
+// orders by soonest purge); "Purge in" is the urgency signal an operator scans.
+const DELETED_COLUMNS = [
+  { key: "avatar",       label: "",         width: 44,  resizable: false },
+  { key: "store_name",   label: "Store",    width: 180, fill: true },
+  { key: "email",        label: "Email",    width: 190, fill: true },
+  { key: "owner_name",   label: "Owner",    width: 120 },
+  { key: "user_deleted", label: "Deleted",  width: 100 },
+  { key: "purge",        label: "Purge in", width: 140 },
+  { key: "actions",      label: "",         width: 120 },
 ];
 
 const CREATOR_COLUMNS = [
@@ -94,13 +106,19 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [impersonating, setImpersonating] = useState(null); // user_id being acted on
+  const [restoring, setRestoring] = useState(null); // user_id being restored
   const [actionError, setActionError] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [filters, setFilters] = useState({});
   const [manageRow, setManageRow] = useState(null); // null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
 
-  const columns = tab === "brands" ? BRAND_COLUMNS : CREATOR_COLUMNS;
+  const columns = tab === "brands" ? BRAND_COLUMNS
+    : tab === "creators" ? CREATOR_COLUMNS
+    : DELETED_COLUMNS;
+  // "deleted" is a list of brands, but labelled distinctly in empty/footer copy.
+  const tabLabel = tab === "deleted" ? "deleted brands" : tab;
+  const showFilterRow = columns.some((c) => c.filter);
   const { widths, startResize, resetWidth } = useColumnWidths(`admin-${tab}`, useMemo(
     () => Object.fromEntries(columns.map((c) => [c.key, c.width])),
     [columns],
@@ -127,8 +145,13 @@ export default function UsersPage() {
     setLoading(true);
     setError("");
     try {
-      const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
-      const data = await fn({ q, limit: 100, sortBy: sort.sortBy, sortDir: sort.sortDir, filters });
+      let data;
+      if (tab === "deleted") {
+        data = await api.listDeletedBrands({ q, limit: 100 });
+      } else {
+        const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
+        data = await fn({ q, limit: 100, sortBy: sort.sortBy, sortDir: sort.sortDir, filters });
+      }
       setRows(data);
     } catch (err) {
       setError(err.message);
@@ -166,6 +189,25 @@ export default function UsersPage() {
     }
   }
 
+  async function handleRestore(row) {
+    const label = row.store_name || row.email || "this brand";
+    if (!window.confirm(
+      `Restore "${label}"?\n\nThis reactivates the brand and cancels the scheduled deletion. ` +
+      `Ended links are not automatically re-activated.`,
+    )) return;
+    setActionError("");
+    setRestoring(row.user_id);
+    try {
+      await api.restoreBrand(row.user_id);
+      // Drop it from the deleted list — it's active again.
+      setRows((rs) => rs.filter((r) => r.user_id !== row.user_id));
+    } catch (err) {
+      setActionError(`${row.email}: ${err.message}`);
+    } finally {
+      setRestoring(null);
+    }
+  }
+
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
@@ -200,9 +242,9 @@ export default function UsersPage() {
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder={tab === "brands"
-            ? "Search by store name, website, email, name…"
-            : "Search by IG handle, email, name…"
+          placeholder={tab === "creators"
+            ? "Search by IG handle, email, name…"
+            : "Search by store name, website, email, name…"
           }
         />
       </div>
@@ -259,7 +301,9 @@ export default function UsersPage() {
           ))}
         </div>
 
-        {/* Per-column filter row (server-side) */}
+        {/* Per-column filter row (server-side). Hidden on the deleted tab,
+            whose endpoint has no per-column filters. */}
+        {showFilterRow && (
         <div style={{
           display: "grid",
           gridTemplateColumns: template,
@@ -284,6 +328,7 @@ export default function UsersPage() {
             </div>
           ))}
         </div>
+        )}
 
         {loading ? (
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -297,8 +342,21 @@ export default function UsersPage() {
           </div>
         ) : rows.length === 0 ? (
           <div style={{ padding: 32, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
-            No {tab} found{q ? ` matching "${q}"` : ""}{hasFilters ? " with the current column filters" : ""}.
+            {tab === "deleted"
+              ? <>No brands pending deletion{q ? ` matching "${q}"` : ""}.</>
+              : <>No {tabLabel} found{q ? ` matching "${q}"` : ""}{hasFilters ? " with the current column filters" : ""}.</>}
           </div>
+        ) : tab === "deleted" ? (
+          rows.map((row) => (
+            <DeletedBrandRow
+              key={row.user_id}
+              row={row}
+              theme={theme}
+              template={template}
+              busy={restoring === row.user_id}
+              onRestore={() => handleRestore(row)}
+            />
+          ))
         ) : (
           rows.map((row) => (
             <UserRow
@@ -335,7 +393,7 @@ export default function UsersPage() {
 
       {!loading && rows.length > 0 && (
         <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
-          Showing {rows.length} {tab} {rows.length === 100 ? "(capped — refine search)" : ""}
+          Showing {rows.length} {tabLabel} {rows.length === 100 ? "(capped — refine search)" : ""}
         </div>
       )}
     </div>
@@ -446,6 +504,99 @@ function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
           View ↗
         </Btn>
       </div>
+    </div>
+  );
+}
+
+// One soft-deleted brand row. No impersonate/manage — a deleted account can't
+// be opened; the only action is to bring it back before the nightly purge.
+function DeletedBrandRow({ row, theme, template, busy, onRestore }) {
+  const avatar = avatarFor(row, "brand");
+  const initials = initialsFor(row, "brand");
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImg = avatar && !imgFailed;
+
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: template,
+      alignItems: "center",
+      padding: "10px 16px",
+      borderBottom: `1px solid ${theme.border}`,
+      gap: 8,
+    }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: "50%",
+        background: theme.surfaceAlt, color: theme.text,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 11, fontWeight: 700, overflow: "hidden",
+      }}>
+        {showImg
+          ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
+          : initials}
+      </div>
+
+      <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+        {row.store_website && (
+          <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {row.store_website}
+          </div>
+        )}
+      </div>
+      <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {row.email}
+      </div>
+      <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {[row.first_name, row.last_name].filter(Boolean).join(" ") || <span style={{ color: theme.textMuted }}>—</span>}
+      </div>
+      <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+        title={row.user_deleted ? new Date(row.user_deleted).toLocaleString() : ""}>
+        {row.user_deleted ? friendlyDate(row.user_deleted) : "—"}
+      </div>
+      <PurgeCell row={row} theme={theme} />
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
+        <Btn size="sm" color="#10B981" onClick={onRestore} loading={busy}>
+          Restore
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+// "Purge in" urgency: red when overdue or ≤3 days, amber ≤7, muted otherwise.
+// The deletion reason (if any) sits underneath as context.
+function PurgeCell({ row, theme }) {
+  const scheduled = row.deletion_scheduled_for;
+  const days = row.days_until_purge;
+
+  let label;
+  let color = theme.textMid;
+  if (scheduled == null) {
+    label = "no schedule";
+    color = theme.textMuted;
+  } else if (row.purge_overdue) {
+    label = "overdue";
+    color = "#EF4444";
+  } else {
+    label = `${days} day${days === 1 ? "" : "s"}`;
+    color = days <= 3 ? "#EF4444" : days <= 7 ? "#F59E0B" : theme.textMid;
+  }
+
+  return (
+    <div
+      style={{ minWidth: 0, fontSize: 12, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+      title={scheduled
+        ? `Scheduled hard-delete: ${new Date(scheduled).toLocaleString()}`
+        : "No purge scheduled — will stay soft-deleted until a schedule is set"}
+    >
+      {label}
+      {row.deletion_reason && (
+        <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {row.deletion_reason}
+        </div>
+      )}
     </div>
   );
 }
