@@ -249,11 +249,26 @@ export function analyticsRoutes() {
         // "not on trial" (a paying brand), not as unknown.
         cloudSqlQuery(`
           WITH paid AS (
-            SELECT (substring(u.account_id from 'shopify_([0-9]+)'))::numeric AS amt,
+            SELECT COALESCE(NULLIF(asub.price_after_discount, 0),
+                            (substring(u.account_id from 'shopify_([0-9]+)'))::numeric) AS amt,
                    (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
                    COALESCE(b.trial_expiration_date > NOW(), false) AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
+            LEFT JOIN LATERAL (
+              SELECT status, price_after_discount FROM app_subscriptions
+              WHERE user_id = u.id
+              ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
+                       shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
+              LIMIT 1
+            ) asub ON true
             WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
+              -- If a live subscription row exists it must be ACTIVE: a FROZEN
+              -- (payment failed) or stale-cancelled brand keeps its account_id
+              -- but collects no revenue, so counting it inflates MRR. No row yet
+              -- (app_subscriptions still rolling out) → fall back to account_id.
+              -- amt prefers price_after_discount so the Startup Programme intro
+              -- ($99 vs $199) and any Shopify discount aren't over-counted.
+              AND (asub.status IS NULL OR asub.status = 'ACTIVE')
           )
           SELECT
             ROUND(SUM(CASE WHEN NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS live_mrr,
@@ -271,11 +286,22 @@ export function analyticsRoutes() {
                 WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 'Growth'
                 ELSE 'Starter'
               END AS tier,
-              (substring(u.account_id from 'shopify_([0-9]+)'))::numeric AS amt,
+              COALESCE(NULLIF(asub.price_after_discount, 0),
+                       (substring(u.account_id from 'shopify_([0-9]+)'))::numeric) AS amt,
               (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly
             FROM users u JOIN brands b ON b.user_id = u.id
+            LEFT JOIN LATERAL (
+              SELECT status, price_after_discount FROM app_subscriptions
+              WHERE user_id = u.id
+              ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
+                       shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
+              LIMIT 1
+            ) asub ON true
             WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
               AND COALESCE(b.trial_expiration_date > NOW(), false) = false
+              -- Same frozen/stale exclusion as the headline MRR so the tier split
+              -- reconciles to live_mrr.
+              AND (asub.status IS NULL OR asub.status = 'ACTIVE')
           )
           SELECT tier, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
           FROM paid GROUP BY tier ORDER BY mrr DESC`),
@@ -285,9 +311,9 @@ export function analyticsRoutes() {
         cloudSqlQuery(`
           SELECT
             (SELECT COUNT(*) FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}) AS signed_up,
-            (SELECT COUNT(DISTINCT p.user_id) FROM products p WHERE p.status = 2 AND p.deleted = '-infinity'::timestamptz) AS launched_campaign,
-            (SELECT COUNT(DISTINCT l.brand_user_id) FROM links l WHERE l.status = 3 AND l.deleted = '-infinity'::timestamptz) AS got_creator,
-            (SELECT COUNT(DISTINCT l.brand_user_id) FROM orders o JOIN links l ON l.id = o.link_id WHERE o.deleted = '-infinity'::timestamptz) AS got_sale`),
+            (SELECT COUNT(DISTINCT p.user_id) FROM products p JOIN users u ON u.id = p.user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND p.status = 2 AND p.deleted = '-infinity'::timestamptz) AS launched_campaign,
+            (SELECT COUNT(DISTINCT l.brand_user_id) FROM links l JOIN users u ON u.id = l.brand_user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND l.status = 3 AND l.deleted = '-infinity'::timestamptz) AS got_creator,
+            (SELECT COUNT(DISTINCT l.brand_user_id) FROM orders o JOIN links l ON l.id = o.link_id JOIN users u ON u.id = l.brand_user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND o.deleted = '-infinity'::timestamptz) AS got_sale`),
 
         // Marketplace throughput.
         cloudSqlQuery(`
@@ -296,7 +322,7 @@ export function analyticsRoutes() {
             (SELECT COUNT(DISTINCT influencer_user_id) FROM links WHERE status = 3 AND deleted = '-infinity'::timestamptz) AS creators_active,
             (SELECT COUNT(*) FROM products WHERE status = 2 AND deleted = '-infinity'::timestamptz) AS active_campaigns,
             (SELECT COALESCE(SUM(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS gmv,
-            (SELECT COALESCE(SUM((commission)::numeric), 0) FROM orders WHERE deleted = '-infinity'::timestamptz AND commission ~ '^[0-9.]+$') AS commission_paid,
+            (SELECT COALESCE(SUM((commission)::numeric), 0) FROM orders WHERE deleted = '-infinity'::timestamptz AND commission ~ '^[0-9]+(\\.[0-9]+)?$') AS commission_paid,
             (SELECT COUNT(*) FROM orders WHERE deleted = '-infinity'::timestamptz) AS orders,
             (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks`),
 
@@ -304,7 +330,11 @@ export function analyticsRoutes() {
         cloudSqlQuery(`
           SELECT
             COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS paying,
-            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true) AS in_trial,
+            -- Standard 14-day trial only (trial_plan_name empty). Admin-granted
+            -- trials carry a trial_plan_name and are counted in extended_trial_active
+            -- instead, so the two buckets stay mutually exclusive rather than
+            -- double-counting a brand that is on a paid plan with a granted trial.
+            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true AND COALESCE(b.trial_plan_name, '') = '') AS in_trial,
             COUNT(*) FILTER (WHERE COALESCE(b.trial_plan_name, '') <> '' AND b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW()) AS extended_trial_active,
             -- Cancelled but still inside the trial-access window: no paid plan
             -- (account_id cleared on cancel) yet trial_expiration_date is in the
