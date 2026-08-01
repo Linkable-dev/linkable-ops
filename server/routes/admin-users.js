@@ -764,7 +764,10 @@ async function impersonateUser(userId, admin) {
 
 // Valid Shopify plan names from the main app's billing config. Keeping the
 // set tight prevents typos that would silently break the activation gate.
-const VALID_TRIAL_PLANS = new Set(["starter", "grow", "scale"]);
+// Current picker slugs are "growth"/"scale"; "starter"/"grow" are legacy slugs
+// the main app still resolves (resolvePlanKey) and are accepted for backward
+// compatibility (re-grants that carry an old brand's stored plan through).
+const VALID_TRIAL_PLANS = new Set(["growth", "scale", "starter", "grow"]);
 const VALID_TRIAL_INTERVALS = new Set(["monthly", "annual"]);
 
 async function grantTrial(userId, body, admin, dbTarget) {

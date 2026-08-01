@@ -7,6 +7,7 @@ import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
+import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
 import {
   useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
@@ -760,7 +761,7 @@ function deriveTrialState(row, now) {
     const daysLeft = Math.max(0, Math.ceil((expires.getTime() - now) / 86_400_000));
     return {
       status: "active",
-      planName: row.trial_plan_name || "trial",
+      planName: planLabel(row.trial_plan_name),
       timeLabel: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`,
       color: "#F59E0B",
       title: `Trial active — payment starts ${expires.toLocaleDateString()}`,
@@ -769,7 +770,7 @@ function deriveTrialState(row, now) {
   if (row.trial_plan_name && !activated) {
     return {
       status: "granted",
-      planName: row.trial_plan_name,
+      planName: planLabel(row.trial_plan_name),
       timeLabel: `${row.trial_days || 0}d offer`,
       color: "#3B82F6",
       title: "Trial granted but not yet activated by the brand",
@@ -778,7 +779,7 @@ function deriveTrialState(row, now) {
   if (activated && expires && expires.getTime() <= now) {
     return {
       status: "expired",
-      planName: row.trial_plan_name || "trial",
+      planName: planLabel(row.trial_plan_name),
       timeLabel: `expired ${expires.toLocaleDateString()}`,
       color: "#EF4444",
       title: `Trial expired ${expires.toLocaleDateString()}`,

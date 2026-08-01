@@ -27,7 +27,7 @@ import { Btn } from "../ui/Button";
 import { Input } from "../ui/Input";
 import {
   TRIAL_PLANS, DEFAULT_PLAN, DEFAULT_DAYS, DEFAULT_INTERVAL,
-  formatPlanLine, planLabel,
+  formatPlanLine, planLabel, planByValue,
 } from "./planConfig";
 
 // Quick-pick presets surfaced as big buttons. Each preset is a function of
@@ -69,18 +69,18 @@ function buildPresets(row) {
     });
   }
   presets.push({
-    key: "grow_14",
-    title: "14-day Grow trial",
+    key: "starter_14",
+    title: "14-day Starter trial",
     hint: "Default new-brand offering",
-    plan: "grow",
+    plan: DEFAULT_PLAN,
     days: 14,
     interval: "monthly",
   });
   presets.push({
-    key: "grow_30",
+    key: "extend_30",
     title: "30-day extension",
     hint: "Same plan, extra time after a demo or ask",
-    plan: prevPlan && TRIAL_PLANS.some(p => p.value === prevPlan) ? prevPlan : "grow",
+    plan: planByValue(prevPlan)?.value || DEFAULT_PLAN,
     days: 30,
     interval: prevInterval,
   });
@@ -119,7 +119,7 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
     setError("");
     // Default the custom form to the brand's prior trial when present, else
     // to the global defaults — so opening Custom doesn't surprise the operator.
-    setPlan(initialPlan && TRIAL_PLANS.some(p => p.value === initialPlan) ? initialPlan : DEFAULT_PLAN);
+    setPlan(planByValue(initialPlan)?.value || DEFAULT_PLAN);
     setDays(Number(initialDays) > 0 ? Number(initialDays) : DEFAULT_DAYS);
     setBillingInterval(initialInterval === "annual" ? "annual" : DEFAULT_INTERVAL);
   }, [userId, initialPlan, initialDays, initialInterval]);
