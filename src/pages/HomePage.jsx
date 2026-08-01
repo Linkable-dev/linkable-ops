@@ -17,6 +17,7 @@ const GREEN = "#10B981";
 const AMBER = "#F59E0B";
 const BLUE = "#3B82F6";
 const RED = "#EF4444";
+const ROSE = "#E11D48";
 
 export default function HomePage() {
   const { theme } = useTheme();
@@ -213,11 +214,12 @@ export default function HomePage() {
 
       {/* ── Subscription & trial health ───────────────────────────────────── */}
       <Section title="Subscription & trial health" hint="how the active brand base breaks down today">
-        <div style={grid(4)}>
+        <div style={grid(5)}>
           <Stat label="Paying" value={num(subscriptions.paying)} accent={GREEN} />
           <Stat label="In free trial" value={num(subscriptions.inTrial)} accent={AMBER} sub="on a plan, not yet billed" />
           <Stat label="Linkable extended trials" value={num(subscriptions.extendedTrialActive)} accent={BLUE} sub="admin-granted, active" />
-          <Stat label="No plan yet" value={num(subscriptions.noPaidPlan)} sub="signed up, not subscribed" />
+          <Stat label="Cancelled · in grace" value={num(subscriptions.cancelledInGrace)} accent={ROSE} sub="cancelled, trial access ending" />
+          <Stat label="No plan yet" value={num(subscriptions.noPaidPlan)} sub="never subscribed / lapsed" />
         </div>
         <div style={{ marginTop: 14 }}>
           <Stat

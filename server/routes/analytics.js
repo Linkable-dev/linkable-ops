@@ -306,7 +306,17 @@ export function analyticsRoutes() {
             COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS paying,
             COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true) AS in_trial,
             COUNT(*) FILTER (WHERE COALESCE(b.trial_plan_name, '') <> '' AND b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW()) AS extended_trial_active,
-            COUNT(*) FILTER (WHERE COALESCE(u.account_id, '') = '' OR u.account_id = 'shopify_free_plan' OR u.account_id = 'free_plan') AS no_paid_plan
+            -- Cancelled but still inside the trial-access window: no paid plan
+            -- (account_id cleared on cancel) yet trial_expiration_date is in the
+            -- future, so hasActiveBrandTrial() still ungates them. Excludes
+            -- admin-granted trials (trial_plan_name set) — those are their own
+            -- bucket above, and they are not a cancellation.
+            COUNT(*) FILTER (WHERE (COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan')) AND COALESCE(b.trial_expiration_date > NOW(), false) = true AND COALESCE(b.trial_plan_name, '') = '') AS cancelled_in_grace,
+            -- Truly no active plan: no paid account_id AND no remaining trial
+            -- access. A cancelled-in-grace brand is NOT counted here (it still
+            -- has access) — that was the bug where it read "signed up, not
+            -- subscribed" despite having subscribed then cancelled.
+            COUNT(*) FILTER (WHERE (COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan')) AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS no_paid_plan
           FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}`),
 
         // New brands this month vs last (momentum).
@@ -360,6 +370,7 @@ export function analyticsRoutes() {
           paying: parseInt(s.paying || 0),
           inTrial: parseInt(s.in_trial || 0),
           extendedTrialActive: parseInt(s.extended_trial_active || 0),
+          cancelledInGrace: parseInt(s.cancelled_in_grace || 0),
           noPaidPlan: parseInt(s.no_paid_plan || 0),
         },
         brands: {

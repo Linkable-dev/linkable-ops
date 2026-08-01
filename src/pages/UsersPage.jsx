@@ -608,6 +608,38 @@ function paidPlanFromAccountId(accountId) {
 // Shopify statuses that mean "no longer a live paying subscription".
 const SUB_TERMINAL = new Set(["CANCELLED", "CANCELED", "EXPIRED", "DECLINED"]);
 
+// #RRGGBB (or #RGB) -> rgba() so a state colour can tint its own pill background.
+function hexToRgba(hex, a) {
+  const h = String(hex || "").replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n)) return `rgba(115,115,115,${a})`;
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// A compact colour-coded status pill (dot + label) so a brand's subscription
+// state reads at a glance in the dense table: green = paying/active, amber =
+// trial / cancelled-in-grace, red = frozen, blue = trial offered, grey =
+// cancelled / no plan. The colour is passed in by SubscriptionCell per state.
+function StatePill({ text, color }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        marginTop: 3, padding: "1px 7px 1px 6px", borderRadius: 999,
+        fontSize: 10, fontWeight: 600, lineHeight: 1.5,
+        color, background: hexToRgba(color, 0.12),
+        border: `1px solid ${hexToRgba(color, 0.28)}`,
+        maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      {text}
+    </span>
+  );
+}
+
 // One "Subscription" column covering every state a brand can be in, read from
 // app_subscriptions (the main app's Shopify source of truth) with a fallback to
 // account_id + brands.trial_* where that table isn't populated yet:
@@ -706,8 +738,10 @@ function SubscriptionCell({ row, theme }) {
         color = "#F59E0B";
         title = `Cancelled${when ? ` on ${when}` : ""} — keeps trial access until ${new Date(trialExpMs).toLocaleDateString()}, then gated`;
       } else {
+        // Hard-cancelled with no remaining access: rose, so it reads as a
+        // distinct negative state rather than the same grey as "no plan yet".
         sub = when ? `Cancelled ${when}` : "Cancelled";
-        color = theme.textMuted;
+        color = "#E11D48";
         title = `Subscription ${status.toLowerCase()}${when ? ` on ${when}` : ""}`;
       }
     } else {
@@ -772,18 +806,23 @@ function SubscriptionCell({ row, theme }) {
   }
 
   return (
-    <div
-      style={{
-        minWidth: 0, fontSize: 12, color, overflow: "hidden",
-        textOverflow: "ellipsis", whiteSpace: "nowrap",
-      }}
-      title={title}
-    >
-      {label}
-      {sub && (
-        <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
-          {sub}
-        </div>
+    <div style={{ minWidth: 0, overflow: "hidden" }} title={title}>
+      {sub ? (
+        <>
+          <div
+            style={{
+              fontSize: 12, fontWeight: 600, color: theme.text,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </div>
+          <StatePill text={sub} color={color} />
+        </>
+      ) : (
+        // States with no detail line (Free, No plan, unrecognized) become the
+        // pill itself so they still carry a colour chip rather than bare text.
+        <StatePill text={label} color={color} />
       )}
     </div>
   );
