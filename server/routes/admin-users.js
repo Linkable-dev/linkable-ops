@@ -352,8 +352,7 @@ async function setStartupProgramme(userId, body) {
   return { startup_programme: rows[0].startup_programme };
 }
 
-// Plan rank + trial state expressions mirror the UsersPage cells (PlanCell /
-// deriveTrialState) so server-side sort/filter orders rows exactly like the
+// Plan rank expression mirrors the UsersPage SubscriptionCell so server-side sort/filter orders rows exactly like the
 // old client-side sort did. Higher plan rank = "more paying".
 const BRAND_PLAN_RANK_SQL = `CASE
   WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 100
@@ -365,20 +364,10 @@ const BRAND_PLAN_RANK_SQL = `CASE
   ELSE 0
 END`;
 
-// Trial "urgency": active = days remaining, granted = offer length,
-// expired = -1, none = -2 (matches the client's trial_time_left sort rank).
-const BRAND_TRIAL_TIME_SQL = `CASE
-  WHEN b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW()
-    THEN CEIL(EXTRACT(EPOCH FROM (b.trial_expiration_date - NOW())) / 86400)
-  WHEN COALESCE(b.trial_plan_name, '') <> '' AND COALESCE(b.trial_activation_date, '-infinity'::timestamptz) = '-infinity'::timestamptz
-    THEN COALESCE(b.trial_days, 0)
-  WHEN b.trial_activation_date > '-infinity'::timestamptz THEN -1
-  ELSE -2
-END`;
-
+// Active Linkable grant (activated, still running) and offered-but-not-started
+// grant — used by the merged Subscription filter's "granted"/"offered" options.
 const BRAND_TRIAL_ACTIVE_SQL   = `(b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW())`;
 const BRAND_TRIAL_GRANTED_SQL  = `(COALESCE(b.trial_plan_name, '') <> '' AND COALESCE(b.trial_activation_date, '-infinity'::timestamptz) = '-infinity'::timestamptz)`;
-const BRAND_TRIAL_EXPIRED_SQL  = `(b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date <= NOW())`;
 
 const BRAND_SORTS = {
   store_name:      `LOWER(COALESCE(b.store_name, ''))`,
@@ -386,32 +375,24 @@ const BRAND_SORTS = {
   owner_name:      `LOWER(TRIM(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, '')))`,
   user_created:    `u.created`,
   last_sign_in:    `sig.last_sign_in`,
-  plan:            BRAND_PLAN_RANK_SQL,
-  // Merged "Linkable trial" column: sort by grant urgency (active days remaining
-  // first, then granted offers, then expired, then none) — see BRAND_TRIAL_TIME_SQL.
-  linkable_trial:  BRAND_TRIAL_TIME_SQL,
+  // Merged Subscription column: rank by "how paying" (paid tier > trial > none).
+  subscription:    BRAND_PLAN_RANK_SQL,
 };
 
-// Cutoff mirrors PAID_PLANS_LAUNCH_TS in UsersPage: brands created before
-// paid plans launched are "Legacy free"; after, an empty account_id is a
-// "No record" anomaly.
 const BRAND_FILTERS = {
   store_name:      textFilter("b.store_name", "b.store_website"),
   email:           textFilter("u.email"),
   owner_name:      textFilter(`(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, ''))`),
-  plan: enumFilter({
-    scale:      `(u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%')`,
-    growth:     `(u.account_id LIKE '%shopify_199%' OR u.account_id LIKE '%shopify_99%')`,
-    free:       `u.account_id = 'shopify_free_plan'`,
-    free_trial: `(COALESCE(u.account_id, '') = '' AND u.created >= NOW() - INTERVAL '14 days')`,
-    legacy:     `(COALESCE(u.account_id, '') = '' AND u.created < NOW() - INTERVAL '14 days' AND u.created < '2025-11-20'::timestamptz)`,
-    no_record:  `(COALESCE(u.account_id, '') = '' AND u.created < NOW() - INTERVAL '14 days' AND u.created >= '2025-11-20'::timestamptz)`,
-  }),
-  linkable_trial: enumFilter({
-    active:  BRAND_TRIAL_ACTIVE_SQL,
-    granted: BRAND_TRIAL_GRANTED_SQL,
-    expired: BRAND_TRIAL_EXPIRED_SQL,
-    none:    `NOT (${BRAND_TRIAL_ACTIVE_SQL} OR ${BRAND_TRIAL_GRANTED_SQL} OR ${BRAND_TRIAL_EXPIRED_SQL})`,
+  // Merged Subscription column. "trial" is any brand on a paid plan still inside
+  // its free trial (standard or granted-via-Shopify); "granted" narrows to an
+  // active Linkable grant; "offered" is a grant not yet started. These overlap
+  // by design (they are different lenses on the same rows).
+  subscription: enumFilter({
+    paying:  `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false)`,
+    trial:   `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true)`,
+    granted: BRAND_TRIAL_ACTIVE_SQL,
+    offered: BRAND_TRIAL_GRANTED_SQL,
+    no_plan: `(COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan'))`,
   }),
 };
 

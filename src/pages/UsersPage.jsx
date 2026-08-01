@@ -31,21 +31,13 @@ const BRAND_COLUMNS = [
     filter: { type: "text", placeholder: "Name…" } },
   { key: "user_created",    label: "Joined",       width: 85,  sortable: true, defaultDir: "desc" },
   { key: "last_sign_in",    label: "Last sign in", width: 95,  sortable: true, defaultDir: "desc" },
-  { key: "plan",            label: "Plan",         width: 95,  sortable: true, defaultDir: "desc",
+  { key: "subscription",    label: "Subscription", width: 210, sortable: true, defaultDir: "desc",
     filter: { type: "select", options: [
-      { value: "growth",     label: "Starter" },
-      { value: "scale",      label: "Growth" },
-      { value: "free",       label: "Free" },
-      { value: "free_trial", label: "Free trial" },
-      { value: "legacy",     label: "Legacy free" },
-      { value: "no_record",  label: "No record ⚠" },
-    ] } },
-  { key: "linkable_trial", label: "Linkable trial", width: 150, sortable: true, defaultDir: "desc",
-    filter: { type: "select", options: [
-      { value: "active",  label: "Active" },
-      { value: "granted", label: "Granted" },
-      { value: "expired", label: "Expired" },
-      { value: "none",    label: "No trial" },
+      { value: "paying",   label: "Paying" },
+      { value: "trial",    label: "In trial" },
+      { value: "granted",  label: "Linkable trial" },
+      { value: "offered",  label: "Trial offered" },
+      { value: "no_plan",  label: "No plan" },
     ] } },
   { key: "actions",         label: "",             width: 165 },
 ];
@@ -450,8 +442,7 @@ function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
           <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
-          <PlanCell row={row} theme={theme} />
-          <LinkableTrialCell row={row} theme={theme} />
+          <SubscriptionCell row={row} theme={theme} />
         </>
       ) : (
         <>
@@ -617,51 +608,69 @@ function paidPlanFromAccountId(accountId) {
 // Shopify statuses that mean "no longer a live paying subscription".
 const SUB_TERMINAL = new Set(["CANCELLED", "CANCELED", "EXPIRED", "DECLINED"]);
 
-// Plan = the brand's real Shopify subscription situation, read straight from
-// app_subscriptions (the main app's source of truth) with a fallback to the
-// account_id heuristic where that table isn't populated yet:
+// One "Subscription" column covering every state a brand can be in, read from
+// app_subscriptions (the main app's Shopify source of truth) with a fallback to
+// account_id + brands.trial_* where that table isn't populated yet:
 //
-//   {Plan} · Trial · Nd left  (amber)  — subscribed, still inside the 14-day trial
-//   {Plan} · Paying           (green)  — subscribed, trial over, being charged
-//   {Plan} · Cancelled DATE   (grey)   — subscription cancelled/expired/declined
-//   {Plan} · Frozen           (red)    — payment failed, subscription frozen
-//   Free                      (muted)  — chose shopify_free_plan
-//   No plan                   (muted)  — never subscribed (or a cancel that cleared account_id)
-//   —                                  — unrecognized account_id
+//   {Plan} · Trial · Nd left            (amber)  — subscribed, inside the trial
+//   {Plan} · Trial · Nd left · granted  (amber)  — that trial is a Linkable grant
+//   {Plan} · Paying                     (green)  — subscribed, trial over, billed
+//   {Plan} · Cancelled DATE             (grey)   — cancelled/expired/declined
+//   {Plan} · Frozen                     (red)    — payment failed
+//   {Plan} · Trial offered · Nd         (blue)   — Linkable grant not yet started
+//   {Plan} · Trial expired              (grey)   — Linkable grant lapsed, no plan
+//   Free                                (muted)  — chose shopify_free_plan
+//   No plan · not subscribed            (muted)  — never subscribed
 //
 // The "(test)" tag marks a test-mode subscription (staff/dev store) that never
-// bills. When app_subscriptions has no row for the brand we fall back to
-// account_id + the first-subscription trial window the main app records in
-// brands.trial_* — that still tells trial-vs-paying, but a cancellation cannot
-// be detected there (account_id is cleared on cancel), so it reads as "No plan".
-function PlanCell({ row, theme }) {
+// bills. The "· granted" suffix (and the offered/expired states) is what the
+// old separate "Linkable trial" column carried — a Linkable-granted trial is
+// delivered as a real Shopify subscription, so it belongs in the same cell.
+function SubscriptionCell({ row, theme }) {
   const [now] = useState(() => Date.now());
   const accountId = row.account_id || "";
   const status = (row.sub_status || "").toUpperCase();
   const isTest = row.sub_test === true || row.sub_test === "t";
   const testTag = isTest ? " (test)" : "";
 
+  // Clean tier label: the account_id customer label ("Starter"), else a Linkable
+  // grant's plan, else the Shopify sub name stripped of the "Linkable " prefix /
+  // " (Interval)" suffix — so it reads "Starter", not "Linkable Starter (Monthly)".
+  const planName =
+    paidPlanFromAccountId(accountId) ||
+    (row.trial_plan_name ? planLabel(row.trial_plan_name) : "") ||
+    (row.sub_name
+      ? String(row.sub_name)
+          .replace(/^Linkable\s+/i, "")
+          .replace(/\s*\((monthly|annual|yearly)\)\s*$/i, "")
+          .trim()
+      : "") ||
+    "Plan";
+
+  // A Linkable-granted trial (trial_plan_name set) overlays the Shopify state.
+  const grant = deriveTrialState(row, now);
+  const grantedActive = grant && grant.status === "active";
+
+  const trialLine = (daysLeft) =>
+    `Trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left${grantedActive ? " · granted" : ""}`;
+
   let label;
   let sub = null;
   let color = theme.textMid;
   let title = "";
 
-  const subPlanName = () =>
-    (row.sub_name && String(row.sub_name).trim()) ||
-    paidPlanFromAccountId(accountId) ||
-    "Plan";
-
   if (status) {
     // Authoritative: a real Shopify subscription row exists.
-    const planName = subPlanName();
     if (status === "ACTIVE") {
       const trialEnds = row.sub_trial_ends_at ? new Date(row.sub_trial_ends_at).getTime() : null;
       if (trialEnds && trialEnds > now) {
         const daysLeft = Math.max(0, Math.ceil((trialEnds - now) / 86_400_000));
         label = `${planName}${testTag}`;
-        sub = `Trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+        sub = trialLine(daysLeft);
         color = "#F59E0B";
-        title = `In the Shopify 14-day trial — first charge ${new Date(trialEnds).toLocaleDateString()}`;
+        title = grantedActive
+          ? "In a Linkable-granted trial — Shopify starts billing when it ends"
+          : `In the Shopify 14-day trial — first charge ${new Date(trialEnds).toLocaleDateString()}`;
       } else {
         label = `${planName}${testTag}`;
         sub = "Paying";
@@ -689,27 +698,44 @@ function PlanCell({ row, theme }) {
       title = `Shopify subscription status: ${status}`;
     }
   } else if (paidPlanFromAccountId(accountId)) {
-    // Fallback: no app_subscriptions row, but a paid account_id is on file.
-    const paidPlan = paidPlanFromAccountId(accountId);
+    // Fallback: a paid account_id but no app_subscriptions row yet.
     const exp = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
       ? new Date(row.trial_expiration_date).getTime() : null;
     const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity";
     if (activated && exp && exp > now) {
       const daysLeft = Math.max(0, Math.ceil((exp - now) / 86_400_000));
-      label = paidPlan;
-      sub = `Trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+      label = planName;
+      sub = trialLine(daysLeft);
       color = "#F59E0B";
-      title = `Paid plan (account_id ${accountId}); in the 14-day trial — first charge ${new Date(exp).toLocaleDateString()}`;
+      title = `Paid plan (${accountId}); in trial — first charge ${new Date(exp).toLocaleDateString()}`;
     } else {
-      label = paidPlan;
+      label = planName;
       sub = "Paying";
       color = "#10B981";
       title = `Paid plan — account_id ${accountId}`;
     }
-  } else if (accountId === "shopify_free_plan") {
+  } else if (grant) {
+    // No live Shopify plan, but a Linkable grant is on file.
+    if (grant.status === "granted") {
+      label = planName;
+      sub = `Trial offered · ${row.trial_days || 0}d`;
+      color = "#3B82F6";
+      title = "Linkable trial granted but not yet started by the brand";
+    } else if (grant.status === "active") {
+      label = planName;
+      sub = `Trial · ${grant.timeLabel} · granted`;
+      color = "#F59E0B";
+      title = "Linkable-granted trial active (no Shopify subscription on file)";
+    } else {
+      label = planName;
+      sub = "Trial expired";
+      color = theme.textMuted;
+      title = grant.title;
+    }
+  } else if (accountId === "shopify_free_plan" || accountId === "free_plan") {
     label = "Free";
     color = theme.textMid;
-    title = "On Shopify free plan (account_id = shopify_free_plan)";
+    title = "On the Shopify free plan";
   } else if (!accountId) {
     label = "No plan";
     sub = "not subscribed";
@@ -717,7 +743,7 @@ function PlanCell({ row, theme }) {
     const created = row.user_created ? new Date(row.user_created).getTime() : null;
     const daysSinceSignup = created ? Math.floor((now - created) / 86_400_000) : null;
     title = daysSinceSignup != null
-      ? `No Shopify plan chosen — signed up ${daysSinceSignup}d ago. A cancellation also clears account_id; the subscription table confirms which once app_subscriptions is populated.`
+      ? `No Shopify plan chosen — signed up ${daysSinceSignup}d ago. A cancellation also clears account_id.`
       : "No Shopify plan chosen";
   } else {
     label = "—";
@@ -788,31 +814,3 @@ function deriveTrialState(row, now) {
   return null;
 }
 
-// A LINKABLE-GRANTED trial in one column: plan name + countdown, colored by
-// state (active amber / granted blue / expired red), with the state word as a
-// muted second line. Reads e.g. "Grow · 12 days left" / "Grow · 60d offer" /
-// "Grow · expired 8/15/2026". Standard Shopify trials are shown in the PLAN
-// column, so this stays scoped to admin grants (deriveTrialState requires
-// trial_plan_name). A dash means no grant on file.
-function LinkableTrialCell({ row, theme }) {
-  const [now] = useState(() => Date.now());
-  const state = deriveTrialState(row, now);
-  if (!state) {
-    return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
-  }
-  return (
-    <div style={{ minWidth: 0, overflow: "hidden" }} title={state.title}>
-      <div
-        style={{
-          fontSize: 12, color: state.color, fontWeight: 500,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}
-      >
-        {state.planName} · {state.timeLabel}
-      </div>
-      <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
-        {state.status}
-      </div>
-    </div>
-  );
-}
