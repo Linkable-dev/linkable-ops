@@ -262,13 +262,14 @@ export function analyticsRoutes() {
             COUNT(*) FILTER (WHERE in_trial) AS pipeline_brands
           FROM paid`),
 
-        // Live MRR split by plan tier (mirrors the app's Growth/Scale lineup).
+        // Live MRR split by plan tier, using the customer-facing labels the brand
+        // sees in-app (2026-07 rebrand: $499 tier = "Growth", $199 tier = "Starter").
         cloudSqlQuery(`
           WITH paid AS (
             SELECT
               CASE
-                WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 'Scale'
-                ELSE 'Growth'
+                WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 'Growth'
+                ELSE 'Starter'
               END AS tier,
               (substring(u.account_id from 'shopify_([0-9]+)'))::numeric AS amt,
               (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly

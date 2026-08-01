@@ -32,8 +32,8 @@ const BRAND_COLUMNS = [
   { key: "last_sign_in",    label: "Last sign in", width: 95,  sortable: true, defaultDir: "desc" },
   { key: "plan",            label: "Plan",         width: 95,  sortable: true, defaultDir: "desc",
     filter: { type: "select", options: [
-      { value: "scale",      label: "Scale" },
-      { value: "growth",     label: "Growth" },
+      { value: "growth",     label: "Starter" },
+      { value: "scale",      label: "Growth" },
       { value: "free",       label: "Free" },
       { value: "free_trial", label: "Free trial" },
       { value: "legacy",     label: "Legacy free" },
@@ -604,8 +604,12 @@ function PurgeCell({ row, theme }) {
 // $199 family (legacy Grow/Starter prices map here by price fidelity).
 function paidPlanFromAccountId(accountId) {
   if (!accountId) return null;
-  if (accountId.includes("shopify_499") || accountId.includes("shopify_4970") || accountId.includes("shopify_299")) return "Scale";
-  if (accountId.includes("shopify_199") || accountId.includes("shopify_99")) return "Growth";
+  // Customer-facing labels (2026-07 rebrand): the $499 tier shows to brands as
+  // "Growth" and the $199 tier as "Starter". Internally the app still calls these
+  // Scale/Growth (plan_detection, entitlement, account_id), but ops mirrors what
+  // the brand actually sees so the two views read the same.
+  if (accountId.includes("shopify_499") || accountId.includes("shopify_4970") || accountId.includes("shopify_299")) return "Growth";
+  if (accountId.includes("shopify_199") || accountId.includes("shopify_99")) return "Starter";
   return null; // shopify_free_plan or anything else
 }
 
