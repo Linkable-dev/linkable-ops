@@ -612,75 +612,111 @@ function paidPlanFromAccountId(accountId) {
   return null; // shopify_free_plan or anything else
 }
 
-// How many days a brand has to evaluate before they should have a plan.
-// Matches the main app's default Shopify-subscription trial period — every
-// paid plan starts with `trialDays: 14`, so 14d is the natural window.
-const SIGNUP_FREE_WINDOW_DAYS = 14;
+// Shopify statuses that mean "no longer a live paying subscription".
+const SUB_TERMINAL = new Set(["CANCELLED", "CANCELED", "EXPIRED", "DECLINED"]);
 
-// LIN-856 (main repo commit c7c1a03b, 2025-11-20) introduced the Shopify
-// subscription flow. Brands created before this date pre-date paid plans
-// entirely — empty account_id on them is genuinely "Legacy free." After
-// this date, a brand without an account_id should have one (they had to
-// pick a plan at signup) — so empty = data anomaly, not "legacy."
-const PAID_PLANS_LAUNCH_TS = Date.UTC(2025, 10, 20); // 2025-11-20
-
-// Plan = "what are they on right now."
+// Plan = the brand's real Shopify subscription situation, read straight from
+// app_subscriptions (the main app's source of truth) with a fallback to the
+// account_id heuristic where that table isn't populated yet:
 //
-//   Starter / Grow / Scale   (green)   — paid Shopify subscription
-//   Free                     (muted)   — chose shopify_free_plan
-//   Free trial · Nd left     (amber)   — empty account_id, within 14d of signup
-//   Legacy free              (purple)  — empty account_id AND signed up BEFORE paid plans existed
-//   No record ⚠              (red)     — empty account_id AND signed up AFTER paid plans (anomaly)
+//   {Plan} · Trial · Nd left  (amber)  — subscribed, still inside the 14-day trial
+//   {Plan} · Paying           (green)  — subscribed, trial over, being charged
+//   {Plan} · Cancelled DATE   (grey)   — subscription cancelled/expired/declined
+//   {Plan} · Frozen           (red)    — payment failed, subscription frozen
+//   Free                      (muted)  — chose shopify_free_plan
+//   No plan                   (muted)  — never subscribed (or a cancel that cleared account_id)
 //   —                                  — unrecognized account_id
 //
-// "No record" is the important one to spot: paid plans launched 2025-11-20,
-// so a brand created after that date must have picked a plan at signup.
-// An empty account_id post-launch means either the Shopify confirmation
-// flow didn't write back to our DB (return-URL handler skipped) or the
-// brand started checkout but never confirmed — in either case the row
-// needs human review, not a "free" label that hides the problem.
+// The "(test)" tag marks a test-mode subscription (staff/dev store) that never
+// bills. When app_subscriptions has no row for the brand we fall back to
+// account_id + the first-subscription trial window the main app records in
+// brands.trial_* — that still tells trial-vs-paying, but a cancellation cannot
+// be detected there (account_id is cleared on cancel), so it reads as "No plan".
 function PlanCell({ row, theme }) {
   const [now] = useState(() => Date.now());
   const accountId = row.account_id || "";
-  const paidPlan = paidPlanFromAccountId(accountId);
-  const isFreePlan = accountId === "shopify_free_plan";
+  const status = (row.sub_status || "").toUpperCase();
+  const isTest = row.sub_test === true || row.sub_test === "t";
+  const testTag = isTest ? " (test)" : "";
 
   let label;
   let sub = null;
   let color = theme.textMid;
   let title = "";
 
-  if (paidPlan) {
-    label = paidPlan;
-    color = "#10B981";
-    title = `Paid plan — account_id ${accountId}`;
-  } else if (isFreePlan) {
+  const subPlanName = () =>
+    (row.sub_name && String(row.sub_name).trim()) ||
+    paidPlanFromAccountId(accountId) ||
+    "Plan";
+
+  if (status) {
+    // Authoritative: a real Shopify subscription row exists.
+    const planName = subPlanName();
+    if (status === "ACTIVE") {
+      const trialEnds = row.sub_trial_ends_at ? new Date(row.sub_trial_ends_at).getTime() : null;
+      if (trialEnds && trialEnds > now) {
+        const daysLeft = Math.max(0, Math.ceil((trialEnds - now) / 86_400_000));
+        label = `${planName}${testTag}`;
+        sub = `Trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+        color = "#F59E0B";
+        title = `In the Shopify 14-day trial — first charge ${new Date(trialEnds).toLocaleDateString()}`;
+      } else {
+        label = `${planName}${testTag}`;
+        sub = "Paying";
+        color = "#10B981";
+        title = row.sub_current_period_end
+          ? `Paying — current period ends ${new Date(row.sub_current_period_end).toLocaleDateString()}`
+          : "Active paid subscription (trial over)";
+      }
+    } else if (status === "FROZEN") {
+      label = `${planName}${testTag}`;
+      sub = "Frozen";
+      color = "#EF4444";
+      title = "Subscription frozen on Shopify — recurring payment failed";
+    } else if (SUB_TERMINAL.has(status)) {
+      const when = row.sub_cancelled_at ? new Date(row.sub_cancelled_at).toLocaleDateString() : null;
+      label = `${planName}${testTag}`;
+      sub = when ? `Cancelled ${when}` : "Cancelled";
+      color = theme.textMuted;
+      title = `Subscription ${status.toLowerCase()}${when ? ` on ${when}` : ""}`;
+    } else {
+      // PENDING / ACCEPTED / anything else Shopify reports.
+      label = `${planName}${testTag}`;
+      sub = status.charAt(0) + status.slice(1).toLowerCase();
+      color = theme.textMid;
+      title = `Shopify subscription status: ${status}`;
+    }
+  } else if (paidPlanFromAccountId(accountId)) {
+    // Fallback: no app_subscriptions row, but a paid account_id is on file.
+    const paidPlan = paidPlanFromAccountId(accountId);
+    const exp = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
+      ? new Date(row.trial_expiration_date).getTime() : null;
+    const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity";
+    if (activated && exp && exp > now) {
+      const daysLeft = Math.max(0, Math.ceil((exp - now) / 86_400_000));
+      label = paidPlan;
+      sub = `Trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+      color = "#F59E0B";
+      title = `Paid plan (account_id ${accountId}); in the 14-day trial — first charge ${new Date(exp).toLocaleDateString()}`;
+    } else {
+      label = paidPlan;
+      sub = "Paying";
+      color = "#10B981";
+      title = `Paid plan — account_id ${accountId}`;
+    }
+  } else if (accountId === "shopify_free_plan") {
     label = "Free";
     color = theme.textMid;
     title = "On Shopify free plan (account_id = shopify_free_plan)";
   } else if (!accountId) {
+    label = "No plan";
+    sub = "not subscribed";
+    color = theme.textMuted;
     const created = row.user_created ? new Date(row.user_created).getTime() : null;
     const daysSinceSignup = created ? Math.floor((now - created) / 86_400_000) : null;
-    const signedUpBeforeLaunch = created != null && created < PAID_PLANS_LAUNCH_TS;
-    const inWindow = daysSinceSignup != null && daysSinceSignup < SIGNUP_FREE_WINDOW_DAYS;
-
-    if (inWindow) {
-      const daysLeft = Math.max(0, SIGNUP_FREE_WINDOW_DAYS - daysSinceSignup);
-      label = "Free trial";
-      sub = `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
-      color = "#F59E0B";
-      title = `Signed up ${daysSinceSignup}d ago — within initial 14-day evaluation window`;
-    } else if (signedUpBeforeLaunch) {
-      label = "Legacy free";
-      color = "#8B5CF6";
-      title = `Signed up before paid plans launched (2025-11-20) — grandfathered`;
-    } else {
-      label = "No record ⚠";
-      color = "#EF4444";
-      title = daysSinceSignup != null
-        ? `Signed up ${daysSinceSignup}d ago — after paid plans launched, but no account_id on file. Likely a failed Shopify confirmation; investigate.`
-        : "No account_id and no signup date";
-    }
+    title = daysSinceSignup != null
+      ? `No Shopify plan chosen — signed up ${daysSinceSignup}d ago. A cancellation also clears account_id; the subscription table confirms which once app_subscriptions is populated.`
+      : "No Shopify plan chosen";
   } else {
     label = "—";
     color = theme.textMuted;
@@ -705,9 +741,15 @@ function PlanCell({ row, theme }) {
   );
 }
 
-// Shared derivation. Returns null when the row has no relevant trial state
-// (no granted offer, no activation history) so cells can render a dash.
+// Shared derivation for the TRIAL PLAN / TIME LEFT columns, which track a
+// LINKABLE-GRANTED trial specifically (trial_plan_name is set only by the admin
+// grant flow). Since 2026-07 the main app also writes brands.trial_* for the
+// standard 14-day Shopify trial, but WITHOUT a trial_plan_name — that one shows
+// in the PLAN column, so we require trial_plan_name here to keep the two apart.
+// Returns null when there is no granted Linkable trial to show.
 function deriveTrialState(row, now) {
+  if (!row.trial_plan_name) return null;
+
   const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
     ? new Date(row.trial_activation_date) : null;
   const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"

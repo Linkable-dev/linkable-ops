@@ -38,6 +38,31 @@ function clientUrl() {
 const USER_ACTIVE = `'infinity'::timestamptz`;
 const ENTITY_ACTIVE = `'-infinity'::timestamptz`;
 
+// app_subscriptions is the main app's Shopify source-of-truth (real status /
+// trial-end / cancel instant). It is rolled out per-service, so it may not exist
+// yet on a given target DB (e.g. prod before the grpc deploy) — reading it
+// blindly would 42P01 the whole brands list. Probe once per target (short TTL so
+// a freshly-deployed table is picked up without a server restart) and fall back
+// to the account_id heuristic where it is absent.
+const appSubsProbe = new Map(); // target -> { ok, at }
+const APP_SUBS_PROBE_TTL_MS = 5 * 60_000;
+async function appSubscriptionsAvailable() {
+  const target = currentDbTarget();
+  const cached = appSubsProbe.get(target);
+  if (cached && Date.now() - cached.at < APP_SUBS_PROBE_TTL_MS) return cached.ok;
+  let ok = false;
+  try {
+    const rows = await cloudSqlQuery(
+      `SELECT to_regclass('public.app_subscriptions') IS NOT NULL AS ok`,
+    );
+    ok = rows[0]?.ok === true;
+  } catch {
+    ok = false;
+  }
+  appSubsProbe.set(target, { ok, at: Date.now() });
+  return ok;
+}
+
 export function adminUsersRoutes() {
   const router = express.Router();
 
@@ -402,12 +427,43 @@ async function listBrands(query) {
     where += ` AND ${cond}`;
   }
   const orderBy = orderBySql(query, BRAND_SORTS, "u.created DESC");
+
+  // Pull the brand's authoritative Shopify subscription from app_subscriptions
+  // when the table exists on this target. Prefer an ACTIVE row, else the most
+  // recently synced (so a lone CANCELLED/EXPIRED row still surfaces as such).
+  const hasAppSubs = await appSubscriptionsAvailable();
+  const subSelect = hasAppSubs
+    ? `asub.status              AS sub_status,
+            asub.name                AS sub_name,
+            asub.test                AS sub_test,
+            asub.price_amount        AS sub_price_amount,
+            asub.price_currency      AS sub_price_currency,
+            asub.trial_ends_at       AS sub_trial_ends_at,
+            asub.current_period_end  AS sub_current_period_end,
+            asub.cancelled_at        AS sub_cancelled_at,`
+    : `NULL AS sub_status, NULL AS sub_name, NULL AS sub_test,
+            NULL::numeric AS sub_price_amount, NULL AS sub_price_currency,
+            NULL::timestamptz AS sub_trial_ends_at, NULL::timestamptz AS sub_current_period_end,
+            NULL::timestamptz AS sub_cancelled_at,`;
+  const subJoin = hasAppSubs
+    ? `LEFT JOIN LATERAL (
+         SELECT status, name, test, price_amount, price_currency,
+                trial_ends_at, current_period_end, cancelled_at
+           FROM app_subscriptions
+          WHERE user_id = u.id
+          ORDER BY (status = 'ACTIVE') DESC, synced_at DESC NULLS LAST,
+                   shopify_created_at DESC NULLS LAST
+          LIMIT 1
+       ) asub ON true`
+    : "";
+
   return cloudSqlQuery(
     `SELECT u.id          AS user_id,
             u.email,
             u.created     AS user_created,
             u.role,
             u.account_id,
+            ${subSelect}
             b.id          AS brand_id,
             b.store_name,
             b.store_website,
@@ -467,6 +523,7 @@ async function listBrands(query) {
           WHERE l.brand_user_id = u.id
             AND o.deleted = ${ENTITY_ACTIVE}
        ) rev ON true
+       ${subJoin}
        WHERE ${where}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
