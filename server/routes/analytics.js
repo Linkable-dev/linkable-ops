@@ -242,6 +242,32 @@ export function analyticsRoutes() {
   const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz`;
   router.get("/home", async (req, res) => {
     try {
+      // app_subscriptions is the main app's Shopify source-of-truth, but it does
+      // not exist on every DB target yet (e.g. prod until the subscription system
+      // is promoted). Referencing it unconditionally would make the whole /home
+      // query 500. Probe once and only join it where it exists; otherwise fall
+      // back to the account_id-only revenue logic (the original behaviour).
+      const hasAppSubs = await cloudSqlQuery(
+        `SELECT to_regclass('public.app_subscriptions') IS NOT NULL AS ok`,
+      )
+        .then((r) => r.rows[0]?.ok === true)
+        .catch(() => false);
+      const subLateral = hasAppSubs
+        ? `LEFT JOIN LATERAL (
+             SELECT status, price_after_discount FROM app_subscriptions
+             WHERE user_id = u.id
+             ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
+                      shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
+             LIMIT 1
+           ) asub ON true`
+        : "";
+      const amtExpr = hasAppSubs
+        ? `COALESCE(NULLIF(asub.price_after_discount, 0), (substring(u.account_id from 'shopify_([0-9]+)'))::numeric)`
+        : `(substring(u.account_id from 'shopify_([0-9]+)'))::numeric`;
+      const subActiveFilter = hasAppSubs
+        ? `AND (asub.status IS NULL OR asub.status = 'ACTIVE')`
+        : "";
+
       const [
         mrr, byTier, funnel, marketplace, subs, growth, gmvSeries,
       ] = await Promise.all([
@@ -249,26 +275,20 @@ export function analyticsRoutes() {
         // "not on trial" (a paying brand), not as unknown.
         cloudSqlQuery(`
           WITH paid AS (
-            SELECT COALESCE(NULLIF(asub.price_after_discount, 0),
-                            (substring(u.account_id from 'shopify_([0-9]+)'))::numeric) AS amt,
+            SELECT ${amtExpr} AS amt,
                    (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
                    COALESCE(b.trial_expiration_date > NOW(), false) AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
-            LEFT JOIN LATERAL (
-              SELECT status, price_after_discount FROM app_subscriptions
-              WHERE user_id = u.id
-              ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
-                       shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
-              LIMIT 1
-            ) asub ON true
+            ${subLateral}
             WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
               -- If a live subscription row exists it must be ACTIVE: a FROZEN
               -- (payment failed) or stale-cancelled brand keeps its account_id
-              -- but collects no revenue, so counting it inflates MRR. No row yet
-              -- (app_subscriptions still rolling out) → fall back to account_id.
-              -- amt prefers price_after_discount so the Startup Programme intro
-              -- ($99 vs $199) and any Shopify discount aren't over-counted.
-              AND (asub.status IS NULL OR asub.status = 'ACTIVE')
+              -- but collects no revenue, so counting it inflates MRR. No row (or
+              -- no app_subscriptions table on this target) → fall back to
+              -- account_id. amt prefers price_after_discount so the Startup
+              -- Programme intro ($99 vs $199) and Shopify discounts aren't
+              -- over-counted.
+              ${subActiveFilter}
           )
           SELECT
             ROUND(SUM(CASE WHEN NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS live_mrr,
@@ -286,22 +306,15 @@ export function analyticsRoutes() {
                 WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 'Growth'
                 ELSE 'Starter'
               END AS tier,
-              COALESCE(NULLIF(asub.price_after_discount, 0),
-                       (substring(u.account_id from 'shopify_([0-9]+)'))::numeric) AS amt,
+              ${amtExpr} AS amt,
               (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly
             FROM users u JOIN brands b ON b.user_id = u.id
-            LEFT JOIN LATERAL (
-              SELECT status, price_after_discount FROM app_subscriptions
-              WHERE user_id = u.id
-              ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
-                       shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
-              LIMIT 1
-            ) asub ON true
+            ${subLateral}
             WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
               AND COALESCE(b.trial_expiration_date > NOW(), false) = false
               -- Same frozen/stale exclusion as the headline MRR so the tier split
-              -- reconciles to live_mrr.
-              AND (asub.status IS NULL OR asub.status = 'ACTIVE')
+              -- reconciles to live_mrr (no-op when app_subscriptions is absent).
+              ${subActiveFilter}
           )
           SELECT tier, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
           FROM paid GROUP BY tier ORDER BY mrr DESC`),
