@@ -8,6 +8,12 @@ import logoWhite from "../../assets/logo-white.svg";
 import iconDark from "../../assets/icon-dark.svg";
 import iconWhite from "../../assets/icon-white.svg";
 
+const homeIcon = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5z" />
+  </svg>
+);
+
 const dashboardIcon = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -213,6 +219,9 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: sidebarOpen ? "0 10px" : "0 6px" }}>
         <div style={{ paddingTop: 8 }}>
+          {navItem("/", "Home", path === "/", homeIcon)}
+        </div>
+        <div style={{ paddingTop: 4 }}>
           {moduleHeader("Operations", opsIcon, opsOpen, () => setOpsOpen(!opsOpen))}
         </div>
         {(opsOpen || !sidebarOpen) && (
@@ -256,7 +265,7 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4,
           }}>
-            {navItem("/", "Dashboard", path === "/", dashboardIcon)}
+            {navItem("/dashboard", "Dashboard", path === "/dashboard", dashboardIcon)}
             {subHeader("Tables")}
             {loading ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 10px" }}>

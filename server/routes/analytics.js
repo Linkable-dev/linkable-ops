@@ -228,6 +228,150 @@ export function analyticsRoutes() {
     }
   });
 
+  // Home: the focused business KPIs an operator/founder actually watches —
+  // recurring revenue, the brand activation funnel, marketplace throughput, and
+  // subscription/trial health. Deliberately excludes vanity counts (IG stats,
+  // gender/niche splits, match scores, raw chat/sample counts).
+  //
+  // MRR is derived from users.account_id, which encodes the plan price
+  // ("shopify_<price>_<period>"): the plan string is the source of truth that
+  // exists on every subscribed brand today (app_subscriptions is still rolling
+  // out). A brand whose brands.trial_expiration_date is in the future is on a
+  // free trial (standard 14-day or admin-granted) and NOT yet billed, so it is
+  // excluded from live MRR and counted as pipeline instead.
+  const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz`;
+  router.get("/home", async (req, res) => {
+    try {
+      const [
+        mrr, byTier, funnel, marketplace, subs, growth, gmvSeries,
+      ] = await Promise.all([
+        // MRR + paying + trial pipeline. coalesce so a NULL trial date reads as
+        // "not on trial" (a paying brand), not as unknown.
+        cloudSqlQuery(`
+          WITH paid AS (
+            SELECT (substring(u.account_id from 'shopify_([0-9]+)'))::numeric AS amt,
+                   (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
+                   COALESCE(b.trial_expiration_date > NOW(), false) AS in_trial
+            FROM users u JOIN brands b ON b.user_id = u.id
+            WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
+          )
+          SELECT
+            ROUND(SUM(CASE WHEN NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS live_mrr,
+            COUNT(*) FILTER (WHERE NOT in_trial) AS paying_brands,
+            ROUND(SUM(CASE WHEN in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS pipeline_mrr,
+            COUNT(*) FILTER (WHERE in_trial) AS pipeline_brands
+          FROM paid`),
+
+        // Live MRR split by plan tier (mirrors the app's Growth/Scale lineup).
+        cloudSqlQuery(`
+          WITH paid AS (
+            SELECT
+              CASE
+                WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 'Scale'
+                ELSE 'Growth'
+              END AS tier,
+              (substring(u.account_id from 'shopify_([0-9]+)'))::numeric AS amt,
+              (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly
+            FROM users u JOIN brands b ON b.user_id = u.id
+            WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
+              AND COALESCE(b.trial_expiration_date > NOW(), false) = false
+          )
+          SELECT tier, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
+          FROM paid GROUP BY tier ORDER BY mrr DESC`),
+
+        // Brand activation funnel: signed up -> launched an active campaign ->
+        // got an accepted creator -> generated a sale.
+        cloudSqlQuery(`
+          SELECT
+            (SELECT COUNT(*) FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}) AS signed_up,
+            (SELECT COUNT(DISTINCT p.user_id) FROM products p WHERE p.status = 2 AND p.deleted = '-infinity'::timestamptz) AS launched_campaign,
+            (SELECT COUNT(DISTINCT l.brand_user_id) FROM links l WHERE l.status = 3 AND l.deleted = '-infinity'::timestamptz) AS got_creator,
+            (SELECT COUNT(DISTINCT l.brand_user_id) FROM orders o JOIN links l ON l.id = o.link_id WHERE o.deleted = '-infinity'::timestamptz) AS got_sale`),
+
+        // Marketplace throughput.
+        cloudSqlQuery(`
+          SELECT
+            (SELECT COUNT(*) FROM influencers WHERE deleted = '-infinity'::timestamptz) AS creators_total,
+            (SELECT COUNT(DISTINCT influencer_user_id) FROM links WHERE status = 3 AND deleted = '-infinity'::timestamptz) AS creators_active,
+            (SELECT COUNT(*) FROM products WHERE status = 2 AND deleted = '-infinity'::timestamptz) AS active_campaigns,
+            (SELECT COALESCE(SUM(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS gmv,
+            (SELECT COALESCE(SUM((commission)::numeric), 0) FROM orders WHERE deleted = '-infinity'::timestamptz AND commission ~ '^[0-9.]+$') AS commission_paid,
+            (SELECT COUNT(*) FROM orders WHERE deleted = '-infinity'::timestamptz) AS orders,
+            (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks`),
+
+        // Subscription/trial health across active brands.
+        cloudSqlQuery(`
+          SELECT
+            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS paying,
+            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true) AS in_trial,
+            COUNT(*) FILTER (WHERE COALESCE(b.trial_plan_name, '') <> '' AND b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW()) AS extended_trial_active,
+            COUNT(*) FILTER (WHERE COALESCE(u.account_id, '') = '' OR u.account_id = 'shopify_free_plan' OR u.account_id = 'free_plan') AS no_paid_plan
+          FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}`),
+
+        // New brands this month vs last (momentum).
+        cloudSqlQuery(`
+          SELECT
+            COUNT(*) FILTER (WHERE u.created >= date_trunc('month', NOW())) AS this_month,
+            COUNT(*) FILTER (WHERE u.created >= date_trunc('month', NOW()) - INTERVAL '1 month' AND u.created < date_trunc('month', NOW())) AS last_month
+          FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}`),
+
+        // GMV per month, last 6 months (marketplace trend).
+        cloudSqlQuery(`
+          SELECT date_trunc('month', created)::date AS date, COALESCE(SUM(shopify_amount), 0) AS gmv, COUNT(*) AS orders
+          FROM orders WHERE deleted = '-infinity'::timestamptz AND created >= NOW() - INTERVAL '6 months'
+          GROUP BY 1 ORDER BY 1`),
+      ]);
+
+      const m = mrr.rows[0];
+      const f = funnel.rows[0];
+      const mk = marketplace.rows[0];
+      const s = subs.rows[0];
+      const g = growth.rows[0];
+      const liveMrr = parseFloat(m.live_mrr || 0);
+      const payingBrands = parseInt(m.paying_brands || 0);
+
+      res.json({
+        revenue: {
+          mrr: liveMrr,
+          arr: Math.round(liveMrr * 12),
+          payingBrands,
+          arpa: payingBrands ? parseFloat((liveMrr / payingBrands).toFixed(2)) : 0,
+          pipelineMrr: parseFloat(m.pipeline_mrr || 0),
+          pipelineBrands: parseInt(m.pipeline_brands || 0),
+          byTier: byTier.rows.map((r) => ({ tier: r.tier, mrr: parseFloat(r.mrr || 0), brands: parseInt(r.brands) })),
+        },
+        funnel: {
+          signedUp: parseInt(f.signed_up || 0),
+          launchedCampaign: parseInt(f.launched_campaign || 0),
+          gotCreator: parseInt(f.got_creator || 0),
+          gotSale: parseInt(f.got_sale || 0),
+        },
+        marketplace: {
+          creatorsTotal: parseInt(mk.creators_total || 0),
+          creatorsActive: parseInt(mk.creators_active || 0),
+          activeCampaigns: parseInt(mk.active_campaigns || 0),
+          gmv: parseFloat(mk.gmv || 0),
+          commissionPaid: parseFloat(mk.commission_paid || 0),
+          orders: parseInt(mk.orders || 0),
+          clicks: parseInt(mk.clicks || 0),
+        },
+        subscriptions: {
+          paying: parseInt(s.paying || 0),
+          inTrial: parseInt(s.in_trial || 0),
+          extendedTrialActive: parseInt(s.extended_trial_active || 0),
+          noPaidPlan: parseInt(s.no_paid_plan || 0),
+        },
+        brands: {
+          newThisMonth: parseInt(g.this_month || 0),
+          newLastMonth: parseInt(g.last_month || 0),
+        },
+        gmvSeries: gmvSeries.rows.map((r) => ({ date: r.date, gmv: parseFloat(r.gmv || 0), orders: parseInt(r.orders) })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Per-table analytics — focused on useful business data only
   router.get("/:table", async (req, res) => {
     const { table } = req.params;

@@ -57,6 +57,7 @@ export const api = {
   getDateRange: (table, column) => request(`/tables/${table}/date-range/${column}`),
 
   getOverview: () => request("/analytics/overview"),
+  getHome: () => request("/analytics/home"),
   getTableAnalytics: (table) => request(`/analytics/${table}`),
 
   // Operations

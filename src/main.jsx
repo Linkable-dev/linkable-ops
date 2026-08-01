@@ -6,6 +6,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { DbTargetProvider } from "./contexts/DbTargetContext";
 import AuthGate from "./components/layout/AuthGate";
 import App from "./App";
+import HomePage from "./pages/HomePage";
 import DashboardPage from "./pages/DashboardPage";
 import CampaignsOpsPage from "./pages/CampaignsOpsPage";
 import TablePage from "./pages/TablePage";
@@ -32,7 +33,8 @@ createRoot(document.getElementById("root")).render(
             <Route path="/accept-invite" element={<AcceptInvitePage />} />
             <Route element={<AuthGate />}>
               <Route element={<App />}>
-                <Route path="/" element={<DashboardPage />} />
+                <Route path="/" element={<HomePage />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
                 <Route path="/ai/test-lab" element={<AiTestLabPage />} />
                 <Route path="/ai/inbox" element={<AiInboxPage />} />
