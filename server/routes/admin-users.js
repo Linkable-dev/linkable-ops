@@ -52,7 +52,7 @@ async function appSubscriptionsAvailable() {
   if (cached && Date.now() - cached.at < APP_SUBS_PROBE_TTL_MS) return cached.ok;
   let ok = false;
   try {
-    const rows = await cloudSqlQuery(
+    const { rows } = await cloudSqlQuery(
       `SELECT to_regclass('public.app_subscriptions') IS NOT NULL AS ok`,
     );
     ok = rows[0]?.ok === true;
@@ -387,8 +387,9 @@ const BRAND_SORTS = {
   user_created:    `u.created`,
   last_sign_in:    `sig.last_sign_in`,
   plan:            BRAND_PLAN_RANK_SQL,
-  trial_plan_name: `LOWER(COALESCE(b.trial_plan_name, ''))`,
-  trial_time_left: BRAND_TRIAL_TIME_SQL,
+  // Merged "Linkable trial" column: sort by grant urgency (active days remaining
+  // first, then granted offers, then expired, then none) — see BRAND_TRIAL_TIME_SQL.
+  linkable_trial:  BRAND_TRIAL_TIME_SQL,
 };
 
 // Cutoff mirrors PAID_PLANS_LAUNCH_TS in UsersPage: brands created before
@@ -398,7 +399,6 @@ const BRAND_FILTERS = {
   store_name:      textFilter("b.store_name", "b.store_website"),
   email:           textFilter("u.email"),
   owner_name:      textFilter(`(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, ''))`),
-  trial_plan_name: textFilter("b.trial_plan_name"),
   plan: enumFilter({
     scale:      `(u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%')`,
     growth:     `(u.account_id LIKE '%shopify_199%' OR u.account_id LIKE '%shopify_99%')`,
@@ -407,7 +407,7 @@ const BRAND_FILTERS = {
     legacy:     `(COALESCE(u.account_id, '') = '' AND u.created < NOW() - INTERVAL '14 days' AND u.created < '2025-11-20'::timestamptz)`,
     no_record:  `(COALESCE(u.account_id, '') = '' AND u.created < NOW() - INTERVAL '14 days' AND u.created >= '2025-11-20'::timestamptz)`,
   }),
-  trial_time_left: enumFilter({
+  linkable_trial: enumFilter({
     active:  BRAND_TRIAL_ACTIVE_SQL,
     granted: BRAND_TRIAL_GRANTED_SQL,
     expired: BRAND_TRIAL_EXPIRED_SQL,

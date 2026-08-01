@@ -39,9 +39,7 @@ const BRAND_COLUMNS = [
       { value: "legacy",     label: "Legacy free" },
       { value: "no_record",  label: "No record ⚠" },
     ] } },
-  { key: "trial_plan_name", label: "Trial plan",   width: 90,  sortable: true, defaultDir: "asc",
-    filter: { type: "text", placeholder: "Plan…" } },
-  { key: "trial_time_left", label: "Time left",    width: 100, sortable: true, defaultDir: "desc",
+  { key: "linkable_trial", label: "Linkable trial", width: 150, sortable: true, defaultDir: "desc",
     filter: { type: "select", options: [
       { value: "active",  label: "Active" },
       { value: "granted", label: "Granted" },
@@ -452,8 +450,7 @@ function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
             {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
           </div>
           <PlanCell row={row} theme={theme} />
-          <TrialPlanCell row={row} theme={theme} />
-          <TrialTimeCell row={row} theme={theme} />
+          <LinkableTrialCell row={row} theme={theme} />
         </>
       ) : (
         <>
@@ -786,46 +783,28 @@ function deriveTrialState(row, now) {
   return null;
 }
 
-// Just the trial plan name with a status color so an operator can scan the
-// column and spot which trials are which (Grow trial vs Scale trial, etc).
-// Pairs with TrialTimeCell which carries the "10 days left" string.
-function TrialPlanCell({ row, theme }) {
+// A LINKABLE-GRANTED trial in one column: plan name + countdown, colored by
+// state (active amber / granted blue / expired red), with the state word as a
+// muted second line. Reads e.g. "Grow · 12 days left" / "Grow · 60d offer" /
+// "Grow · expired 8/15/2026". Standard Shopify trials are shown in the PLAN
+// column, so this stays scoped to admin grants (deriveTrialState requires
+// trial_plan_name). A dash means no grant on file.
+function LinkableTrialCell({ row, theme }) {
   const [now] = useState(() => Date.now());
   const state = deriveTrialState(row, now);
   if (!state) {
     return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
   }
   return (
-    <div
-      style={{
-        minWidth: 0, fontSize: 12, color: state.color, fontWeight: 500,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-      }}
-      title={state.title}
-    >
-      {state.planName}
-    </div>
-  );
-}
-
-// Time/countdown information for the trial. Granted = "Nd offer", Active =
-// "N days left", Expired = "expired DATE". The color matches TrialPlanCell
-// so the two columns read as a single visual unit even though they're split.
-function TrialTimeCell({ row, theme }) {
-  const [now] = useState(() => Date.now());
-  const state = deriveTrialState(row, now);
-  if (!state) {
-    return <span style={{ fontSize: 12, color: theme.textMuted }}>—</span>;
-  }
-  return (
-    <div
-      style={{
-        minWidth: 0, fontSize: 12, color: state.color,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-      }}
-      title={state.title}
-    >
-      {state.timeLabel}
+    <div style={{ minWidth: 0, overflow: "hidden" }} title={state.title}>
+      <div
+        style={{
+          fontSize: 12, color: state.color, fontWeight: 500,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}
+      >
+        {state.planName} · {state.timeLabel}
+      </div>
       <div style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400 }}>
         {state.status}
       </div>
