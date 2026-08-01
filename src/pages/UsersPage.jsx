@@ -651,6 +651,14 @@ function SubscriptionCell({ row, theme }) {
   const grant = deriveTrialState(row, now);
   const grantedActive = grant && grant.status === "active";
 
+  // A subscription cancelled while still inside its trial keeps access until the
+  // trial end (the brand's trial window stays open, so the trial exemption
+  // ungates them until then) — surface that grace instead of a bare "Cancelled".
+  const trialExpMs = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
+    ? new Date(row.trial_expiration_date).getTime() : null;
+  const inTrialGrace =
+    row.trial_activation_date && row.trial_activation_date !== "-infinity" && trialExpMs && trialExpMs > now;
+
   const trialLine = (daysLeft) =>
     `Trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left${grantedActive ? " · granted" : ""}`;
 
@@ -687,9 +695,15 @@ function SubscriptionCell({ row, theme }) {
     } else if (SUB_TERMINAL.has(status)) {
       const when = row.sub_cancelled_at ? new Date(row.sub_cancelled_at).toLocaleDateString() : null;
       label = `${planName}${testTag}`;
-      sub = when ? `Cancelled ${when}` : "Cancelled";
-      color = theme.textMuted;
-      title = `Subscription ${status.toLowerCase()}${when ? ` on ${when}` : ""}`;
+      if (inTrialGrace) {
+        sub = `Cancelled · access until ${new Date(trialExpMs).toLocaleDateString()}`;
+        color = "#F59E0B";
+        title = `Cancelled${when ? ` on ${when}` : ""} — keeps trial access until ${new Date(trialExpMs).toLocaleDateString()}, then gated`;
+      } else {
+        sub = when ? `Cancelled ${when}` : "Cancelled";
+        color = theme.textMuted;
+        title = `Subscription ${status.toLowerCase()}${when ? ` on ${when}` : ""}`;
+      }
     } else {
       // PENDING / ACCEPTED / anything else Shopify reports.
       label = `${planName}${testTag}`;
