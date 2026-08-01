@@ -734,8 +734,11 @@ function SubscriptionCell({ row, theme }) {
       const when = row.sub_cancelled_at ? new Date(row.sub_cancelled_at).toLocaleDateString() : null;
       label = `${planName}${testTag}`;
       if (inTrialGrace) {
+        // Rose, like a hard cancellation — a cancelled brand should never share
+        // the amber of a live trial. The "access until" text carries the grace
+        // nuance; the colour says "this is churning", not "healthy trial".
         sub = `Cancelled · access until ${new Date(trialExpMs).toLocaleDateString()}`;
-        color = "#F59E0B";
+        color = "#E11D48";
         title = `Cancelled${when ? ` on ${when}` : ""} — keeps trial access until ${new Date(trialExpMs).toLocaleDateString()}, then gated`;
       } else {
         // Hard-cancelled with no remaining access: rose, so it reads as a
