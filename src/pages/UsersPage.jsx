@@ -629,7 +629,13 @@ const SUB_TERMINAL = new Set(["CANCELLED", "CANCELED", "EXPIRED", "DECLINED"]);
 function SubscriptionCell({ row, theme }) {
   const [now] = useState(() => Date.now());
   const accountId = row.account_id || "";
-  const status = (row.sub_status || "").toUpperCase();
+  // A row can report status='ACTIVE' while cancelled_at is set — an out-of-order
+  // Shopify webhook that landed after the cancellation. That subscription is
+  // dead, so treat a stamped cancelled_at as authoritative and render it as
+  // cancelled rather than an ongoing trial/paying state.
+  const rawStatus = (row.sub_status || "").toUpperCase();
+  const status =
+    rawStatus === "ACTIVE" && row.sub_cancelled_at ? "CANCELLED" : rawStatus;
   const isTest = row.sub_test === true || row.sub_test === "t";
   const testTag = isTest ? " (test)" : "";
 

@@ -432,8 +432,15 @@ async function listBrands(query) {
                 trial_ends_at, current_period_end, cancelled_at
            FROM app_subscriptions
           WHERE user_id = u.id
-          ORDER BY (status = 'ACTIVE') DESC, synced_at DESC NULLS LAST,
-                   shopify_created_at DESC NULLS LAST
+          -- Prefer a genuinely-live subscription: ACTIVE *and* never cancelled.
+          -- A row can carry status='ACTIVE' while cancelled_at is set (an
+          -- out-of-order Shopify webhook that arrived after the cancellation) —
+          -- treating that as live would show a cancelled brand as still
+          -- trialing, so it must not win. Otherwise fall back to the most
+          -- recently created subscription, which reflects the current state.
+          ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
+                   shopify_created_at DESC NULLS LAST,
+                   synced_at DESC NULLS LAST
           LIMIT 1
        ) asub ON true`
     : "";
