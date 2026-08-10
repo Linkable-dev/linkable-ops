@@ -92,7 +92,7 @@ Federico`,
 
 Linkable connects to your Shopify store in 2 minutes. You'll immediately see which creators drive actual sales — not just engagement.
 
-No contract. No credit card. Free trial.
+No contract. No credit card. 30-day money-back guarantee.
 
 https://linkable.link
 
@@ -182,7 +182,7 @@ Quick math: if {{brandName}} gifts 50 creators a month and only 5 drive most of 
 
 Linkable plugs into Shopify in 2 minutes and tells you exactly which is which. Cut the dead weight, double down on the winners.
 
-Free trial, no card: https://linkable.link
+No card, 30-day money-back: https://linkable.link
 
 Federico`,
   },
@@ -262,7 +262,7 @@ Federico`,
 
 If {{brandName}} works with creators or affiliates, you're almost certainly overpaying — most brands have no idea which partners actually drive Shopify revenue, so the budget gets spread across people who do nothing.
 
-Linkable plugs into Shopify in 2 minutes and shows you who's actually converting. Free trial: https://linkable.link
+Linkable plugs into Shopify in 2 minutes and shows you who's actually converting. 30-day money-back guarantee: https://linkable.link
 
 Federico`,
   },
