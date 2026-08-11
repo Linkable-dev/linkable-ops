@@ -717,6 +717,14 @@ function SubscriptionCell({ row, theme }) {
         title = grantedActive
           ? "In a Linkable-granted trial — Shopify starts billing when it ends"
           : `In the Shopify 14-day trial — first charge ${new Date(trialEnds).toLocaleDateString()}`;
+      } else if (Number(row.sub_price_amount) === 0) {
+        // An ACTIVE subscription priced at $0 (e.g. shopify_free_plan) is not
+        // "Paying" — it's a free plan. Grey, not green, so it doesn't inflate
+        // the paying count or read as revenue.
+        label = `${planName}${testTag}`;
+        sub = "Free";
+        color = "#6B7280";
+        title = "Active subscription on a free ($0) plan — not billed";
       } else {
         label = `${planName}${testTag}`;
         sub = "Paying";
@@ -766,10 +774,14 @@ function SubscriptionCell({ row, theme }) {
       color = "#F59E0B";
       title = `Paid plan (${accountId}); in trial — first charge ${new Date(exp).toLocaleDateString()}`;
     } else {
+      // account_id on file but NO app_subscriptions row. The sync mirrors every
+      // live Shopify subscription, so a missing row means there is no confirmed
+      // active subscription (cancelled, or not yet synced). Do NOT show green
+      // "Paying" off a stale account_id — surface it as unconfirmed (grey).
       label = planName;
-      sub = "Paying";
-      color = "#10B981";
-      title = `Paid plan — account_id ${accountId}`;
+      sub = "No active sub";
+      color = "#9CA3AF";
+      title = `account_id "${accountId}" on file, but no active Shopify subscription is synced — likely cancelled (or awaiting next sync)`;
     }
   } else if (grant) {
     // No live Shopify plan, but a Linkable grant is on file.
