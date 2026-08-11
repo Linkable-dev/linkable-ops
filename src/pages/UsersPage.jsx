@@ -725,6 +725,13 @@ function SubscriptionCell({ row, theme }) {
         sub = "Free";
         color = "#6B7280";
         title = "Active subscription on a free ($0) plan — not billed";
+      } else if (isTest) {
+        // Test-mode subscription (staff/dev store) never bills — it must not
+        // read as green revenue. Grey "Test".
+        label = planName;
+        sub = "Test";
+        color = "#6B7280";
+        title = "Test-mode subscription — never charged, not real revenue";
       } else {
         label = `${planName}${testTag}`;
         sub = "Paying";
