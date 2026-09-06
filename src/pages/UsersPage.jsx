@@ -164,6 +164,11 @@ export default function UsersPage() {
     setManageRow((r) => (r && r.user_id === userId ? { ...r, startup_programme: enabled } : r));
   }
 
+  function handleHiddenChanged(userId, hidden) {
+    setRows((rs) => rs.map((r) => (r.user_id === userId ? { ...r, hidden } : r)));
+    setManageRow((r) => (r && r.user_id === userId ? { ...r, hidden } : r));
+  }
+
   async function handleImpersonate(row) {
     setActionError("");
     setImpersonating(row.user_id);
@@ -371,6 +376,7 @@ export default function UsersPage() {
         isDev={isDev}
         onClose={() => setManageRow(null)}
         onStartupChanged={handleStartupChanged}
+        onHiddenChanged={handleHiddenChanged}
         onWiped={fetchRows}
         onGrantTrial={(row) => { setManageRow(null); setTrialModalRow(row); }}
       />

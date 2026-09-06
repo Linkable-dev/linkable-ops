@@ -17,7 +17,7 @@ import { Btn } from "../ui/Button";
 import { planLabel } from "../trials/planConfig";
 import { friendlyDate } from "../../lib/api";
 
-export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged, onGrantTrial, onWiped }) {
+export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged, onHiddenChanged, onGrantTrial, onWiped }) {
   const { theme, mode } = useTheme();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -30,6 +30,7 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
   if (!row) return null;
 
   const enrolled = !!row.startup_programme;
+  const hidden = !!row.hidden;
 
   async function toggleStartup() {
     setError("");
@@ -37,6 +38,19 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
     try {
       await api.setStartupProgramme(row.user_id, !enrolled);
       onStartupChanged(row.user_id, !enrolled);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleHidden() {
+    setError("");
+    setBusy(true);
+    try {
+      await api.setBrandHidden(row.user_id, !hidden);
+      onHiddenChanged?.(row.user_id, !hidden);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -121,6 +135,39 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
               style={{ flexShrink: 0 }}
             >
               {enrolled ? "Remove" : "Enroll"}
+            </Btn>
+          </div>
+        </div>
+
+        {/* Marketplace visibility */}
+        <div style={sectionStyle}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={titleStyle}>
+                Marketplace visibility
+                {hidden && (
+                  <span style={{
+                    marginLeft: 8, fontSize: 10, fontWeight: 600, padding: "2px 7px",
+                    borderRadius: 9, background: mode === "dark" ? "#3F2A0B" : "#FEF3C7",
+                    color: "#B45309", verticalAlign: "middle",
+                  }}>HIDDEN</span>
+                )}
+              </div>
+              <div style={hintStyle}>
+                Hiding keeps the brand out of Discover, the campaign feed and its own
+                public campaign list. It is not a delete: the account keeps working for
+                whoever owns it and nothing is purged. The profile still resolves by
+                direct link. Use it for demo and test accounts.
+              </div>
+            </div>
+            <Btn
+              size="sm"
+              variant={hidden ? "outline" : "solid"}
+              onClick={toggleHidden}
+              loading={busy}
+              style={{ flexShrink: 0 }}
+            >
+              {hidden ? "Show" : "Hide"}
             </Btn>
           </div>
         </div>

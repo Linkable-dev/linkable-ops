@@ -192,6 +192,10 @@ export const api = {
     request(`/admin-users/${userId}/grant-trial`, { method: "POST", body: JSON.stringify(body) }),
   setStartupProgramme: (userId, enabled) =>
     request(`/admin-users/${userId}/startup-programme`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  // Keeps a brand out of the marketplace without deleting it — demo and test
+  // accounts. The main app reads brands.hidden.
+  setBrandHidden: (userId, hidden) =>
+    request(`/admin-users/${userId}/hidden`, { method: "POST", body: JSON.stringify({ hidden }) }),
   // DEV-ONLY hard wipe of a brand + all its data. Server refuses unless the
   // request targets the dev DB.
   wipeBrand: (userId) =>

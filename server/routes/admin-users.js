@@ -140,6 +140,20 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Hide/show a brand in the marketplace. The main app reads brands.hidden and
+  // filters it out of Discover brands, the campaign feed and the brand's public
+  // campaign list. It is not a delete: the account keeps working for whoever
+  // owns it and nothing is purged. Used for demo and test accounts.
+  // Body: { hidden: boolean }.
+  router.post("/:userId/hidden", async (req, res) => {
+    try {
+      const out = await setBrandHidden(req.params.userId, req.body || {});
+      res.json(out);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   // DEV-ONLY: hard-wipe a brand and all its data so the account can re-onboard
   // from scratch. Refuses on prod — this is a test-data reset, not a
   // production tool. Guarded again server-side so a forged x-db-target=prod
@@ -352,6 +366,26 @@ async function setStartupProgramme(userId, body) {
   return { startup_programme: rows[0].startup_programme };
 }
 
+async function setBrandHidden(userId, body) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  const hidden = Boolean(body.hidden);
+  const { rows } = await cloudSqlQuery(
+    `UPDATE brands
+        SET hidden  = $2,
+            updated = NOW()
+      WHERE user_id = $1
+        AND deleted = ${ENTITY_ACTIVE}
+      RETURNING hidden`,
+    [userId, hidden],
+  );
+  if (rows.length === 0) {
+    const e = new Error("No active brand found for that user"); e.status = 404; throw e;
+  }
+  return { hidden: rows[0].hidden };
+}
+
 // Plan rank expression mirrors the UsersPage SubscriptionCell so server-side sort/filter orders rows exactly like the
 // old client-side sort did. Higher plan rank = "more paying".
 const BRAND_PLAN_RANK_SQL = `CASE
@@ -466,6 +500,7 @@ async function listBrands(query) {
             b.trial_activation_date,
             b.trial_expiration_date,
             b.startup_programme,
+            COALESCE(b.hidden, false) AS hidden,
             sig.last_sign_in,
             COALESCE(camp.n, 0)::int    AS active_campaigns,
             COALESCE(prom.n, 0)::int    AS active_promoters,
