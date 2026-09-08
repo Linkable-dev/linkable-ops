@@ -14,8 +14,6 @@ import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discov
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
 import { generatePost, triggerSiteRebuild } from "../lib/blog-writer.js";
-import { buildAlerts } from "./insights.js";
-import { runWithDbTarget } from "../lib/cloudsql.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -218,30 +216,6 @@ export function cronRoutes() {
       res.json(result);
     } catch (err) {
       console.error("/cron/process-discovery error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Daily funnel-alert digest → Slack (OPS_SLACK_WEBHOOK_URL). Without a webhook
-  // it just returns the alerts, which is handy for checking what would be sent.
-  router.get("/alerts-digest", async (req, res) => {
-    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
-    try {
-      const alerts = await runWithDbTarget("prod", () => buildAlerts());
-      const webhook = process.env.OPS_SLACK_WEBHOOK_URL;
-      const appUrl = (process.env.OPS_APP_URL || "https://linkable-ops.vercel.app").replace(/\/$/, "");
-      let posted = false;
-      if (webhook && alerts.length && req.query.dry !== "1") {
-        const icon = { danger: "🔴", warn: "🟠", info: "🔵" };
-        const top = alerts.slice(0, 15).map((a) => `${icon[a.severity] || "•"} *${a.title}* — ${a.brand?.store_name || a.brand?.email || ""}${a.campaign ? ` · ${a.campaign.title}` : ""}`);
-        const text = [`*Linkable ops · ${alerts.length} alert${alerts.length === 1 ? "" : "s"} today*`, ...top, alerts.length > 15 ? `…and ${alerts.length - 15} more` : null, `<${appUrl}/alerts|Open the alerts page>`].filter(Boolean).join("\n");
-        const r = await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-        if (!r.ok) throw new Error(`Slack webhook ${r.status}`);
-        posted = true;
-      }
-      res.json({ count: alerts.length, posted, webhookConfigured: !!webhook, alerts: req.query.full === "1" ? alerts : alerts.slice(0, 15) });
-    } catch (err) {
-      console.error("/cron/alerts-digest error:", err);
       res.status(500).json({ error: err.message });
     }
   });

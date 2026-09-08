@@ -393,7 +393,7 @@ const ASK_TABLES = [
 ];
 const HIDDEN_COL = /(token|password|hash|secret|otp|verifier|stripe_|shopify_token|facebook_token|raw_json|raw_api_response|\bsub\b|storefront)/i;
 const FORBIDDEN_SQL = /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|execute|vacuum|analyze|refresh|listen|notify|set|reset|begin|commit|rollback|lock|cluster|comment|security|pg_sleep|pg_read|pg_ls|lo_|dblink|current_setting)\b/i;
-const ASK_MODEL = process.env.ASK_MODEL || "claude-sonnet-5";
+const ASK_MODEL = "claude-sonnet-5";
 const ASK_PRICES = { "claude-sonnet-5": { in: 2, out: 10 }, "claude-opus-5": { in: 5, out: 25 }, "claude-haiku-4-5": { in: 1, out: 5 } };
 
 let schemaCache = { at: 0, text: "" };
@@ -456,7 +456,7 @@ async function runReadOnly(sql, limit = 200) {
 }
 
 async function askData(question) {
-  const apiKey = process.env.ASK_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
   const client = new Anthropic({ apiKey });
   const schema = await askSchema();
