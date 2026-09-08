@@ -13,7 +13,8 @@ import { getDefaultTeamId } from "../automation/conversation-state.js";
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
 const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz`;
 const LINK = { INVITED: 1, APPLIED: 2, ACCEPTED: 3, REJECTED: 4, ENDED: 5 };
-const PRODUCT_STATUS = { 0: "unset", 1: "new", 2: "active", 3: "paused", 4: "ended" };
+// products.status 5 is a Shopify-synced product that was never launched as a campaign.
+const PRODUCT_STATUS = { 0: "unset", 1: "new", 2: "active", 3: "paused", 4: "ended", 5: "not launched" };
 
 const hasTable = (name) =>
   cloudSqlQuery(`SELECT to_regclass($1) IS NOT NULL AS ok`, [`public.${name}`])
@@ -189,6 +190,7 @@ async function brand360(userId) {
   const hasSubs = await hasTable("app_subscriptions");
   const { rows: profileRows } = await cloudSqlQuery(`
     SELECT u.id AS user_id, u.email, u.created AS user_created, u.account_id, u.shopify_shop, u.deleted AS user_deleted,
+           (u.deleted = 'infinity'::timestamptz) AS active,
            u.deletion_scheduled_for, u.deletion_reason,
            b.id AS brand_id, b.store_name, b.store_website, b.first_name, b.last_name, b.location, b.niche, b.description,
            b.logo_pic_name, b.trial_plan_name, b.trial_days, b.trial_interval, b.trial_activation_date, b.trial_expiration_date,
@@ -219,7 +221,7 @@ async function brand360(userId) {
              (SELECT COALESCE(SUM(o.shopify_amount), 0) FROM orders o JOIN links l2 ON l2.id = o.link_id WHERE l2.product_id = p.id AND ${ND("o")} AND ${ND("l2")}) AS revenue
       FROM products p LEFT JOIN links l ON l.product_id = p.id AND ${ND("l")}
       WHERE p.user_id = $1::uuid AND ${ND("p")}
-      GROUP BY p.id ORDER BY (p.status = 2) DESC, p.created DESC LIMIT 100`, [userId]),
+      GROUP BY p.id ORDER BY (p.status = 5), (p.status = 2) DESC, p.created DESC LIMIT 100`, [userId]),
     cloudSqlQuery(`
       SELECT DISTINCT ON (l.product_id, l.influencer_user_id)
              l.id AS link_id, l.product_id, p.title AS campaign, l.status, l.created, l.accepted_at, l.clicks_counter AS clicks,
@@ -277,13 +279,12 @@ async function brand360(userId) {
       trial_activation_date: profile.trial_activation_date, trial_expiration_date: profile.trial_expiration_date,
       startup_programme: profile.startup_programme, hidden: profile.hidden, account_id: profile.account_id,
     },
-    profile: {
-      ...profile,
-      active: profile.user_deleted === "infinity" || profile.user_deleted === null || String(profile.user_deleted).startsWith("infinity") || new Date(profile.user_deleted).getTime() > 8e15,
-    },
+    profile: { ...profile, active: profile.active === true },
     subscription: sub,
     subscriptionHistory: subscription.rows,
-    campaigns: campaigns.rows.map((c) => ({
+    // Synced-but-never-launched products (status 5) are counted, not listed.
+    notLaunched: campaigns.rows.filter((c) => c.status === 5).length,
+    campaigns: campaigns.rows.filter((c) => c.status !== 5).map((c) => ({
       ...c, status_label: PRODUCT_STATUS[c.status] || `status ${c.status}`,
       invited: int(c.invited), applied: int(c.applied), accepted: int(c.accepted), shipped: int(c.shipped),
       clicks: int(c.clicks), sales: int(c.sales), revenue: num(c.revenue),

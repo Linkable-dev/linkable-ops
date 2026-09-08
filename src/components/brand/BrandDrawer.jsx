@@ -15,6 +15,13 @@ const money = (n, currency = "USD", cents = false) => {
   try { return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 }).format(Number(n || 0)); }
   catch { return `${currency} ${Number(n || 0).toLocaleString()}`; }
 };
+// brands.location is a pipe-separated market list that can run to 100+ codes.
+const shortList = (value, max = 8) => {
+  const parts = String(value || "").split("|").map((s) => s.trim()).filter((s) => s && s !== "*");
+  if (!parts.length) return "—";
+  const unique = [...new Set(parts)];
+  return unique.length > max ? `${unique.slice(0, max).join(", ")} +${unique.length - max} more` : unique.join(", ");
+};
 const planFromAccount = (accountId) => {
   if (!accountId) return null;
   if (/shopify_(499|4970|299)/.test(accountId)) return "Growth";
@@ -205,7 +212,7 @@ function Overview({ data, theme, label, section }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 12 }}>
         <Stat theme={theme} label="GMV attributed" value={gmvValue} sub={`${cur.reduce((a, c) => a + c.orders, 0)} orders`} />
         <Stat theme={theme} label="Commission" value={cur.length ? cur.map((c) => money(c.commission, c.currency, true)).join(" + ") : money(0)} />
-        <Stat theme={theme} label="Campaigns" value={activeCampaigns} sub={`${data.campaigns.length} total`} />
+        <Stat theme={theme} label="Campaigns" value={activeCampaigns} sub={`${data.campaigns.length} launched${data.notLaunched ? ` · ${data.notLaunched} synced, not launched` : ""}`} />
         <Stat theme={theme} label="Accepted creators" value={acceptedCreators} sub={`${data.creators.length} relationships`} />
         <Stat theme={theme} label="Link clicks" value={friendlyNumber(data.campaigns.reduce((a, c) => a + c.clicks, 0))} />
         <Stat theme={theme} label="Last sign-in" value={p.last_sign_in ? friendlyDate(p.last_sign_in) : "never"} sub={`signed up ${friendlyDate(p.user_created)}`} />
@@ -245,7 +252,7 @@ function Overview({ data, theme, label, section }) {
         <div style={label}>Profile</div>
         <KV theme={theme} rows={[
           ["Owner", [p.first_name, p.last_name].filter(Boolean).join(" ") || "—"],
-          ["Location", p.location || "—"],
+          ["Markets", shortList(p.location)],
           ["Niche", p.niche || "—"],
           ["Shop currency", p.shopify_shop_default_currency || "—"],
           ["Shopify shop", p.shopify_shop || "—"],
@@ -292,8 +299,8 @@ function StatusPill({ value, theme }) {
 
 function Campaigns({ data, theme }) {
   return (
-    <Table theme={theme} empty="This brand has not created a campaign yet." rows={data.campaigns} columns={[
-      { key: "title", label: "Campaign", render: (c) => <div><div style={{ fontWeight: 600 }}>{c.title}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{c.activated_at ? `live since ${friendlyDate(c.activated_at)}` : `created ${friendlyDate(c.created)}`}{c.sale_commission ? ` · ${c.sale_commission}% commission` : ""}{c.shipping ? " · ships samples" : ""}</div></div> },
+    <Table theme={theme} empty={data.notLaunched ? `No campaign launched yet (${data.notLaunched} synced products waiting).` : "This brand has not created a campaign yet."} rows={data.campaigns} columns={[
+      { key: "title", label: "Campaign", render: (c) => <div><div style={{ fontWeight: 600 }}>{c.title}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{c.status === 2 && c.activated_at ? `live since ${friendlyDate(c.activated_at)}` : c.status >= 3 && c.activated_at ? `ran from ${friendlyDate(c.activated_at)}` : `created ${friendlyDate(c.created)}`}{c.sale_commission ? ` · ${c.sale_commission}% commission` : ""}{c.shipping ? " · ships samples" : ""}</div></div> },
       { key: "status_label", label: "Status", render: (c) => <StatusPill value={c.status_label} theme={theme} /> },
       { key: "invited", label: "Invited", right: true },
       { key: "applied", label: "Applied", right: true },

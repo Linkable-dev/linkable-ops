@@ -82,7 +82,7 @@ function Stat({ label, value, sub, accent, span = 3, spark, delta }) {
         </div>
         {spark && spark.length > 1 && (
           <div style={{ alignSelf: "flex-end", flexShrink: 0 }} title="Trend over the selected range">
-            <Sparkline data={spark} color={accent || theme.brand} width={92} height={30} />
+            <Sparkline data={spark} color={accent || theme.brand} width={span <= 2 ? 64 : 92} height={30} />
           </div>
         )}
       </div>
@@ -232,7 +232,7 @@ export default function HomePage() {
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
       <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
         <div className="lk-grid">
-          <Stat label="MRR" value={money(revenue.mrr)} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox ? delta("mrr") : null} />
+          <Stat label="MRR" value={money(revenue.mrr)} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox && delta("mrr") ? { ...delta("mrr"), text: `${delta("mrr").text} (from subscription records)` } : null} />
           <Stat label="ARR" value={money(revenue.arr)} sub="MRR × 12" spark={series?.mrrApprox ? spark("mrr") : null} />
           <Stat label="ARPA" value={money(revenue.arpa, { cents: true })} sub="avg revenue / paying brand" />
           <Stat

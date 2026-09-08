@@ -129,7 +129,10 @@ function fmt(v) {
   if (v === null || v === undefined) return <span style={{ opacity: 0.5 }}>null</span>;
   if (typeof v === "boolean") return v ? "true" : "false";
   if (typeof v === "object") return JSON.stringify(v);
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return new Date(v).toLocaleString();
+  // Dates: date-only values (midnight UTC) show as a date, real timestamps with the time.
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T00:00:00(\.000)?Z$/.test(v)) return new Date(v).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + "T00:00:00Z").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return new Date(v).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   if (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v)) { const n = Number(v); return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
   if (typeof v === "number") return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
   return String(v);
