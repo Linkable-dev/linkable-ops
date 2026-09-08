@@ -104,7 +104,7 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: "60vh", overflowY: "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
         {visibleCols.map((col, i) => (
           <div key={col.column_name} style={{
             padding: "12px 0",

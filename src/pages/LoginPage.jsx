@@ -52,7 +52,7 @@ export default function LoginPage() {
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh",
-      background: theme.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+      background: theme.bg, fontFamily: "inherit",
       color: theme.text,
     }}>
       <div style={{ width: "100%", maxWidth: 380, padding: 24 }}>

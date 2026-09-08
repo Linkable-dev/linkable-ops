@@ -34,7 +34,7 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
 
   async function toggleStartup() {
     setError("");
-    setBusy(true);
+    setBusy("startup");
     try {
       await api.setStartupProgramme(row.user_id, !enrolled);
       onStartupChanged(row.user_id, !enrolled);
@@ -47,7 +47,7 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
 
   async function toggleHidden() {
     setError("");
-    setBusy(true);
+    setBusy("hidden");
     try {
       await api.setBrandHidden(row.user_id, !hidden);
       onHiddenChanged?.(row.user_id, !hidden);
@@ -131,7 +131,7 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
               size="sm"
               variant={enrolled ? "outline" : "solid"}
               onClick={toggleStartup}
-              loading={busy}
+              loading={busy === "startup"}
               style={{ flexShrink: 0 }}
             >
               {enrolled ? "Remove" : "Enroll"}
@@ -164,7 +164,7 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
               size="sm"
               variant={hidden ? "outline" : "solid"}
               onClick={toggleHidden}
-              loading={busy}
+              loading={busy === "hidden"}
               style={{ flexShrink: 0 }}
             >
               {hidden ? "Show" : "Hide"}

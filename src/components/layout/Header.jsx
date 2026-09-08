@@ -1,10 +1,19 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import {useLocation} from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useDbTarget } from "../../contexts/DbTargetContext";
 
 function getPageInfo(pathname) {
-  if (pathname === "/") return { title: "Dashboard", subtitle: "Database overview and analytics" };
+  if (pathname === "/") return { title: "Home", subtitle: "Live business metrics" };
+  if (pathname === "/dashboard") return { title: "Dashboard", subtitle: "Database overview and analytics" };
+  if (pathname.startsWith("/ops/campaigns")) return { title: "Campaigns", subtitle: "Campaign operations" };
+  if (pathname.startsWith("/users")) return { title: "Impersonation", subtitle: "Open the main app as a brand or creator" };
+  if (pathname.startsWith("/trials")) return { title: "Trials", subtitle: "Trial grants and subscription health" };
+  if (pathname.startsWith("/team")) return { title: "Team", subtitle: "Admins of this panel" };
+  if (pathname.startsWith("/ai/campaigns/")) return { title: "Outbound", subtitle: "Campaign detail" };
+  if (pathname.startsWith("/ai/campaigns")) return { title: "Outbound", subtitle: "Email outreach campaigns" };
+  if (pathname.startsWith("/ai/inbox")) return { title: "Inbox", subtitle: "Replies that need a human" };
+  if (pathname.startsWith("/ai/test-lab")) return { title: "Test Lab", subtitle: "Try the reply agent" };
   if (pathname === "/blog") return { title: "Blog", subtitle: "Articles published on linkable.link" };
   if (pathname === "/blog/new") return { title: "Blog", subtitle: "New article" };
   if (pathname.startsWith("/blog/")) return { title: "Blog", subtitle: "Edit article" };
@@ -51,7 +60,7 @@ export default function Header() {
   const pillBg = isDev
     ? (mode === "dark" ? "#3D2A05" : "#FFFBEB")
     : (mode === "dark" ? "#052e16" : "#F0FDF4");
-  const pillColor = isDev ? "#F59E0B" : "#22C55E";
+  const pillColor = isDev ? "#D97706" : "#3CBA8C";
   const pillLabel = isDev ? "Cloud SQL · Dev" : "Cloud SQL · Prod";
 
   const toggleFullscreen = useCallback(() => {
@@ -65,7 +74,7 @@ export default function Header() {
   const iconBtn = (onClick, btnTitle, children) => (
     <button onClick={onClick} title={btnTitle} style={{
       display: "flex", alignItems: "center", justifyContent: "center",
-      width: 32, height: 32, borderRadius: 8, border: `1px solid ${theme.border}`,
+      width: 32, height: 32, borderRadius: 999, border: `1px solid ${theme.border}`,
       background: "transparent", cursor: "pointer", color: theme.textMid,
       transition: "all 0.15s",
     }}>{children}</button>
@@ -79,7 +88,7 @@ export default function Header() {
       padding: "0 24px", zIndex: 90, transition: "background 0.2s, border-color 0.2s",
     }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: theme.text, letterSpacing: -0.2, textTransform: "capitalize" }}>{title}</h1>
+        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: theme.text, letterSpacing: -0.3, textTransform: "capitalize" }}>{title}</h1>
         {subtitle && <p style={{ margin: 0, fontSize: 12, color: theme.textMuted, marginTop: 1 }}>{subtitle}</p>}
       </div>
 

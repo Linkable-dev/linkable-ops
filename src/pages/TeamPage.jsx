@@ -69,8 +69,9 @@ export default function TeamPage() {
       const res = await fetch(`/api/auth/admins${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${await authCtx.getToken()}` },
       });
-      if (res.ok) setAdmins(await res.json());
-    } catch { /* network error — keep whatever is on screen */ }
+      if (res.ok) { setAdmins(await res.json()); setError(null); }
+      else setError((await res.json().catch(() => ({}))).error || "Could not load the team list");
+    } catch { setError("Network error while loading the team list"); }
     finally { setLoading(false); }
     // authCtx isn't memoized by its provider; getToken is safe to close over.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,15 +97,19 @@ export default function TeamPage() {
     finally { setInviting(false); }
   };
 
+  const [removing, setRemoving] = useState(false);
   const handleRemove = async (id) => {
+    setRemoving(true); setError(null);
     try {
-      await fetch(`/api/auth/admins/${id}`, {
+      const res = await fetch(`/api/auth/admins/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${await authCtx.getToken()}` },
       });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not remove admin");
       setDeleteConfirm(null);
       fetchAdmins();
-    } catch { /* network error — modal stays open, user can retry */ }
+    } catch (err) { setError(err.message); }
+    finally { setRemoving(false); }
   };
 
 
@@ -326,10 +331,7 @@ export default function TeamPage() {
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Btn size="sm" variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Btn>
-          <button onClick={() => handleRemove(deleteConfirm?.id)} style={{
-            padding: "7px 18px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 600,
-            background: "#EF4444", color: "#fff", cursor: "pointer", fontFamily: "inherit",
-          }}>Remove</button>
+          <Btn size="sm" variant="danger" loading={removing} onClick={() => handleRemove(deleteConfirm?.id)}>Remove</Btn>
         </div>
       </Modal>
 

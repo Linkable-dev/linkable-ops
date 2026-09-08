@@ -10,24 +10,32 @@ export function Modal({ open, onClose, title, width = 520, children }) {
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
+  // Escape closes, like every other dialog people are used to.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
     <div onClick={onClose} style={{
       position: "fixed", inset: 0, zIndex: 1000,
-      background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)",
+      background: "rgba(18,20,25,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center",
       padding: 24,
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: theme.surface, borderRadius: 12, width: "100%", maxWidth: width,
+        background: theme.surface, borderRadius: 16, width: "100%", maxWidth: width,
         maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
         border: `1px solid ${theme.border}`,
       }}>
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
           padding: "16px 20px", borderBottom: `1px solid ${theme.border}`,
-          position: "sticky", top: 0, background: theme.surface, zIndex: 1, borderRadius: "12px 12px 0 0",
+          position: "sticky", top: 0, background: theme.surface, zIndex: 1, borderRadius: "16px 16px 0 0",
         }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: theme.text }}>{title}</div>
           <button onClick={onClose} style={{

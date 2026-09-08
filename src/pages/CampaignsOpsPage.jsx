@@ -23,7 +23,7 @@ const PAGE_SIZE = 25;
 // The expand-chevron column is fixed — not resizable.
 const COLUMNS = [
   { key: "expand",            width: 28, resizable: false },
-  { key: "campaign_name",     width: 260 },
+  { key: "campaign_name",     width: 200, fill: true },
   { key: "brand_name",        width: 160 },
   { key: "creators_invited",  width: 100 },
   { key: "creators_applied",  width: 100 },
@@ -32,7 +32,7 @@ const COLUMNS = [
   { key: "products_shipped",  width: 85 },
   { key: "clicks",            width: 80 },
   { key: "sales",             width: 80 },
-  { key: "bottleneck",        width: 240 },
+  { key: "bottleneck",        width: 180, fill: true },
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
 
@@ -54,7 +54,9 @@ export default function CampaignsOpsPage() {
   const [filters, setFilters] = useState({}); // per-column server-side filters
 
   const { widths, startResize, resetWidth } = useColumnWidths("ops-campaigns", DEFAULT_WIDTHS);
-  const totalWidth = COLUMNS.reduce((sum, c) => sum + (widths[c.key] || c.width), 0);
+  // Fixed columns keep their width; the two `fill` columns share whatever is
+  // left, so the table fits the card and only scrolls when it really must.
+  const totalWidth = COLUMNS.reduce((sum, c) => sum + (c.fill ? 140 : (widths[c.key] || c.width)), 0);
 
   const handleFilter = (key, value) => {
     setPage(0);
@@ -180,7 +182,7 @@ export default function CampaignsOpsPage() {
           <table style={{ width: "100%", minWidth: totalWidth, borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
             <colgroup>
               {COLUMNS.map((c) => (
-                <col key={c.key} style={{ width: widths[c.key] || c.width }} />
+                <col key={c.key} style={c.fill ? { minWidth: 140 } : { width: widths[c.key] || c.width }} />
               ))}
             </colgroup>
             <thead>

@@ -25,7 +25,9 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    api.getOverview().then(setData).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    let alive = true;
+    api.getOverview().then((d) => { if (alive) setData(d); }).catch((e) => { if (alive) setError(e.message); }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, []);
 
   if (loading) return (
@@ -82,7 +84,7 @@ export default function DashboardPage() {
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${theme.border}` }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>Money</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
           <MetricCell theme={theme} label="Revenue" value={`$${friendlyNumber(revenue.total)}`} />
           <MetricCell theme={theme} label="Orders" value={revenue.totalOrders} border />
           <MetricCell theme={theme} label="Avg Order" value={`$${friendlyNumber(revenue.avgOrderValue)}`} border />
@@ -287,7 +289,7 @@ function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
       <ResponsiveContainer width="100%" height={180}>
         <AreaChart data={data}>
           <defs>
-            <linearGradient id={`g-${title}`} x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={`g-${String(title).replace(/\W+/g, "-")}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={color} stopOpacity={0.1} />
               <stop offset="95%" stopColor={color} stopOpacity={0} />
             </linearGradient>
@@ -297,7 +299,7 @@ function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
             tickFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
           <YAxis tick={{ fontSize: 9, fill: theme.textMuted }} axisLine={false} tickLine={false} allowDecimals={false} />
           <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => new Date(d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} />
-          <Area type="monotone" dataKey="count" stroke={color} strokeWidth={2} fill={`url(#g-${title})`} />
+          <Area type="monotone" dataKey="count" stroke={color} strokeWidth={2} fill={`url(#g-${String(title).replace(/\W+/g, "-")})`} />
         </AreaChart>
       </ResponsiveContainer>
     </Card>

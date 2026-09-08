@@ -729,7 +729,7 @@ function SendsTab({ campaign, theme }) {
                       </button>
                       {(r.status === "pending" || r.status === "scheduled") && (
                         <button
-                          onClick={() => runStop([r.to_email], "replied")}
+                          onClick={() => { if (window.confirm(`Stop all pending emails to ${r.to_email}? This suppresses the address for this campaign.`)) runStop([r.to_email], "replied"); }}
                           disabled={stopBusy}
                           style={miniBtn(theme)}
                           title="Cancel this row + all other pending touches for this address"
@@ -1026,12 +1026,17 @@ function SettingsCard({ campaign, theme, onSaved }) {
   async function save() {
     setBusy(true); setErr(null);
     try {
-      const target_filters = {
-        countries: form.countries.split(",").map((s) => s.trim()).filter(Boolean),
-        categories: form.categories,
-        min_revenue: Number(form.min_revenue) || undefined,
-        max_revenue: Number(form.max_revenue) || undefined,
-      };
+      // Influencer campaigns keep their own targeting (followers, niches, list
+      // tag); the brand fields below would otherwise wipe it on every save.
+      const target_filters = campaign.audience_type === "influencer"
+        ? (campaign.target_filters || {})
+        : {
+          ...(campaign.target_filters || {}),
+          countries: form.countries.split(",").map((s) => s.trim()).filter(Boolean),
+          categories: form.categories,
+          min_revenue: Number(form.min_revenue) || undefined,
+          max_revenue: Number(form.max_revenue) || undefined,
+        };
       const schedule = {
         cadence: form.schedule_cadence,
         timezone: form.schedule_timezone,
@@ -1255,22 +1260,30 @@ function selStyle(theme) {
 // ---------- ACTIONS ----------
 
 function CampaignActions({ campaign, onChange, navigate }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(null); // "pause" | "resume" | "archive"
+  const [err, setErr] = useState(null);
 
-  async function pause() { setBusy(true); try { await api.pauseOutboundCampaign(campaign.id); onChange(); } finally { setBusy(false); } }
-  async function resume() { setBusy(true); try { await api.resumeOutboundCampaign(campaign.id); onChange(); } finally { setBusy(false); } }
-  async function archive() {
-    if (!window.confirm(`Archive "${campaign.name}"? Already-scheduled touches will still go out unless you also pause.`)) return;
-    setBusy(true);
-    try { await api.archiveOutboundCampaign(campaign.id); navigate("/ai/campaigns"); }
-    finally { setBusy(false); }
+  async function run(action, fn) {
+    setBusy(action); setErr(null);
+    try { await fn(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(null); }
   }
+  const pause = () => run("pause", async () => { await api.pauseOutboundCampaign(campaign.id); onChange(); });
+  const resume = () => run("resume", async () => { await api.resumeOutboundCampaign(campaign.id); onChange(); });
+  const archive = () => {
+    if (!window.confirm(`Archive "${campaign.name}"? Already-scheduled touches will still go out unless you also pause.`)) return;
+    run("archive", async () => { await api.archiveOutboundCampaign(campaign.id); navigate("/ai/campaigns"); });
+  };
 
   return (
-    <div style={{ display: "flex", gap: 8 }}>
-      {campaign.status === "active" && <Btn onClick={pause} loading={busy} variant="secondary">Pause</Btn>}
-      {campaign.status === "paused" && <Btn onClick={resume} loading={busy}>Resume</Btn>}
-      {campaign.status !== "archived" && <Btn onClick={archive} loading={busy} variant="secondary" style={{ color: "#DC2626" }}>Archive</Btn>}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        {campaign.status === "active" && <Btn onClick={pause} loading={busy === "pause"} disabled={!!busy} variant="secondary">Pause</Btn>}
+        {campaign.status === "paused" && <Btn onClick={resume} loading={busy === "resume"} disabled={!!busy}>Resume</Btn>}
+        {campaign.status !== "archived" && <Btn onClick={archive} loading={busy === "archive"} disabled={!!busy} variant="outline" color="#DC2626">Archive</Btn>}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#B91C1C" }}>{err}</div>}
     </div>
   );
 }
@@ -1478,7 +1491,9 @@ function LeadPoolPanel({ theme, campaign }) {
     maxRevenue: tf.max_revenue,
   } : {};
 
+  const [poolState, setPoolState] = useState({ loading: false, error: null });
   const load = useCallback(() => {
+    setPoolState({ loading: true, error: null });
     api.listOutboundLeads({
       q: q || undefined,
       qualified: onlyQualified ? undefined : "false",
@@ -1488,8 +1503,8 @@ function LeadPoolPanel({ theme, campaign }) {
       sortDir: sort.sortDir,
       ...filterArgs,
     })
-      .then((res) => { setRows(res.rows || []); setTotal(res.total || 0); })
-      .catch(() => {});
+      .then((res) => { setRows(res.rows || []); setTotal(res.total || 0); setPoolState({ loading: false, error: null }); })
+      .catch((e) => setPoolState({ loading: false, error: e.message }));
     api.getOutboundLeadCounts(filterArgs).then(setCounts).catch(() => {});
   }, [q, page, onlyQualified, scopeToCampaign, sort, JSON.stringify(filterArgs)]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1502,6 +1517,7 @@ function LeadPoolPanel({ theme, campaign }) {
 
   return (
     <Card style={{ marginBottom: 16, padding: 0 }}>
+      {poolState.error && <div style={{ margin: "12px 20px 0", padding: "8px 12px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 12 }}>Could not load leads: {poolState.error}</div>}
       <div style={{ padding: "16px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -1759,8 +1775,9 @@ function TemplateRow({ template, theme, onChange }) {
 
   async function deactivate() {
     if (!window.confirm("Deactivate this template? It won't be sent again until you toggle is_active back on.")) return;
-    setBusy(true);
+    setBusy(true); setErr(null);
     try { await api.deleteOutboundTemplate(template.id); onChange(); }
+    catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   }
 
@@ -1825,9 +1842,9 @@ function Field({ label, theme, colSpan, children }) {
   );
 }
 
-function Pill({ tint = {}, children }) {
+function Pill({ tint = {}, children, title }) {
   return (
-    <span style={{
+    <span title={title} style={{
       display: "inline-block",
       background: tint.bg || "#F3F4F6", color: tint.fg || "#374151",
       fontSize: 10, fontWeight: 700, padding: "2px 6px",

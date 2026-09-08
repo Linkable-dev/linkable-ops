@@ -7,7 +7,7 @@ export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChan
   const to = Math.min(page * pageSize, total);
 
   const btnStyle = (disabled) => ({
-    padding: "6px 12px", borderRadius: 6, border: `1px solid ${theme.border}`,
+    padding: "6px 12px", borderRadius: 999, border: `1px solid ${theme.border}`,
     background: disabled ? "transparent" : theme.surface, color: disabled ? theme.textMuted : theme.text,
     fontSize: 13, fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.5 : 1, transition: "all 0.1s",

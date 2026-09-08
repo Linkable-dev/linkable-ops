@@ -74,7 +74,7 @@ export default function AcceptInvitePage() {
   if (tokenError) return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh",
-      background: theme.bg, color: theme.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      background: theme.bg, color: theme.text, fontFamily: "inherit",
     }}>
       <div style={{ textAlign: "center", maxWidth: 360, padding: 24 }}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Invalid or Expired Invite</div>
@@ -90,7 +90,7 @@ export default function AcceptInvitePage() {
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh",
-      background: theme.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+      background: theme.bg, fontFamily: "inherit",
       color: theme.text,
     }}>
       <div style={{ width: "100%", maxWidth: 380, padding: 24 }}>

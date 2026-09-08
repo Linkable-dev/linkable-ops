@@ -68,7 +68,7 @@ export default function SetupPasswordPage() {
   if (!sessionReady) return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh",
-      background: theme.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      background: theme.bg, fontFamily: "inherit",
       color: theme.text,
     }}>
       <div style={{ textAlign: "center", maxWidth: 360, padding: 24 }}>
@@ -87,7 +87,7 @@ export default function SetupPasswordPage() {
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh",
-      background: theme.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+      background: theme.bg, fontFamily: "inherit",
       color: theme.text,
     }}>
       <div style={{ width: "100%", maxWidth: 380, padding: 24 }}>

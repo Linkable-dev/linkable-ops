@@ -23,15 +23,15 @@ const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
 // localStorage per table). `fill: true` lets a column absorb leftover space.
 const BRAND_COLUMNS = [
   { key: "avatar",          label: "",             width: 44,  resizable: false },
-  { key: "store_name",      label: "Store",        width: 170, fill: true, sortable: true, defaultDir: "asc",
+  { key: "store_name",      label: "Store",        width: 160, fill: true, sortable: true, defaultDir: "asc",
     filter: { type: "text", placeholder: "Store / website…" } },
-  { key: "email",           label: "Email",        width: 190, fill: true, sortable: true, defaultDir: "asc",
+  { key: "email",           label: "Email",        width: 170, fill: true, sortable: true, defaultDir: "asc",
     filter: { type: "text", placeholder: "Email…" } },
   { key: "owner_name",      label: "Owner",        width: 120, sortable: true, defaultDir: "asc",
     filter: { type: "text", placeholder: "Name…" } },
   { key: "user_created",    label: "Joined",       width: 85,  sortable: true, defaultDir: "desc" },
   { key: "last_sign_in",    label: "Last sign in", width: 95,  sortable: true, defaultDir: "desc" },
-  { key: "subscription",    label: "Subscription", width: 210, sortable: true, defaultDir: "desc",
+  { key: "subscription",    label: "Subscription", width: 185, sortable: true, defaultDir: "desc",
     filter: { type: "select", options: [
       { value: "paying",   label: "Paying" },
       { value: "trial",    label: "In trial" },

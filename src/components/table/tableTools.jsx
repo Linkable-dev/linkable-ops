@@ -178,7 +178,7 @@ export function ColumnFilter({ type = "text", value, options, placeholder, onCom
     color: active ? theme.text : theme.textMid,
     border: `1px solid ${focused || active ? accent : theme.border}`,
     borderRadius: 6,
-    fontFamily: "inherit", fontSize: 11, padding: "0 7px",
+    fontFamily: "inherit", fontSize: 11, padding: "0 22px 0 7px",
     outline: "none", transition: "border-color 0.12s, color 0.12s",
   };
 

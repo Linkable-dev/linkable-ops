@@ -1,7 +1,7 @@
 import { useTheme } from "../../contexts/ThemeContext";
 
 export function Skeleton({ width = "100%", height = 14, radius = 6, style = {} }) {
-  const { theme, mode } = useTheme();
+  const { mode } = useTheme();
   const base = mode === "dark" ? "#1f1f1f" : "#EAEAEA";
   const hi   = mode === "dark" ? "#2a2a2a" : "#F5F5F5";
   return (

@@ -5,12 +5,12 @@ import { useTheme } from "./contexts/ThemeContext";
 
 export default function App() {
   const { theme, sidebarOpen } = useTheme();
-  const sidebarW = sidebarOpen ? 240 : 68;
+  const sidebarW = sidebarOpen ? 240 : 64; // keep in sync with Sidebar W
 
   return (
     <div style={{
       display: "flex", minHeight: "100vh", background: theme.bg,
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+      fontFamily: "inherit",
       color: theme.text, transition: "background 0.2s, color 0.2s",
     }}>
       <Sidebar />

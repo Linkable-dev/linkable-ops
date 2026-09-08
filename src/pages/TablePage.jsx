@@ -84,6 +84,8 @@ export default function TablePage() {
   const [data, setData] = useState({ rows: [], total: 0, page: 1, totalPages: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(""); // debounced into `search`
+  const [deleteError, setDeleteError] = useState(null);
   const [sortBy, setSortBy] = useState("");
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
@@ -149,8 +151,13 @@ export default function TablePage() {
   }, [table, page, pageSize, search, sortBy, sortDir, filters]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  // Search: wait for a pause in typing instead of refetching per keystroke.
   useEffect(() => {
-    setSearch(""); setSortBy(""); setSortDir("asc"); setPage(1);
+    const t = setTimeout(() => { setSearch(searchInput); setPage(1); }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+  useEffect(() => {
+    setSearch(""); setSearchInput(""); setSortBy(""); setSortDir("asc"); setPage(1);
     setFilters({}); setShowFilters(false); setFkLabels({});
     // Switching tables loads THAT table's stored widths (empty if none saved)
     setColWidths(loadStoredWidths(table));
@@ -176,8 +183,9 @@ export default function TablePage() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(deleteConfirm);
+    setDeleteError(null);
     try { await api.deleteRow(table, deleteConfirm); setDeleteConfirm(null); fetchData(); }
-    catch (err) { console.error(err); }
+    catch (err) { setDeleteError(err.message || "Delete failed"); }
     finally { setDeleting(null); }
   };
 
@@ -204,13 +212,13 @@ export default function TablePage() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    setBulkDeleting(true);
+    setBulkDeleting(true); setDeleteError(null);
     try {
       await api.deleteRows(table, [...selectedIds]);
       setBulkDeleteConfirm(false);
       setSelectedIds(new Set());
       fetchData();
-    } catch (err) { console.error(err); }
+    } catch (err) { setDeleteError(err.message || "Delete failed"); }
     finally { setBulkDeleting(false); }
   };
 
@@ -318,8 +326,8 @@ export default function TablePage() {
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
         <input
-          type="text" value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          type="text" value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           placeholder="Search across all text fields..."
           style={{
             width: "100%", padding: "9px 13px 9px 36px",
@@ -416,7 +424,7 @@ export default function TablePage() {
                 Array.from({ length: 10 }).map((_, r) => (
                   <tr key={`sk-${r}`} style={{ borderBottom: `1px solid ${theme.border}` }}>
                     {pk && <td />}
-                    {visibleCols.map((col, c) => (
+                    {(visibleCols.length ? visibleCols : Array.from({ length: 6 }, (_, i) => ({ column_name: `c${i}` }))).map((col, c) => (
                       <td key={col.column_name} style={{ padding: "12px 14px" }}>
                         <Skeleton width={`${50 + ((r + c) * 11) % 45}%`} height={11} />
                       </td>
@@ -460,7 +468,7 @@ export default function TablePage() {
                       </td>
                     ))}
                     {hasMore && <td style={{ padding: "10px 14px", color: theme.textMuted, fontSize: 11 }}>...</td>}
-                    <td style={{ padding: "10px 14px", textAlign: "right", position: "sticky", right: 0, background: "inherit" }}>
+                    <td style={{ padding: "10px 14px", textAlign: "right", position: "sticky", right: 0, background: pk && selectedIds.has(id) ? theme.accentLight : theme.surface }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
                         {pk && (
                           <>
@@ -511,6 +519,7 @@ export default function TablePage() {
 
       {/* Delete Confirmation Modal */}
       <Modal open={deleteConfirm !== null} onClose={() => setDeleteConfirm(null)} title="Delete Record" width={420}>
+        {deleteError && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{deleteError}</div>}
         <div style={{ padding: "4px 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
             <div style={{
@@ -548,6 +557,7 @@ export default function TablePage() {
 
       {/* Bulk Delete Confirmation Modal */}
       <Modal open={bulkDeleteConfirm} onClose={() => setBulkDeleteConfirm(false)} title="Delete Records" width={420}>
+        {deleteError && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{deleteError}</div>}
         <div style={{ padding: "4px 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
             <div style={{

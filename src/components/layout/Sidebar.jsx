@@ -73,7 +73,7 @@ export default function Sidebar() {
   }, []);
 
   const navItem = (to, label, isActive, iconEl, indent = false) => (
-    <Link to={to} title={label} style={{
+    <Link key={to} to={to} title={label} style={{
       display: "flex", alignItems: "center", gap: 10, height: 34,
       padding: sidebarOpen ? (indent ? "0 10px 0 22px" : "0 10px") : "0",
       justifyContent: sidebarOpen ? "flex-start" : "center",
@@ -90,14 +90,6 @@ export default function Sidebar() {
       </span>
       {sidebarOpen && <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>}
     </Link>
-  );
-
-  const sectionHeader = (label) => sidebarOpen ? (
-    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: theme.textMuted, padding: "12px 12px 6px" }}>
-      {label}
-    </div>
-  ) : (
-    <div style={{ height: 1, background: theme.border, margin: "10px 10px" }} />
   );
 
   const moduleHeader = (label, iconEl, open, onToggle) => sidebarOpen ? (
@@ -242,6 +234,7 @@ export default function Sidebar() {
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
+            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
           </div>
         )}
 
@@ -258,11 +251,12 @@ export default function Sidebar() {
           }}>
             {navItem("/ai/campaigns", "Outbound", path.startsWith("/ai/campaigns"), campaignsIcon)}
             {navItem("/ai/inbox", "Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
+            {navItem("/ai/test-lab", "Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
           </div>
         )}
 
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("CMS", cmsIcon, cmsOpen, () => setCmsOpen(!cmsOpen))}
+          {moduleHeader("Database", cmsIcon, cmsOpen, () => setCmsOpen(!cmsOpen))}
         </div>
         {(cmsOpen || !sidebarOpen) && (
           <div style={{
@@ -273,7 +267,6 @@ export default function Sidebar() {
             marginTop: 4,
           }}>
             {navItem("/dashboard", "Dashboard", path === "/dashboard", dashboardIcon)}
-            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {subHeader("Tables")}
             {loading ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 10px" }}>

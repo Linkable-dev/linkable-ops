@@ -1,13 +1,51 @@
+/* Linkable brand typeface (same files the marketing site ships). */
+@font-face { font-family: "Satoshi"; font-weight: 400; font-style: normal; font-display: swap; src: url("./assets/fonts/Satoshi-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Satoshi"; font-weight: 500; font-style: normal; font-display: swap; src: url("./assets/fonts/Satoshi-Medium.woff2") format("woff2"); }
+@font-face { font-family: "Satoshi"; font-weight: 600 700; font-style: normal; font-display: swap; src: url("./assets/fonts/Satoshi-Bold.woff2") format("woff2"); }
+@font-face { font-family: "Satoshi"; font-weight: 400; font-style: italic; font-display: swap; src: url("./assets/fonts/Satoshi-Italic.woff2") format("woff2"); }
+
+:root {
+  --lk-font: "Satoshi", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --lk-focus: #232323;           /* overwritten by the theme provider */
+  --lk-focus-ring: rgba(35, 35, 35, 0.12);
+  --lk-scrollbar: #D9DFE8;
+  --lk-hover: rgba(35, 35, 35, 0.04);
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--lk-font);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+
+button, input, select, textarea { font-family: inherit; }
+
+/* Keyboard focus is visible everywhere, in the brand colour. */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  border-color: var(--lk-focus) !important;
+  box-shadow: 0 0 0 3px var(--lk-focus-ring) !important;
+}
+button:focus-visible, a:focus-visible { outline: 2px solid var(--lk-focus); outline-offset: 2px; border-radius: 8px; }
+
+/* Buttons rendered by ui/Button.jsx */
+.lk-btn:not(:disabled):hover { filter: brightness(0.94); }
+.lk-btn.lk-btn-outline:not(:disabled):hover, .lk-btn.lk-btn-secondary:not(:disabled):hover { filter: none; background: var(--lk-hover) !important; }
+.lk-btn:not(:disabled):active { transform: translateY(0.5px); }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes lkBreathe {
+  0%, 100% { transform: scale(0.94); opacity: 0.75; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+@keyframes lkHalo {
+  0%, 100% { transform: scale(0.6); opacity: 0.22; }
+  50%      { transform: scale(1); opacity: 0.06; }
 }
 
 @keyframes skeletonShimmer {
@@ -32,5 +70,5 @@ select {
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #ccc; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #aaa; }
+::-webkit-scrollbar-thumb { background: var(--lk-scrollbar); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { filter: brightness(0.85); }

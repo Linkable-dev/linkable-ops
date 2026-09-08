@@ -34,6 +34,8 @@ export default function AiInboxPage() {
   const [mode, setMode] = useState("all");
   const [status, setStatus] = useState("unhandled");
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  useEffect(() => { const t = setTimeout(() => setSearch(searchInput), 300); return () => clearTimeout(t); }, [searchInput]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -119,7 +121,7 @@ export default function AiInboxPage() {
         theme={theme}
         mode={mode} setMode={setMode}
         status={status} setStatus={setStatus}
-        search={search} setSearch={setSearch}
+        search={searchInput} setSearch={setSearchInput}
       />
 
       {error && (
@@ -315,7 +317,7 @@ function DetailPane({ theme, selected, detail, loading, busyAction, onClose, onM
   if (loading || !detail) {
     return (
       <Card>
-        <div style={{ color: theme.textMuted, fontSize: 13 }}>Loading…</div>
+        <SkeletonRow widths={["40%", "90%", "75%", "60%"]} gap={12} />
       </Card>
     );
   }

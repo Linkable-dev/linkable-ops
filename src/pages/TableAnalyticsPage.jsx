@@ -27,7 +27,7 @@ export default function TableAnalyticsPage() {
   };
 
   useEffect(() => {
-    setLoading(true);
+    setLoading(true); setError(null);
     api.getTableAnalytics(table).then(setData).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, [table]);
 
@@ -63,7 +63,7 @@ export default function TableAnalyticsPage() {
   return (
     <div>
       <Link to={`/tables/${table}`} style={{
-        display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none",
+        display: "flex", width: "fit-content", alignItems: "center", gap: 6, textDecoration: "none",
         color: theme.textMid, fontSize: 13, marginBottom: 20,
       }}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -90,7 +90,7 @@ export default function TableAnalyticsPage() {
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={ts.map((d) => ({ date: d.date, count: parseInt(d.count) }))}>
               <defs>
-                <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`tg-${col}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={theme.accent} stopOpacity={0.1} />
                   <stop offset="95%" stopColor={theme.accent} stopOpacity={0} />
                 </linearGradient>
@@ -100,7 +100,7 @@ export default function TableAnalyticsPage() {
                 tickFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
               <YAxis tick={{ fontSize: 9, fill: theme.textMuted }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => new Date(d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} />
-              <Area type="monotone" dataKey="count" stroke={theme.accent} strokeWidth={2} fill="url(#tg)" name="New records" />
+              <Area type="monotone" dataKey="count" stroke={theme.accent} strokeWidth={2} fill={`url(#tg-${col})`} name="New records" />
             </AreaChart>
           </ResponsiveContainer>
         </Card>

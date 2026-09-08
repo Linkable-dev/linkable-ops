@@ -221,7 +221,7 @@ export default function HomePage() {
           <Stat label="Cancelled · in grace" value={num(subscriptions.cancelledInGrace)} accent={ROSE} sub="cancelled, trial access ending" />
           <Stat label="No plan yet" value={num(subscriptions.noPaidPlan)} sub="never subscribed / lapsed" />
         </div>
-        <div style={{ marginTop: 14 }}>
+        <div style={{ ...grid(5), marginTop: 14 }}>
           <Stat
             label="New brands this month"
             value={num(brands.newThisMonth)}
