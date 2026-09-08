@@ -5,6 +5,9 @@ import { useDbTarget } from "../../contexts/DbTargetContext";
 
 function getPageInfo(pathname) {
   if (pathname === "/") return { title: "Dashboard", subtitle: "Database overview and analytics" };
+  if (pathname === "/blog") return { title: "Blog", subtitle: "Articles published on linkable.link" };
+  if (pathname === "/blog/new") return { title: "Blog", subtitle: "New article" };
+  if (pathname.startsWith("/blog/")) return { title: "Blog", subtitle: "Edit article" };
   const match = pathname.match(/^\/tables\/([^/]+)/);
   if (match) {
     const table = match[1].replace(/_/g, " ");

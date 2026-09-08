@@ -129,6 +129,13 @@ export default function Sidebar() {
     </div>
   );
 
+  const blogIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 4h16v16H4z"/>
+      <path d="M8 9h8M8 13h8M8 17h5"/>
+    </svg>
+  );
+
   const cmsIcon = (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -266,6 +273,7 @@ export default function Sidebar() {
             marginTop: 4,
           }}>
             {navItem("/dashboard", "Dashboard", path === "/dashboard", dashboardIcon)}
+            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {subHeader("Tables")}
             {loading ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 10px" }}>

@@ -14,3 +14,21 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## Blog (articles on www.linkable.link)
+
+Articles live in their own Supabase project (`BLOG_SUPABASE_URL`, tables `blog_posts` and `blog_topics`; schema in
+`server/sql/blog/001_blog_posts.sql`, apply it with the Supabase SQL editor or Management API). The **Blog** section of
+the ops app (CMS module) lists, edits, creates, publishes and deletes articles, keeps a topic backlog, and can draft an
+article with Claude (`server/lib/blog-writer.js`: voice rules in `server/data/blog/style.md`, allowed facts in
+`server/data/blog/facts.md`, hero images in `server/data/blog/images.json`). Every draft is validated against those
+rules before it is saved.
+
+- Daily article: Vercel cron hits `GET /api/cron/blog-daily` at 07:00 UTC, writes one article from the backlog and
+  publishes it (`?draft=1` to save as draft instead).
+- The website is rendered from the database by the landing-page repo
+  (`Linkable-dev/linkable-landing-page`, workflow `blog-sync.yml`, every two hours). "Publish to site" and every
+  publish trigger an immediate rebuild when `GITHUB_TOKEN` (a token with `repo` scope on that repo) is set on this
+  server; otherwise changes go live at the next scheduled sync.
+- Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `CRON_SECRET`,
+  optional `GITHUB_TOKEN` and `LANDING_REPO`.

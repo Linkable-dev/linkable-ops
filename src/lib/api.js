@@ -36,6 +36,22 @@ function buildQs(params) {
 }
 
 export const api = {
+  // Blog (articles on www.linkable.link)
+  getBlogPosts: (status) => request(`/blog/posts${status ? `?status=${status}` : ""}`),
+  getBlogPost: (id) => request(`/blog/posts/${id}`),
+  createBlogPost: (data) => request("/blog/posts", { method: "POST", body: JSON.stringify(data) }),
+  updateBlogPost: (id, data) => request(`/blog/posts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteBlogPost: (id) => request(`/blog/posts/${id}`, { method: "DELETE" }),
+  validateBlogPost: (data) => request("/blog/posts/validate", { method: "POST", body: JSON.stringify(data) }),
+  generateBlogPost: (data) => request("/blog/generate", { method: "POST", body: JSON.stringify(data) }),
+  deployBlog: () => request("/blog/deploy", { method: "POST", body: "{}" }),
+  getBlogTopics: () => request("/blog/topics"),
+  createBlogTopic: (data) => request("/blog/topics", { method: "POST", body: JSON.stringify(data) }),
+  proposeBlogTopics: () => request("/blog/topics/propose", { method: "POST", body: "{}" }),
+  updateBlogTopic: (id, data) => request(`/blog/topics/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteBlogTopic: (id) => request(`/blog/topics/${id}`, { method: "DELETE" }),
+  getBlogImages: () => request("/blog/images"),
+
   getTables: () => request("/tables"),
   getSchema: (table) => request(`/tables/${table}/schema`),
   getRows: (table, params = {}) => request(`/tables/${table}/rows?${buildQs(params)}`),

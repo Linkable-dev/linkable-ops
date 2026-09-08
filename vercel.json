@@ -10,11 +10,27 @@
     }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api" },
-    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "/api"
+    },
+    {
+      "source": "/((?!api(?:/|$)).*)",
+      "destination": "/index.html"
+    }
   ],
   "crons": [
-    { "path": "/api/cron/auto-discover", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/run-daily-outbound", "schedule": "0 9 * * 1-5" }
+    {
+      "path": "/api/cron/auto-discover",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/run-daily-outbound",
+      "schedule": "0 9 * * 1-5"
+    },
+    {
+      "path": "/api/cron/blog-daily",
+      "schedule": "0 7 * * *"
+    }
   ]
 }

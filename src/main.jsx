@@ -20,6 +20,8 @@ import AiCampaignsPage from "./pages/AiCampaignsPage";
 import AiCampaignDetailPage from "./pages/AiCampaignDetailPage";
 import UsersPage from "./pages/UsersPage";
 import TrialsPage from "./pages/TrialsPage";
+import BlogPage from "./pages/blog/BlogPage";
+import BlogEditorPage from "./pages/blog/BlogEditorPage";
 import "./index.css";
 
 createRoot(document.getElementById("root")).render(
@@ -45,6 +47,9 @@ createRoot(document.getElementById("root")).render(
                 <Route path="/tables/:table" element={<TablePage />} />
                 <Route path="/tables/:table/analytics" element={<TableAnalyticsPage />} />
                 <Route path="/team" element={<TeamPage />} />
+                <Route path="/blog" element={<BlogPage />} />
+                <Route path="/blog/new" element={<BlogEditorPage />} />
+                <Route path="/blog/:id" element={<BlogEditorPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Route>

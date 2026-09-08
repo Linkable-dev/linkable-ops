@@ -10,6 +10,7 @@ import {
   conversationsWebhookRoutes,
 } from "../server/routes/conversations.js";
 import { cronRoutes } from "../server/routes/cron.js";
+import { blogRoutes } from "../server/routes/blog.js";
 import { outboundRoutes } from "../server/routes/outbound.js";
 import { outboundCampaignsRoutes } from "../server/routes/outbound-campaigns.js";
 import { dbTargetMiddleware } from "../server/middleware/dbTarget.js";
@@ -99,6 +100,8 @@ app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes()
 app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
 app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
+// Blog articles for www.linkable.link (Supabase-backed, see migration 018).
+app.use("/api/blog", requireOpsAdmin, blogRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
 

@@ -9,6 +9,7 @@
     "outreach:dry": "node automation/run.js --dry-run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "@google-cloud/cloud-sql-connector": "^1.9.2",
     "@google-cloud/storage": "^7.19.0",
     "@supabase/supabase-js": "^2.101.0",
@@ -16,6 +17,7 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "p-queue": "^8.1.0",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "zod": "^4.5.4"
   }
 }

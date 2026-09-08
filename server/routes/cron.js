@@ -13,6 +13,7 @@ import { runDailyInfluencer } from "../automation/run-daily-influencer.js";
 import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discovery.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
+import { generatePost, triggerSiteRebuild } from "../lib/blog-writer.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -72,6 +73,22 @@ export function cronRoutes() {
   router.get("/ping", (req, res) => {
     if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
     res.json({ ok: true, ts: new Date().toISOString() });
+  });
+
+  // Daily blog article for www.linkable.link: writes one AI article from the
+  // topic backlog, publishes it and asks the landing-page repo to re-render.
+  //   ?draft=1  — save as draft instead of publishing
+  router.get("/blog-daily", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const publish = !(req.query.draft === "1" || req.query.draft === "true");
+      const post = await generatePost({ publish, createdBy: "cron" });
+      const rebuild = publish ? await triggerSiteRebuild(`daily article ${post.slug}`).catch((e) => ({ triggered: false, note: e.message })) : null;
+      res.json({ ok: true, slug: post.slug, title: post.title, status: post.status, rebuild });
+    } catch (err) {
+      console.error("/cron/blog-daily error:", err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Vercel Cron hits GET by default.

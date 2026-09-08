@@ -10,6 +10,7 @@ import {
   conversationsWebhookRoutes,
 } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
+import { blogRoutes } from "./routes/blog.js";
 import { closeCloudSql } from "./lib/cloudsql.js";
 import { dbTargetMiddleware } from "./middleware/dbTarget.js";
 
@@ -45,6 +46,8 @@ app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes()
 app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
 app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
+// Blog articles for www.linkable.link (Supabase-backed, see migration 018).
+app.use("/api/blog", requireOpsAdmin, blogRoutes());
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Linkable Ops server running on port ${PORT}`));
