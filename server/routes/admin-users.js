@@ -428,6 +428,12 @@ const BRAND_FILTERS = {
     offered: BRAND_TRIAL_GRANTED_SQL,
     no_plan: `(COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan'))`,
   }),
+  // Marketplace visibility (brands.hidden, set from Manage). Not a column
+  // filter: the page sends it from a select beside the search box.
+  visibility: enumFilter({
+    visible: `COALESCE(b.hidden, false) = false`,
+    hidden:  `COALESCE(b.hidden, false) = true`,
+  }),
 };
 
 async function listBrands(query) {

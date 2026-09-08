@@ -234,15 +234,38 @@ export default function UsersPage() {
         setFilters({});
       }} />
 
-      <div style={{ marginBottom: 16, maxWidth: 420 }}>
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={tab === "creators"
-            ? "Search by IG handle, email, name…"
-            : "Search by store name, website, email, name…"
-          }
-        />
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: "0 1 420px", minWidth: 240 }}>
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={tab === "creators"
+              ? "Search by IG handle, email, name…"
+              : "Search by store name, website, email, name…"
+            }
+          />
+        </div>
+        {/* Marketplace visibility (brands.hidden). Lives beside the search
+            rather than in the filter row because it isn't a column: the
+            HIDDEN pill sits inside the Store cell. Server-side like the rest
+            (BRAND_FILTERS.visibility). */}
+        {tab === "brands" && (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
+            Visibility
+            <div style={{ width: 150 }}>
+              <ColumnFilter
+                theme={theme}
+                type="select"
+                options={[
+                  { value: "visible", label: "Visible only" },
+                  { value: "hidden",  label: "Hidden only" },
+                ]}
+                value={filters.visibility || ""}
+                onCommit={(v) => handleFilter("visibility", v)}
+              />
+            </div>
+          </label>
+        )}
       </div>
 
       {actionError && (
