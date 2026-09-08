@@ -231,10 +231,10 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
+            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
-            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
           </div>
         )}
 
@@ -249,8 +249,8 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {navItem("/ai/campaigns", "Outbound", path.startsWith("/ai/campaigns"), campaignsIcon)}
             {navItem("/ai/inbox", "Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
+            {navItem("/ai/campaigns", "Outbound", path.startsWith("/ai/campaigns"), campaignsIcon)}
             {navItem("/ai/test-lab", "Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
           </div>
         )}

@@ -39,13 +39,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--lk-focus); outl
   to { transform: rotate(360deg); }
 }
 
-@keyframes lkBreathe {
-  0%, 100% { transform: scale(0.94); opacity: 0.75; }
-  50%      { transform: scale(1.06); opacity: 1; }
-}
-@keyframes lkHalo {
-  0%, 100% { transform: scale(0.6); opacity: 0.22; }
-  50%      { transform: scale(1); opacity: 0.06; }
+@keyframes lkTurn {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 @keyframes skeletonShimmer {
