@@ -75,6 +75,12 @@ export const api = {
 
   getOverview: () => request("/analytics/overview"),
   getHome: () => request("/analytics/home"),
+  // Insights: alerts, Brand 360, Home time series, Ask the data, global search
+  getAlerts: () => request("/insights/alerts"),
+  getBrand360: (userId) => request(`/insights/brand/${userId}`),
+  getHomeSeries: (range = "90d") => request(`/insights/series?range=${encodeURIComponent(range)}`),
+  askData: (question) => request("/insights/ask", { method: "POST", body: JSON.stringify({ question }) }),
+  globalSearch: (q) => request(`/insights/search?q=${encodeURIComponent(q)}`),
   getTableAnalytics: (table) => request(`/analytics/${table}`),
 
   // Operations

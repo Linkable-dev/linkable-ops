@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { useTheme } from "../contexts/ThemeContext";
 import { useDbTarget } from "../contexts/DbTargetContext";
-import { Skeleton, SkeletonStat, SkeletonBars } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonStat, SkeletonBars, SkeletonListRows } from "../components/ui/Skeleton";
+import { Sparkline } from "../components/ui/Sparkline";
+import { deltaLabel } from "../lib/delta";
+import { AlertRow } from "../components/alerts/AlertRow";
+import { isSnoozed } from "../lib/alerts";
+import { Link } from "react-router-dom";
+
+const RANGES = [["30d", "30 days"], ["90d", "90 days"], ["12m", "12 months"], ["all", "All time"]];
 
 // ── formatters ──────────────────────────────────────────────────────────────
 const money = (n, { cents, currency = "USD" } = {}) => {
@@ -57,15 +64,29 @@ function Card({ children, span = 3, pad = 18, style }) {
   );
 }
 
-function Stat({ label, value, sub, accent, big, span = 3 }) {
+// One stat card. All values share the same size so the eye compares them
+// evenly; `spark` draws the trend for the selected range and `delta` the change
+// against the previous period.
+function Stat({ label, value, sub, accent, span = 3, spark, delta }) {
   const { theme } = useTheme();
+  const deltaColor = delta?.dir > 0 ? GREEN : delta?.dir < 0 ? RED : theme.textMuted;
   return (
     <Card span={span}>
-      <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: accent || theme.text, lineHeight: 1.1, letterSpacing: -0.5, overflowWrap: "anywhere" }}>
-        {value}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 8 }}>{label}</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: accent || theme.text, lineHeight: 1.1, letterSpacing: -0.5, overflowWrap: "anywhere" }}>
+            {value}
+          </div>
+          {sub && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>{sub}</div>}
+        </div>
+        {spark && spark.length > 1 && (
+          <div style={{ alignSelf: "flex-end", flexShrink: 0 }} title="Trend over the selected range">
+            <Sparkline data={spark} color={accent || theme.brand} width={92} height={30} />
+          </div>
+        )}
       </div>
-      {sub && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>{sub}</div>}
+      {delta && <div style={{ fontSize: 11, color: deltaColor, marginTop: 8, fontWeight: 500 }}>{delta.text}</div>}
     </Card>
   );
 }
@@ -76,6 +97,31 @@ export default function HomePage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Time travel: sparklines + deltas for the chosen range (the headline figures are always "now").
+  const [range, setRange] = useState(() => { try { return localStorage.getItem("lk-home-range") || "90d"; } catch { return "90d"; } });
+  // Cached per target+range so switching back is instant and no state is reset inside effects.
+  const [seriesCache, setSeriesCache] = useState({});
+  const [alertsCache, setAlertsCache] = useState({});
+  const seriesKey = `${target}:${range}`;
+  const series = seriesCache[seriesKey] || null;
+  const alerts = alertsCache[target] || null;
+  useEffect(() => {
+    let alive = true;
+    api.getHomeSeries(range)
+      .then((s) => alive && setSeriesCache((c) => ({ ...c, [seriesKey]: s })))
+      .catch(() => alive && setSeriesCache((c) => ({ ...c, [seriesKey]: { buckets: [], totals: {} } })));
+    return () => { alive = false; };
+  }, [range, target, seriesKey]);
+  useEffect(() => {
+    let alive = true;
+    api.getAlerts()
+      .then((d) => alive && setAlertsCache((c) => ({ ...c, [target]: (d.alerts || []).filter((a) => !isSnoozed(a.key)) })))
+      .catch(() => alive && setAlertsCache((c) => ({ ...c, [target]: [] })));
+    return () => { alive = false; };
+  }, [target]);
+  const pickRange = (r) => { setRange(r); try { localStorage.setItem("lk-home-range", r); } catch { /* ignore */ } };
+  const spark = (key) => series?.buckets?.map((b) => b[key]);
+  const delta = (key) => series?.totals?.current ? deltaLabel(series.totals.current[key], series.totals.previous?.[key], series.previousLabel) : null;
 
   useEffect(() => {
     let alive = true;
@@ -98,7 +144,7 @@ export default function HomePage() {
         {/* Same sections, grids and card shapes as the loaded page. */}
         <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
           <div className="lk-grid">
-            {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" big={i < 2} seed={i} /></div>)}
+            {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" seed={i} /></div>)}
             <Card pad={18} span={12}>
               <Skeleton width={80} height={12} />
               <div style={{ height: 14 }} />
@@ -151,18 +197,43 @@ export default function HomePage() {
 
   return (
     <div style={{ maxWidth: 1280 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: "4px 12px", marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px 12px", marginBottom: 24 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text }}>Home</div>
-        <div style={{ fontSize: 12, color: theme.textMuted }}>
-          Live metrics · <span style={{ textTransform: "uppercase", fontWeight: 600 }}>{target}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 4, padding: 3, borderRadius: 999, background: theme.surfaceAlt }} title="Range for the trend lines and the change vs the previous period">
+            {RANGES.map(([k, lbl]) => (
+              <button key={k} onClick={() => pickRange(k)} style={{
+                height: 26, padding: "0 10px", borderRadius: 999, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+                border: "none", background: range === k ? theme.surface : "transparent", color: range === k ? theme.text : theme.textMuted,
+                boxShadow: range === k ? theme.shadow : "none",
+              }}>{lbl}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>
+            Live metrics · <span style={{ textTransform: "uppercase", fontWeight: 600 }}>{target}</span>
+          </div>
         </div>
       </div>
+
+      {/* ── Needs attention ───────────────────────────────────────────────── */}
+      <Section title="Needs attention" hint={alerts ? (alerts.length ? `${alerts.length} alert${alerts.length === 1 ? "" : "s"} across brands and campaigns` : "nothing is blocked right now") : "checking…"}>
+        <Card pad={0}>
+          {alerts === null && <SkeletonListRows rows={3} padding="10px 14px" lines={[["45%", 13]]} meta={{ width: 80, lines: [[70, 11]] }} lastDivider />}
+          {alerts && alerts.length === 0 && <div style={{ padding: "14px 16px", fontSize: 13, color: GREEN }}>All clear: no stuck samples, waiting applications, expiring trials or failed payments.</div>}
+          {alerts && alerts.slice(0, 5).map((a, i) => <AlertRow key={a.key} alert={a} theme={theme} compact isLast={i === Math.min(alerts.length, 5) - 1 && alerts.length <= 5} />)}
+          {alerts && alerts.length > 5 && (
+            <div style={{ padding: "10px 14px", fontSize: 12 }}>
+              <Link to="/alerts" style={{ color: theme.textMid }}>View all {alerts.length} alerts →</Link>
+            </div>
+          )}
+        </Card>
+      </Section>
 
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
       <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
         <div className="lk-grid">
-          <Stat label="MRR" value={money(revenue.mrr)} accent={GREEN} big sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} />
-          <Stat label="ARR" value={money(revenue.arr)} big sub="MRR × 12" />
+          <Stat label="MRR" value={money(revenue.mrr)} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox ? delta("mrr") : null} />
+          <Stat label="ARR" value={money(revenue.arr)} sub="MRR × 12" spark={series?.mrrApprox ? spark("mrr") : null} />
           <Stat label="ARPA" value={money(revenue.arpa, { cents: true })} sub="avg revenue / paying brand" />
           <Stat
             label="Trial pipeline"
@@ -224,10 +295,10 @@ export default function HomePage() {
       {/* ── Marketplace ───────────────────────────────────────────────────── */}
       <Section title="Marketplace" hint="the two-sided activity brands and creators generate">
         <div className="lk-grid">
-          <Stat label="Creators" value={num(marketplace.creatorsTotal)} sub={`${num(marketplace.creatorsActive)} active (accepted a campaign)`} />
-          <Stat label="Active campaigns" value={num(marketplace.activeCampaigns)} />
-          <Stat label="GMV" value={money(marketplace.gmv, { currency: marketplace.gmvCurrency })} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} />
-          <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.clicks)} link clicks`} />
+          <Stat label="Creators" value={num(marketplace.creatorsTotal)} sub={`${num(marketplace.creatorsActive)} active (accepted a campaign)`} spark={spark("creators")} delta={delta("creators") && { ...delta("creators"), text: `new creators ${delta("creators").text}` }} />
+          <Stat label="Active campaigns" value={num(marketplace.activeCampaigns)} spark={spark("campaigns")} delta={delta("campaigns") && { ...delta("campaigns"), text: `launches ${delta("campaigns").text}` }} />
+          <Stat label="GMV" value={money(marketplace.gmv, { currency: marketplace.gmvCurrency })} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} spark={spark("gmv")} delta={delta("gmv")} />
+          <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.clicks)} link clicks`} spark={spark("commission")} delta={delta("clicks") && { ...delta("clicks"), text: `clicks ${delta("clicks").text}` }} />
         </div>
       </Section>
 
@@ -243,6 +314,8 @@ export default function HomePage() {
             label="New brands this month"
             value={num(brands.newThisMonth)}
             span={2}
+            spark={spark("brands")}
+            delta={delta("brands") && { ...delta("brands"), text: `signups ${delta("brands").text}` }}
             sub={
               momentumDelta === 0
                 ? `same as last month (${num(brands.newLastMonth)})`

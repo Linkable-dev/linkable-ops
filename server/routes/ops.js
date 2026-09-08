@@ -107,7 +107,7 @@ export function opsRoutes() {
 
       const { rows } = await cloudSqlQuery(`
         WITH base AS (
-          SELECT p.id, p.title AS campaign_name, b.store_name AS brand_name,
+          SELECT p.id, p.title AS campaign_name, b.store_name AS brand_name, p.user_id AS brand_user_id,
                  p.status AS product_status, p.created
           FROM products p
           LEFT JOIN brands b ON b.id = p.brand_id
@@ -188,6 +188,7 @@ export function opsRoutes() {
             p.id,
             p.campaign_name,
             p.brand_name,
+            p.brand_user_id,
             p.product_status,
             p.created,
             -- Platform + external combined: one number per funnel stage. The

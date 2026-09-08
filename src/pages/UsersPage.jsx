@@ -7,6 +7,8 @@ import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
 import { SkeletonGridRows } from "../components/ui/Skeleton";
 import { useNow } from "../lib/useNow";
+import { useSearchParams } from "react-router-dom";
+import { BrandLink } from "../components/brand/BrandLink";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
@@ -99,8 +101,10 @@ export default function UsersPage() {
   const { theme, mode } = useTheme();
   const { target } = useDbTarget();
   const isDev = target === "dev";
-  const [tab, setTab] = useState("brands");
-  const [q, setQ] = useState("");
+  // ?tab=creators&q=handle deep links (command palette, alerts).
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(() => (["brands", "creators", "deleted"].includes(params.get("tab")) ? params.get("tab") : "brands"));
+  const [q, setQ] = useState(() => params.get("q") || "");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -464,7 +468,7 @@ function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
           <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+                <BrandLink userId={row.user_id}>{row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}</BrandLink>
               </span>
               {/* brands.hidden — kept out of Discover / the campaign feed by ops.
                   Mirrors the HIDDEN pill in ManageBrandModal so the state is
@@ -573,7 +577,7 @@ function DeletedBrandRow({ row, theme, template, busy, onRestore }) {
       </div>
 
       <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+        <BrandLink userId={row.user_id}>{row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}</BrandLink>
         {row.store_website && (
           <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {row.store_website}

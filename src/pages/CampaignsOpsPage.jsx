@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { BrandLink } from "../components/brand/BrandLink";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -49,8 +51,9 @@ export default function CampaignsOpsPage() {
   const [creatorsById, setCreatorsById] = useState({});
   const [creatorsLoading, setCreatorsLoading] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [params] = useSearchParams();
+  const [search, setSearch] = useState(() => params.get("search") || "");
+  const [debouncedSearch, setDebouncedSearch] = useState(() => params.get("search") || "");
   const [sortBy, setSortBy] = useState("created");
   const [sortDir, setSortDir] = useState("desc");
   const [filters, setFilters] = useState({}); // per-column server-side filters
@@ -241,7 +244,7 @@ export default function CampaignsOpsPage() {
                         </svg>
                       </Td>
                       <Td theme={theme} style={{ fontWeight: 500, color: theme.text }}>{c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>}</Td>
-                      <Td theme={theme}>{c.brand_name || "—"}</Td>
+                      <Td theme={theme}><BrandLink userId={c.brand_user_id}>{c.brand_name || "—"}</BrandLink></Td>
                       <Td theme={theme} num><SplitCount theme={theme} total={c.creators_invited} ext={c.externals_invited} /></Td>
                       <Td theme={theme} num><SplitCount theme={theme} total={c.creators_applied} ext={c.externals_applied} /></Td>
                       <Td theme={theme} num>{friendlyNumber(c.creators_accepted)}</Td>

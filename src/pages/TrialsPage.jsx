@@ -25,6 +25,7 @@ import { SkeletonListRows } from "../components/ui/Skeleton";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import { useNow } from "../lib/useNow";
+import { BrandLink } from "../components/brand/BrandLink";
 
 export default function TrialsPage() {
   const { theme } = useTheme();
@@ -184,7 +185,7 @@ function BrandResultRow({ row, theme, isLast, onGrantTrial }) {
       {/* Identity */}
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {row.store_name || row.email}
+          <BrandLink userId={row.user_id}>{row.store_name || row.email}</BrandLink>
         </div>
         <div style={{ fontSize: 12, color: theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {row.email}{row.store_website ? ` · ${row.store_website}` : ""}

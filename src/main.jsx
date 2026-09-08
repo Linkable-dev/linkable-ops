@@ -22,6 +22,8 @@ import UsersPage from "./pages/UsersPage";
 import TrialsPage from "./pages/TrialsPage";
 import BlogPage from "./pages/blog/BlogPage";
 import BlogEditorPage from "./pages/blog/BlogEditorPage";
+import AlertsPage from "./pages/AlertsPage";
+import AskPage from "./pages/AskPage";
 import "./index.css";
 
 createRoot(document.getElementById("root")).render(
@@ -36,6 +38,8 @@ createRoot(document.getElementById("root")).render(
             <Route element={<AuthGate />}>
               <Route element={<App />}>
                 <Route path="/" element={<HomePage />} />
+                <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/ask" element={<AskPage />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
                 <Route path="/ai/test-lab" element={<AiTestLabPage />} />

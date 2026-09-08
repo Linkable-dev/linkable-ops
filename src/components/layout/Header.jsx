@@ -2,9 +2,14 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import {useLocation} from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useDbTarget } from "../../contexts/DbTargetContext";
+import { Link } from "react-router-dom";
+import { api } from "../../lib/api";
+import { isSnoozed } from "../../lib/alerts";
 
 function getPageInfo(pathname) {
   if (pathname === "/") return { title: "Home", subtitle: "Live business metrics" };
+  if (pathname === "/alerts") return { title: "Alerts", subtitle: "Brands that need a nudge" };
+  if (pathname === "/ask") return { title: "Ask the data", subtitle: "Questions answered with a read-only query" };
   if (pathname === "/dashboard") return { title: "Dashboard", subtitle: "Database overview and analytics" };
   if (pathname.startsWith("/ops/campaigns")) return { title: "Campaigns", subtitle: "Campaign operations" };
   if (pathname.startsWith("/users")) return { title: "Impersonation", subtitle: "Open the main app as a brand or creator" };
@@ -37,6 +42,21 @@ export default function Header() {
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
   const [dbMenuOpen, setDbMenuOpen] = useState(false);
   const dbMenuRef = useRef(null);
+  // Alert badge: refreshed every 5 minutes and whenever the alerts page is visited.
+  const [alertCount, setAlertCount] = useState(null);
+  const onAlertsPage = location.pathname === "/alerts";
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => api.getAlerts().then((d) => {
+      if (!alive) return;
+      const live = (d.alerts || []).filter((a) => !isSnoozed(a.key));
+      setAlertCount({ total: live.length, danger: live.filter((a) => a.severity === "danger").length });
+    }).catch(() => {});
+    refresh();
+    const t = setInterval(refresh, 5 * 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [target, onAlertsPage]);
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
 
   useEffect(() => {
     if (!dbMenuOpen) return;
@@ -93,6 +113,32 @@ export default function Header() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          onClick={() => window.dispatchEvent(new Event("lk-open-palette"))}
+          title="Search anything"
+          style={{
+            display: "flex", alignItems: "center", gap: 8, height: 32, padding: "0 10px 0 12px", borderRadius: 999,
+            border: `1px solid ${theme.border}`, background: "transparent", color: theme.textMuted, cursor: "pointer",
+            fontSize: 12, fontFamily: "inherit",
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <span>Search</span>
+          <kbd style={{ fontSize: 10, border: `1px solid ${theme.border}`, borderRadius: 5, padding: "1px 5px", color: theme.textMuted, fontFamily: "inherit" }}>{isMac ? "⌘" : "Ctrl"} K</kbd>
+        </button>
+        <Link to="/alerts" title={alertCount ? `${alertCount.total} alert${alertCount.total === 1 ? "" : "s"}${alertCount.danger ? ` · ${alertCount.danger} urgent` : ""}` : "Alerts"} style={{
+          position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+          width: 32, height: 32, borderRadius: 999, border: `1px solid ${theme.border}`, color: theme.textMid, textDecoration: "none",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+          {alertCount?.total > 0 && (
+            <span style={{
+              position: "absolute", top: -5, right: -6, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
+              background: alertCount.danger ? "#DC2626" : "#D97706", color: "#fff", fontSize: 10, fontWeight: 700,
+              display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${theme.surface}`,
+            }}>{alertCount.total > 99 ? "99+" : alertCount.total}</span>
+          )}
+        </Link>
         <div ref={dbMenuRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDbMenuOpen((v) => !v)}

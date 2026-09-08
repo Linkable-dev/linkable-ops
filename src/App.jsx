@@ -2,12 +2,16 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import { useTheme } from "./contexts/ThemeContext";
+import { BrandDrawerProvider } from "./contexts/BrandDrawerContext";
+import CommandPalette from "./components/CommandPalette";
 
 export default function App() {
   const { theme, sidebarOpen } = useTheme();
   const sidebarW = sidebarOpen ? 240 : 64; // keep in sync with Sidebar W
 
   return (
+    <BrandDrawerProvider>
+    <CommandPalette />
     <div style={{
       display: "flex", minHeight: "100vh", background: theme.bg,
       fontFamily: "inherit",
@@ -21,5 +25,6 @@ export default function App() {
         </main>
       </div>
     </div>
+    </BrandDrawerProvider>
   );
 }

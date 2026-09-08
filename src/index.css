@@ -85,3 +85,5 @@ select {
 @media (max-width: 720px) {
   .lk-c2, .lk-c3, .lk-c4, .lk-c6 { grid-column: span 12; }
 }
+
+@keyframes lkSlideIn { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }

@@ -13,6 +13,7 @@ import { cronRoutes } from "../server/routes/cron.js";
 import { blogRoutes } from "../server/routes/blog.js";
 import { outboundRoutes } from "../server/routes/outbound.js";
 import { outboundCampaignsRoutes } from "../server/routes/outbound-campaigns.js";
+import { insightsRoutes } from "../server/routes/insights.js";
 import { dbTargetMiddleware } from "../server/middleware/dbTarget.js";
 
 const app = express();
@@ -98,6 +99,7 @@ app.use("/api/cron", cronRoutes());
 app.use("/api/tables", dbTargetMiddleware, requireOpsAdmin, tableRoutes());
 app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes());
 app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
+app.use("/api/insights", dbTargetMiddleware, requireOpsAdmin, insightsRoutes());
 app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 // Blog articles for www.linkable.link (Supabase-backed, see migration 018).
