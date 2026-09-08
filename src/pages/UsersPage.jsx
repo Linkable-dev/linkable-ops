@@ -101,6 +101,9 @@ export default function UsersPage() {
   const [actionError, setActionError] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [filters, setFilters] = useState({});
+  // Brands tab: hidden (brands.hidden) rows are excluded by default so the list
+  // reads as the live marketplace; "Show Hidden" folds them back in.
+  const [showHidden, setShowHidden] = useState(false);
   const [manageRow, setManageRow] = useState(null); // null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
 
@@ -141,7 +144,10 @@ export default function UsersPage() {
         data = await api.listDeletedBrands({ q, limit: 100 });
       } else {
         const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
-        data = await fn({ q, limit: 100, sortBy: sort.sortBy, sortDir: sort.sortDir, filters });
+        const effective = tab === "brands" && !showHidden
+          ? { ...filters, visibility: "visible" }
+          : filters;
+        data = await fn({ q, limit: 100, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
       }
       setRows(data);
     } catch (err) {
@@ -150,7 +156,7 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, q, sort, filters]);
+  }, [tab, q, sort, filters, showHidden]);
 
   // Debounce free-text search; sort/filter changes arrive pre-debounced
   // (ColumnFilter commits after a pause) so they refetch immediately.
@@ -232,6 +238,7 @@ export default function UsersPage() {
         setQ("");
         setSort(DEFAULT_SORT);
         setFilters({});
+        setShowHidden(false);
       }} />
 
       <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -245,26 +252,21 @@ export default function UsersPage() {
             }
           />
         </div>
-        {/* Marketplace visibility (brands.hidden). Lives beside the search
-            rather than in the filter row because it isn't a column: the
-            HIDDEN pill sits inside the Store cell. Server-side like the rest
-            (BRAND_FILTERS.visibility). */}
+        {/* Marketplace visibility (brands.hidden). A plain toggle beside the
+            search rather than a filter-row control because it isn't a column:
+            the HIDDEN pill sits inside the Store cell. Off (default) sends
+            visibility=visible; on drops the filter so hidden rows show too. */}
         {tab === "brands" && (
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap" }}>
-            Visibility
-            <div style={{ width: 150 }}>
-              <ColumnFilter
-                theme={theme}
-                type="select"
-                options={[
-                  { value: "visible", label: "Visible only" },
-                  { value: "hidden",  label: "Hidden only" },
-                ]}
-                value={filters.visibility || ""}
-                onCommit={(v) => handleFilter("visibility", v)}
-              />
-            </div>
-          </label>
+          <Btn
+            size="sm"
+            variant={showHidden ? "solid" : "outline"}
+            onClick={() => setShowHidden((v) => !v)}
+            title={showHidden
+              ? "Hidden brands are included — click to hide them again"
+              : "Hidden brands (Manage → Marketplace visibility) are excluded — click to include them"}
+          >
+            Show Hidden
+          </Btn>
         )}
       </div>
 
