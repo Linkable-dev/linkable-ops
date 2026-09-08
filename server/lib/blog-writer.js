@@ -11,6 +11,10 @@ import { blogDb as supabase } from "./blog-supabase.js";
 import { findHeroPhoto } from "./blog-images.js";
 
 const MODEL = "claude-opus-5";
+// The blog uses its own Anthropic key so its spend is tracked separately from
+// the outreach features (falls back to the shared key if not set).
+const apiKey = () => process.env.BLOG_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+const anthropic = () => new Anthropic({ apiKey: apiKey() });
 const DATA = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "blog");
 const style = fs.readFileSync(path.join(DATA, "style.md"), "utf8");
 const facts = fs.readFileSync(path.join(DATA, "facts.md"), "utf8");
@@ -96,7 +100,7 @@ export async function uniqueSlug(base, posts) {
 
 /* ---------------------------------------------------------------- topics */
 export async function proposeTopics(count = 10) {
-  const client = new Anthropic();
+  const client = anthropic();
   const posts = await listExistingPosts();
   const { data: topics } = await supabase.from("blog_topics").select("keyword");
   const TopicSchema = z.object({ topics: z.array(z.object({ keyword: z.string(), angle: z.string(), category: z.string() })) });
@@ -112,8 +116,8 @@ export async function proposeTopics(count = 10) {
 /* --------------------------------------------------------------- article */
 // Returns { article, attempts, problems } where article passed validation.
 export async function writeArticle({ keyword, angle = "", category = "Guide", date = new Date().toISOString().slice(0, 10), onProgress = () => {} }) {
-  if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not set");
-  const client = new Anthropic();
+  if (!apiKey()) throw new Error("BLOG_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY) not set");
+  const client = anthropic();
   const posts = await listExistingPosts();
   const candidates = imageCandidates(posts);
   const brief = `Write today's article for the Linkable blog.

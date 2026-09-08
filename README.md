@@ -33,5 +33,6 @@ rules before it is saved.
 - Hero photos: each article gets a topical stock photo from Pexels (`PEXELS_API_KEY`; `server/lib/blog-images.js`),
   chosen by the writer's image query or searched in the editor. Without the key the static pool in
   `server/data/blog/images.json` is used. Schema addition: `server/sql/blog/002_hero_image.sql`.
-- Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `CRON_SECRET`,
-  `PEXELS_API_KEY`, optional `GITHUB_TOKEN` and `LANDING_REPO`.
+- Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `BLOG_ANTHROPIC_API_KEY` (dedicated key
+  for article generation; falls back to `ANTHROPIC_API_KEY`), `CRON_SECRET`, `PEXELS_API_KEY`, optional `GITHUB_TOKEN`
+  (fine-grained token with Contents: read/write on the landing repo, used for `repository_dispatch`) and `LANDING_REPO`.
