@@ -37,7 +37,8 @@ function buildQs(params) {
 
 export const api = {
   // Blog (articles on www.linkable.link)
-  getBlogPosts: (status) => request(`/blog/posts${status ? `?status=${status}` : ""}`),
+  getBlogPosts: ({ status, limit = 25, offset = 0, q } = {}) => request(`/blog/posts?${buildQs({ status, limit, offset, q })}`),
+  searchBlogImages: (q) => request(`/blog/images/search?q=${encodeURIComponent(q)}`),
   getBlogPost: (id) => request(`/blog/posts/${id}`),
   createBlogPost: (data) => request("/blog/posts", { method: "POST", body: JSON.stringify(data) }),
   updateBlogPost: (id, data) => request(`/blog/posts/${id}`, { method: "PUT", body: JSON.stringify(data) }),

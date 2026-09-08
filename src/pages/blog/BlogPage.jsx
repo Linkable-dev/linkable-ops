@@ -20,7 +20,10 @@ const SOURCE_LABEL = { ai: "AI", manual: "Manual", framer: "Framer" };
 export default function BlogPage() {
   const { theme: t } = useTheme();
   const navigate = useNavigate();
+  const PAGE = 25;
   const [posts, setPosts] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [error, setError] = useState(null);
@@ -31,14 +34,19 @@ export default function BlogPage() {
   const [topicsOpen, setTopicsOpen] = useState(false);
 
   const load = useCallback(async () => {
-    try { setPosts(await api.getBlogPosts()); setError(null); }
-    catch (e) { setError(e.message); }
+    setLoading(true);
+    try {
+      const r = await api.getBlogPosts({ status: filter === "all" ? undefined : filter, limit: PAGE, offset });
+      setPosts(r.items); setTotal(r.total); setError(null);
+    } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, []);
+  }, [filter, offset]);
   useEffect(() => { load(); }, [load]);
+  const changeFilter = (f) => { setFilter(f); setOffset(0); };
 
-  const visible = posts.filter((p) => filter === "all" || p.status === filter);
-  const counts = { published: posts.filter((p) => p.status === "published").length, draft: posts.filter((p) => p.status === "draft").length };
+  const visible = posts;
+  const pageStart = total === 0 ? 0 : offset + 1;
+  const pageEnd = Math.min(offset + PAGE, total);
 
   const togglePublish = async (p) => {
     setBusy(p.id);
@@ -71,8 +79,8 @@ export default function BlogPage() {
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 6 }}>
-          {[["all", `All (${posts.length})`], ["published", `Published (${counts.published})`], ["draft", `Drafts (${counts.draft})`]].map(([id, label]) => (
-            <button key={id} onClick={() => setFilter(id)} style={{ ...link, padding: "6px 12px", background: filter === id ? t.surface : "transparent", color: filter === id ? t.text : t.textMuted, fontWeight: filter === id ? 600 : 400, boxShadow: filter === id ? t.shadow : "none" }}>{label}</button>
+          {[["all", "All"], ["published", "Published"], ["draft", "Drafts"], ["archived", "Archived"]].map(([id, label]) => (
+            <button key={id} onClick={() => changeFilter(id)} style={{ ...link, padding: "6px 12px", background: filter === id ? t.surface : "transparent", color: filter === id ? t.text : t.textMuted, fontWeight: filter === id ? 600 : 400, boxShadow: filter === id ? t.shadow : "none" }}>{label}</button>
           ))}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -129,6 +137,14 @@ export default function BlogPage() {
           </div>
         )}
       </Card>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
+        <span>{total === 0 ? "No articles" : `${pageStart}–${pageEnd} of ${total}`}</span>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button style={link} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
+          <button style={link} disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
+        </div>
+      </div>
 
       <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete article" width={440}>
         <p style={{ margin: "0 0 16px", fontSize: 13, color: t.textMid }}>Delete “{deleteConfirm?.title}”? If it is live, the page is removed from the site on the next sync.</p>

@@ -3,8 +3,9 @@
 import express from "express";
 import { blogDb as supabase } from "../lib/blog-supabase.js";
 import { generatePost, proposeTopics, triggerSiteRebuild, validateArticle, wordCount, slugify, IMAGE_POOL } from "../lib/blog-writer.js";
+import { searchPhotos } from "../lib/blog-images.js";
 
-const EDITABLE = ["slug", "title", "description", "excerpt", "category", "keyword", "status", "author_name", "hero_image_id", "hero_image_alt", "blocks", "faqs", "published_at"];
+const EDITABLE = ["slug", "title", "description", "excerpt", "category", "keyword", "status", "author_name", "hero_image_id", "hero_image_alt", "hero_image", "blocks", "faqs", "published_at"];
 
 function pickEditable(body) {
   const out = {};
@@ -21,16 +22,21 @@ export function blogRoutes() {
   const router = express.Router();
 
   // ---- posts
+  // Paginated list: ?status=&limit=&offset= -> { items, total, limit, offset }
   router.get("/posts", async (req, res) => {
     try {
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+      const offset = Math.max(parseInt(req.query.offset) || 0, 0);
       let q = supabase.from("blog_posts")
-        .select("id, slug, title, excerpt, category, keyword, status, source, author_name, hero_image_id, word_count, read_minutes, published_at, created_at, updated_at, created_by")
+        .select("id, slug, title, excerpt, category, keyword, status, source, author_name, hero_image_id, hero_image, word_count, read_minutes, published_at, created_at, updated_at, created_by", { count: "exact" })
         .order("published_at", { ascending: false, nullsFirst: true })
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
       if (req.query.status) q = q.eq("status", req.query.status);
-      const { data, error } = await q;
+      if (req.query.q) q = q.ilike("title", `%${String(req.query.q).replace(/[%_]/g, "")}%`);
+      const { data, error, count } = await q;
       if (error) throw new Error(error.message);
-      res.json(data);
+      res.json({ items: data, total: count ?? data.length, limit, offset });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -145,8 +151,15 @@ export function blogRoutes() {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  // ---- hero image pool (served by the landing site)
+  // ---- hero images: static pool (served by the landing site) + stock search
   router.get("/images", (req, res) => res.json(IMAGE_POOL));
+  router.get("/images/search", async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      if (!q) return res.status(400).json({ error: "q is required" });
+      res.json(await searchPhotos(q, { perPage: Math.min(Number(req.query.limit) || 12, 30) }));
+    } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+  });
 
   return router;
 }

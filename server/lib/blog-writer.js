@@ -8,6 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { blogDb as supabase } from "./blog-supabase.js";
+import { findHeroPhoto } from "./blog-images.js";
 
 const MODEL = "claude-opus-5";
 const DATA = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "blog");
@@ -28,6 +29,7 @@ const ArticleSchema = z.object({
   category: z.enum(["Sourcing", "Strategy", "Playbook", "Measurement", "By category", "Guide"]),
   heroImageId: z.string(),
   heroAlt: z.string(),
+  imageQuery: z.string(),
   blocks: z.array(z.object({
     type: z.enum(["p", "h2", "h3", "ul", "ol", "quote"]),
     text: z.string().nullable(),
@@ -44,7 +46,7 @@ export function validateArticle(a) {
   const text = [a.title, a.excerpt, a.metaDescription, ...blocks.flatMap((b) => [b.text || "", ...(b.items || [])]), ...faqs.flatMap((f) => [f.q, f.a])].join("\n");
   const body = blocks.flatMap((b) => [b.text || "", ...(b.items || [])]).join(" ");
   const words = wordCount(blocks);
-  if (words < 1100 || words > 1900) problems.push(`body has ${words} words, needs 1200 to 1800`);
+  if (words < 600 || words > 1150) problems.push(`body has ${words} words, needs 700 to 1000`);
   if (a.title.length < 40 || a.title.length > 65) problems.push(`title is ${a.title.length} characters, needs 45 to 62`);
   if (a.metaDescription.length < 110 || a.metaDescription.length > 158) problems.push(`meta description is ${a.metaDescription.length} characters, needs 120 to 155`);
   if (/[—–]/.test(text)) problems.push("contains an em dash or en dash");
@@ -52,9 +54,9 @@ export function validateArticle(a) {
   const lists = blocks.filter((b) => b.type === "ul" || b.type === "ol").length;
   if (lists > 2) problems.push(`${lists} lists, maximum is 2`);
   const h2s = blocks.filter((b) => b.type === "h2");
-  if (h2s.length < 4 || h2s.length > 8) problems.push(`${h2s.length} H2 sections, needs 4 to 7`);
+  if (h2s.length < 3 || h2s.length > 6) problems.push(`${h2s.length} H2 sections, needs 3 to 5`);
   if (h2s.some((h) => /^(introduction|conclusion|final thoughts|wrapping up|summary)$/i.test((h.text || "").trim()))) problems.push("has an Introduction/Conclusion style heading");
-  if (faqs.length < 4 || faqs.length > 5) problems.push(`${faqs.length} FAQs, needs 4 or 5`);
+  if (faqs.length < 3 || faqs.length > 5) problems.push(`${faqs.length} FAQs, needs 3 or 4`);
   const lower = text.toLowerCase();
   const hits = banned.filter((w) => new RegExp(`(^|[^a-z])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\.\\\.\\\./g, ".*")}([^a-z]|$)`, "i").test(lower));
   if (hits.length) problems.push(`uses banned words: ${hits.join(", ")}`);
@@ -74,7 +76,7 @@ export function validateArticle(a) {
 
 /* --------------------------------------------------------------- helpers */
 export async function listExistingPosts() {
-  const { data, error } = await supabase.from("blog_posts").select("slug, title, keyword, hero_image_id, status").neq("status", "archived");
+  const { data, error } = await supabase.from("blog_posts").select("slug, title, keyword, hero_image_id, hero_image, status").neq("status", "archived");
   if (error) throw new Error(error.message);
   return data || [];
 }
@@ -130,7 +132,8 @@ ${candidates.map((c) => `- ${c.id}: ${c.alt}`).join("\n")}
 Output format:
 - "blocks" is the article body in order. Types: p, h2, h3, ul, ol, quote. For p/h2/h3/quote fill "text" and set "items" to null. For ul/ol fill "items" (each item one sentence or a short phrase) and set "text" to null.
 - Inline formatting inside text and items: **bold**, *italic*, and links as [words](/pricing), [words](/creators), [words](/contact), [words](/blog/some-existing-slug) or [words](https://apps.shopify.com/linkable-1). No other links. No raw HTML.
-- "faqs": 4 or 5 question/answer pairs that do not repeat the H2s.
+- "faqs": 3 or 4 question/answer pairs that do not repeat the H2s.
+- "imageQuery": 2 to 4 words describing a concrete photo scene for this article (stock-photo search).
 - "slug": lower case words joined by hyphens, 3 to 7 words, containing the keyword's main words.
 Follow every rule in the style guide and only state facts from the facts file.`;
 
@@ -183,10 +186,12 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
   const posts = await listExistingPosts();
   const slug = await uniqueSlug(article.slug || article.title, posts);
   const words = wordCount(article.blocks);
+  // Per-article photo from the stock library (falls back to the pool image).
+  const heroImage = await findHeroPhoto(article.imageQuery || topic.keyword, { exclude: posts.map((p) => p.hero_image?.id).filter(Boolean) }).catch((e) => { console.warn("hero photo search failed:", e.message); return null; });
   const row = {
     slug, title: article.title, description: article.metaDescription, excerpt: article.excerpt,
     category: article.category, keyword: topic.keyword, status: publish ? "published" : "draft", source: "ai",
-    hero_image_id: article.heroImageId, hero_image_alt: article.heroAlt, blocks: article.blocks, faqs: article.faqs,
+    hero_image_id: article.heroImageId, hero_image_alt: heroImage?.alt || article.heroAlt, hero_image: heroImage, blocks: article.blocks, faqs: article.faqs,
     word_count: words, read_minutes: Math.max(3, Math.round(words / 200)), published_at: publish ? date : null,
     generation: { model, attempts, topic: topic.keyword }, created_by: createdBy,
   };

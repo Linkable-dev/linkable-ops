@@ -30,5 +30,8 @@ rules before it is saved.
   (`Linkable-dev/linkable-landing-page`, workflow `blog-sync.yml`, every two hours). "Publish to site" and every
   publish trigger an immediate rebuild when `GITHUB_TOKEN` (a token with `repo` scope on that repo) is set on this
   server; otherwise changes go live at the next scheduled sync.
+- Hero photos: each article gets a topical stock photo from Pexels (`PEXELS_API_KEY`; `server/lib/blog-images.js`),
+  chosen by the writer's image query or searched in the editor. Without the key the static pool in
+  `server/data/blog/images.json` is used. Schema addition: `server/sql/blog/002_hero_image.sql`.
 - Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `CRON_SECRET`,
-  optional `GITHUB_TOKEN` and `LANDING_REPO`.
+  `PEXELS_API_KEY`, optional `GITHUB_TOKEN` and `LANDING_REPO`.

@@ -11,7 +11,7 @@ import { blocksToMarkdown, markdownToBlocks, countWords, inlineHtml } from "../.
 import { SITE_URL } from "./BlogPage";
 
 const CATEGORIES = ["Guide", "Sourcing", "Strategy", "Playbook", "Measurement", "By category"];
-const EMPTY = { title: "", slug: "", description: "", excerpt: "", category: "Guide", keyword: "", author_name: "Linkable Team", status: "draft", published_at: "", hero_image_id: "", hero_image_alt: "", faqs: [], source: "manual" };
+const EMPTY = { title: "", slug: "", description: "", excerpt: "", category: "Guide", keyword: "", author_name: "Linkable Team", status: "draft", published_at: "", hero_image_id: "", hero_image_alt: "", hero_image: null, faqs: [], source: "manual" };
 const slugify = (s) => s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
 
 export default function BlogEditorPage() {
@@ -29,6 +29,10 @@ export default function BlogEditorPage() {
   const [error, setError] = useState(null);
   const [preview, setPreview] = useState(false);
   const [slugTouched, setSlugTouched] = useState(!isNew);
+  const [photoQuery, setPhotoQuery] = useState("");
+  const [photos, setPhotos] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [photoError, setPhotoError] = useState(null);
 
   useEffect(() => { api.getBlogImages().then(setImages).catch(() => {}); }, []);
   useEffect(() => {
@@ -54,7 +58,7 @@ export default function BlogEditorPage() {
   const payload = (overrides = {}) => ({
     title: post.title, slug: post.slug || slugify(post.title), description: post.description, excerpt: post.excerpt,
     category: post.category, keyword: post.keyword, author_name: post.author_name, status: post.status,
-    published_at: post.published_at || null, hero_image_id: post.hero_image_id || null, hero_image_alt: post.hero_image_alt,
+    published_at: post.published_at || null, hero_image_id: post.hero_image_id || null, hero_image_alt: post.hero_image_alt, hero_image: post.hero_image || null,
     blocks, faqs: post.faqs.filter((f) => f.q.trim() || f.a.trim()), ...overrides,
   });
 
@@ -73,6 +77,19 @@ export default function BlogEditorPage() {
       navigate("/blog");
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
+  };
+
+  const searchPhotos = async () => {
+    const q = photoQuery.trim() || post.keyword || post.title;
+    if (!q) return;
+    setSearching(true); setPhotoError(null);
+    try { setPhotos(await api.searchBlogImages(q)); }
+    catch (e) { setPhotoError(e.message); }
+    finally { setSearching(false); }
+  };
+  const pickPhoto = (ph) => {
+    const { thumb, aspect, ...hero } = ph; // eslint-disable-line no-unused-vars
+    setPost((p) => ({ ...p, hero_image: { ...hero, thumb }, hero_image_alt: ph.alt || p.hero_image_alt }));
   };
 
   const sel = { width: "100%", boxSizing: "border-box", background: t.bg, border: `1.5px solid ${t.border}`, borderRadius: 8, color: t.text, fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none" };
@@ -130,13 +147,43 @@ export default function BlogEditorPage() {
 
       {!readOnly && (
         <Card>
-          <Label>Hero image</Label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
-            {images.map((img) => (
-              <button key={img.id} onClick={() => setPost((p) => ({ ...p, hero_image_id: img.id, hero_image_alt: p.hero_image_alt || img.alt }))} title={img.alt} style={{ padding: 0, border: `2px solid ${post.hero_image_id === img.id ? t.text : t.border}`, borderRadius: 10, overflow: "hidden", cursor: "pointer", background: t.surfaceAlt, aspectRatio: "3 / 2" }}>
-                <img src={img.thumb} alt={img.alt} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-start", marginBottom: 14 }}>
+            <div style={{ width: 220, flexShrink: 0 }}>
+              <Label>Current hero image</Label>
+              <div style={{ aspectRatio: "3 / 2", borderRadius: 10, overflow: "hidden", background: t.surfaceAlt, border: `1px solid ${t.border}` }}>
+                {post.hero_image?.thumb || post.hero_image?.src
+                  ? <img src={post.hero_image.thumb || post.hero_image.src} alt={post.hero_image_alt || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  : images.find((i) => i.id === post.hero_image_id)
+                    ? <img src={images.find((i) => i.id === post.hero_image_id).thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    : <div style={{ padding: 12, fontSize: 12, color: t.textMuted }}>No image yet</div>}
+              </div>
+              {post.hero_image?.credit?.name && <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>Photo: {post.hero_image.credit.name} · Pexels</div>}
+            </div>
+            <div style={{ flex: 1 }}>
+              <Label>Find a photo for this article</Label>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <Input value={photoQuery} onChange={(e) => setPhotoQuery(e.target.value)} placeholder={post.keyword || "e.g. woman filming skincare video phone"} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); searchPhotos(); } }} />
+                <Btn size="sm" variant="outline" onClick={searchPhotos} loading={searching} style={{ height: 41, whiteSpace: "nowrap" }}>Search photos</Btn>
+              </div>
+              {photoError && <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>{photoError}</div>}
+              {photos.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8, marginBottom: 12 }}>
+                  {photos.map((ph) => (
+                    <button key={ph.id} onClick={() => pickPhoto(ph)} title={`${ph.alt} · ${ph.credit.name}`} style={{ padding: 0, border: `2px solid ${post.hero_image?.id === ph.id ? t.text : t.border}`, borderRadius: 8, overflow: "hidden", cursor: "pointer", background: t.surfaceAlt, aspectRatio: "3 / 2" }}>
+                      <img src={ph.thumb} alt={ph.alt} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Label>Or a stock image from the site pool</Label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
+                {images.map((img) => (
+                  <button key={img.id} onClick={() => setPost((p) => ({ ...p, hero_image: null, hero_image_id: img.id, hero_image_alt: p.hero_image_alt || img.alt }))} title={img.alt} style={{ padding: 0, border: `2px solid ${!post.hero_image && post.hero_image_id === img.id ? t.text : t.border}`, borderRadius: 8, overflow: "hidden", cursor: "pointer", background: t.surfaceAlt, aspectRatio: "3 / 2" }}>
+                    <img src={img.thumb} alt={img.alt} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           <Label>Image alt text</Label>
           <Input value={post.hero_image_alt || ""} onChange={set("hero_image_alt")} placeholder="Plain description of the photo" />
@@ -145,7 +192,7 @@ export default function BlogEditorPage() {
 
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <Label>Body {hint(words >= 1200 && words <= 1800, `${words} words · aim for 1,200–1,800`)}</Label>
+          <Label>Body {hint(words >= 700 && words <= 1000, `${words} words · aim for 700–1,000`)}</Label>
           {!readOnly && <button onClick={() => setPreview((v) => !v)} style={{ background: "none", border: `1px solid ${t.border}`, borderRadius: 6, color: t.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, padding: "4px 10px" }}>{preview ? "Edit" : "Preview"}</button>}
         </div>
         {preview || readOnly ? (
@@ -172,7 +219,7 @@ export default function BlogEditorPage() {
           <Label>FAQ (shown at the end of the article and as FAQ schema for search engines)</Label>
           {!readOnly && <Btn size="sm" variant="outline" onClick={() => setPost((p) => ({ ...p, faqs: [...p.faqs, { q: "", a: "" }] }))}>Add question</Btn>}
         </div>
-        {post.faqs.length === 0 && <div style={{ color: t.textMuted, fontSize: 13 }}>No questions yet. Aim for four or five.</div>}
+        {post.faqs.length === 0 && <div style={{ color: t.textMuted, fontSize: 13 }}>No questions yet. Aim for three or four.</div>}
         {post.faqs.map((f, i) => (
           <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}><Input value={f.q} onChange={(e) => setPost((p) => ({ ...p, faqs: p.faqs.map((x, k) => k === i ? { ...x, q: e.target.value } : x) }))} placeholder="Question" disabled={readOnly} /></div>
