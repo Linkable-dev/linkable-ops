@@ -38,6 +38,18 @@ const banned = (style.match(/Never use these words or phrases: (.*)/)?.[1] || ""
   .split(",").map((s) => s.trim().replace(/\.$/, "")).filter((s) => s.length > 2);
 
 export const slugify = (s) => s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
+// --- similarity guard: keeps the backlog and the articles from repeating ---
+const STOP = new Set("a an the and or of to for in on with your you how what why when do does is are be vs versus from into every month first should brand brands ecommerce shopify creator creators marketing".split(" "));
+const tokens = (s) => new Set(String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w)).map((w) => w.replace(/(ies)$/, "y").replace(/(s|ing|ed)$/, "")));
+export function similarity(a, b) {
+  const A = tokens(a), B = tokens(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0; for (const w of A) if (B.has(w)) inter++;
+  return inter / Math.min(A.size, B.size); // overlap relative to the shorter phrase
+}
+export function tooSimilar(text, others, threshold = 0.6) {
+  return others.find((o) => similarity(text, o) >= threshold) || null;
+}
 export const wordCount = (blocks) => (blocks || []).reduce((n, b) => n + (b.text ? b.text.split(/\s+/).length : 0) + (b.items ? b.items.join(" ").split(/\s+/).length : 0), 0);
 
 const ArticleSchema = z.object({
@@ -126,7 +138,13 @@ export async function proposeTopics(count = 10) {
     system: style + "\n\n" + facts,
     messages: [{ role: "user", content: `Propose ${count} new blog topics for the Linkable blog. Each needs a search keyword phrase a Shopify brand owner would type (lower case, 4 to 8 words), a one-sentence angle that is specific and opinionated, and a category (Sourcing, Strategy, Playbook, Measurement or "By category"). Avoid anything close to these existing titles and keywords:\n${posts.map((p) => `- ${p.title} (${p.keyword || "no keyword"})`).join("\n")}\n${(topics || []).map((t) => `- ${t.keyword}`).join("\n")}` }],
   });
-  return res.parsed_output?.topics || [];
+  const existing = [...posts.map((p) => p.title), ...posts.map((p) => p.keyword), ...(topics || []).map((t) => t.keyword)].filter(Boolean);
+  const out = [];
+  for (const t of res.parsed_output?.topics || []) {
+    if (tooSimilar(t.keyword, existing) || tooSimilar(t.keyword, out.map((o) => o.keyword))) continue;
+    out.push(t);
+  }
+  return out;
 }
 
 /* --------------------------------------------------------------- article */
@@ -177,6 +195,8 @@ Follow every rule in the style guide and only state facts from the facts file.`;
     const a = res.parsed_output;
     if (!a) { feedback = "\n\nThe previous output was not valid JSON for the schema. Return the article again."; log.push({ attempt, cost, problems: ["invalid JSON"] }); continue; }
     const problems = validateArticle(a);
+    const dup = tooSimilar(a.title, posts.map((p) => p.title), 0.75);
+    if (dup) problems.push(`title too similar to the existing article "${dup}"; take a clearly different angle`);
     log.push({ attempt, cost: Number(cost.toFixed(4)), words: wordCount(a.blocks), problems });
     if (!best || problems.length < best.problems.length) best = { article: a, problems };
     if (!problems.length) {
@@ -193,6 +213,26 @@ Follow every rule in the style guide and only state facts from the facts file.`;
   return { article: { ...best.article, heroImageId }, attempts: log, model: MODEL, cost: Number(spent.toFixed(4)), valid: false, problems: best.problems };
 }
 
+// Next queued topic: skip anything too close to an existing article and
+// prefer categories not used by the most recent posts, so consecutive
+// articles vary in subject.
+async function pickNextTopic() {
+  const { data: queued } = await supabase.from("blog_topics").select("*").eq("status", "queued").order("position");
+  if (!queued?.length) return null;
+  const { data: recent } = await supabase.from("blog_posts").select("title, keyword, category, published_at").neq("status", "archived").order("published_at", { ascending: false, nullsFirst: false }).limit(50);
+  const titles = (recent || []).flatMap((p) => [p.title, p.keyword]).filter(Boolean);
+  const recentCats = (recent || []).slice(0, 4).map((p) => p.category);
+  const candidates = [];
+  for (const t of queued) {
+    const dup = tooSimilar(t.keyword, titles);
+    if (dup) { await supabase.from("blog_topics").update({ status: "skipped" }).eq("id", t.id); console.log(`topic skipped as too similar: "${t.keyword}" ~ "${dup}"`); continue; }
+    candidates.push(t);
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => (recentCats.filter((c) => c === a.category).length - recentCats.filter((c) => c === b.category).length) || (a.position - b.position));
+  return candidates[0];
+}
+
 // Full pipeline: pick a topic (or use the given one), write, store as a row.
 export async function generatePost({ keyword, angle, category, topicId, publish = false, createdBy = null } = {}) {
   let topic = null;
@@ -203,8 +243,7 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
   } else if (keyword) {
     topic = { keyword, angle: angle || "", category: category || "Guide" };
   } else {
-    const { data } = await supabase.from("blog_topics").select("*").eq("status", "queued").order("position").limit(1);
-    topic = data?.[0] || null;
+    topic = await pickNextTopic();
     if (!topic) {
       const fresh = await proposeTopics(10);
       if (!fresh.length) throw new Error("no topics available");
