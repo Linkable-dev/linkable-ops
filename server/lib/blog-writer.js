@@ -195,8 +195,15 @@ Follow every rule in the style guide and only state facts from the facts file.`;
     const a = res.parsed_output;
     if (!a) { feedback = "\n\nThe previous output was not valid JSON for the schema. Return the article again."; log.push({ attempt, cost, problems: ["invalid JSON"] }); continue; }
     const problems = validateArticle(a);
+    // A title collision alone is fixed with a tiny title-only request (a few
+    // hundred tokens) rather than regenerating the whole article.
     const dup = tooSimilar(a.title, posts.map((p) => p.title), 0.75);
-    if (dup) problems.push(`title too similar to the existing article "${dup}"; take a clearly different angle`);
+    if (dup && !problems.length) {
+      const fixed = await retitle(client, a, posts.map((p) => p.title), dup);
+      spent += fixed.cost;
+      if (fixed.title) { a.title = fixed.title; a.slug = slugify(fixed.title); log.push({ attempt, note: `title rewritten (${fixed.cost.toFixed(4)} USD)` }); }
+      else problems.push(`title too similar to the existing article "${dup}"; take a clearly different angle`);
+    } else if (dup) problems.push(`title too similar to the existing article "${dup}"; take a clearly different angle`);
     log.push({ attempt, cost: Number(cost.toFixed(4)), words: wordCount(a.blocks), problems });
     if (!best || problems.length < best.problems.length) best = { article: a, problems };
     if (!problems.length) {
@@ -231,6 +238,20 @@ async function pickNextTopic() {
   if (!candidates.length) return null;
   candidates.sort((a, b) => (recentCats.filter((c) => c === a.category).length - recentCats.filter((c) => c === b.category).length) || (a.position - b.position));
   return candidates[0];
+}
+
+// Title-only rewrite: cheap alternative to a full retry when the article is
+// fine but its title collides with an existing one.
+async function retitle(client, a, existingTitles, dup) {
+  const Schema = z.object({ titles: z.array(z.string()) });
+  const res = await client.messages.parse({
+    model: MODEL, max_tokens: 400,
+    output_config: { effort: "low", format: zodOutputFormat(Schema) },
+    messages: [{ role: "user", content: `Propose 5 alternative titles (45 to 62 characters, sentence case, no colons, no dashes, no exclamation marks, British English) for an article whose current title is "${a.title}" and whose first paragraph is: ${a.blocks.find((b) => b.type === "p")?.text || ""}\nThe title must read clearly differently from "${dup}" and from these existing titles:\n${existingTitles.map((t) => "- " + t).join("\n")}` }],
+  });
+  const cost = usageCost(res.usage);
+  const pick = (res.parsed_output?.titles || []).find((t) => t.length >= 40 && t.length <= 65 && !/[—–!:]/.test(t) && !tooSimilar(t, existingTitles, 0.75));
+  return { title: pick || null, cost };
 }
 
 // Full pipeline: pick a topic (or use the given one), write, store as a row.
