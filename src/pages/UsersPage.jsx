@@ -429,7 +429,15 @@ function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
       {tab === "brands" ? (
         <>
           <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+              </span>
+              {/* brands.hidden — kept out of Discover / the campaign feed by ops.
+                  Mirrors the HIDDEN pill in ManageBrandModal so the state is
+                  visible in the list, not only after opening Manage. */}
+              {row.hidden && <HiddenPill />}
+            </span>
             {row.store_website && (
               <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {row.store_website}
@@ -621,6 +629,27 @@ function hexToRgba(hex, a) {
   const n = parseInt(full, 16);
   if (Number.isNaN(n)) return `rgba(115,115,115,${a})`;
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// Marketplace-visibility marker for a brand with brands.hidden = true. Amber,
+// same as the modal's pill: it is a deliberate ops state, not an error, and not
+// a delete (the account still works; only the shop window is affected).
+function HiddenPill() {
+  const color = "#B45309";
+  return (
+    <span
+      title="Hidden from the marketplace (Discover, campaign feed, public campaign list). Not deleted — change under Manage → Marketplace visibility."
+      style={{
+        display: "inline-flex", alignItems: "center", flexShrink: 0,
+        padding: "1px 6px", borderRadius: 999,
+        fontSize: 9, fontWeight: 700, lineHeight: 1.5, letterSpacing: 0.3,
+        color, background: hexToRgba(color, 0.12),
+        border: `1px solid ${hexToRgba(color, 0.28)}`,
+      }}
+    >
+      HIDDEN
+    </span>
+  );
 }
 
 // A compact colour-coded status pill (dot + label) so a brand's subscription
