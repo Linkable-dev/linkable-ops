@@ -1,3 +1,4 @@
+/* global process */
 // Writes blog articles for www.linkable.link with Claude and validates them
 // against the voice rules (data/blog/style.md) and the verified facts
 // (data/blog/facts.md). Used by the admin "Generate" action and the daily cron.
@@ -15,6 +16,9 @@ import { findHeroPhoto } from "./blog-images.js";
 const MODEL = process.env.BLOG_MODEL || "claude-sonnet-5";
 const MAX_COST_USD = Number(process.env.BLOG_MAX_COST_USD) || 0.10;
 const MAX_READ_MINUTES = 6;
+// Vercel functions are capped at 60 s (vercel.json maxDuration): retries only
+// happen while another attempt is expected to finish inside the deadline.
+const DEADLINE_MS = Number(process.env.BLOG_DEADLINE_MS) || 50_000;
 // USD per million tokens (input, output, cache write, cache read)
 const PRICES = {
   "claude-sonnet-5": { in: 2, out: 10, cw: 2.5, cr: 0.2 },
@@ -179,8 +183,10 @@ Follow every rule in the style guide and only state facts from the facts file.`;
   const log = [];
   let spent = 0;
   let best = null; // { article, problems }
+  const started = Date.now();
   for (let attempt = 1; attempt <= 3; attempt++) {
     onProgress(`attempt ${attempt}`);
+    const t0 = Date.now();
     const res = await client.messages.parse({
       model: MODEL,
       max_tokens: 8000,
@@ -190,6 +196,7 @@ Follow every rule in the style guide and only state facts from the facts file.`;
       messages: [{ role: "user", content: brief + feedback }],
     });
     const cost = usageCost(res.usage);
+    const took = Date.now() - t0;
     spent += cost;
     if (res.stop_reason === "refusal") throw new Error("model refused: " + (res.stop_details?.explanation || ""));
     const a = res.parsed_output;
@@ -198,13 +205,13 @@ Follow every rule in the style guide and only state facts from the facts file.`;
     // A title collision alone is fixed with a tiny title-only request (a few
     // hundred tokens) rather than regenerating the whole article.
     const dup = tooSimilar(a.title, posts.map((p) => p.title), 0.75);
-    if (dup && !problems.length) {
+    if (dup && !problems.length && Date.now() - started + 8_000 < DEADLINE_MS) {
       const fixed = await retitle(client, a, posts.map((p) => p.title), dup);
       spent += fixed.cost;
       if (fixed.title) { a.title = fixed.title; a.slug = slugify(fixed.title); log.push({ attempt, note: `title rewritten (${fixed.cost.toFixed(4)} USD)` }); }
       else problems.push(`title too similar to the existing article "${dup}"; take a clearly different angle`);
     } else if (dup) problems.push(`title too similar to the existing article "${dup}"; take a clearly different angle`);
-    log.push({ attempt, cost: Number(cost.toFixed(4)), words: wordCount(a.blocks), problems });
+    log.push({ attempt, cost: Number(cost.toFixed(4)), seconds: Math.round(took / 1000), words: wordCount(a.blocks), problems });
     if (!best || problems.length < best.problems.length) best = { article: a, problems };
     if (!problems.length) {
       const heroImageId = candidates.some((c) => c.id === a.heroImageId) ? a.heroImageId : candidates[0].id;
@@ -213,6 +220,7 @@ Follow every rule in the style guide and only state facts from the facts file.`;
     // Stop retrying when another attempt would blow the budget; hand back the
     // best draft so a human can fix it instead of publishing something invalid.
     if (spent + cost > MAX_COST_USD) { log.push({ note: `budget ${MAX_COST_USD} USD reached after ${attempt} attempt(s)` }); break; }
+    if (Date.now() - started + took > DEADLINE_MS) { log.push({ note: `time budget reached after ${attempt} attempt(s); draft saved for review` }); break; }
     feedback = `\n\nYour previous draft was rejected for these reasons, fix all of them and return the complete article again:\n- ${problems.join("\n- ")}`;
   }
   if (!best) throw new Error("article failed after 3 attempts");

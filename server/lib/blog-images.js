@@ -1,3 +1,4 @@
+/* global process */
 // Stock photos for article heroes, via the Pexels API (PEXELS_API_KEY).
 // Returns hero objects the landing-page renderer understands:
 //   { provider, id, alt, width, height, src, srcset:[{url,w}], credit:{name,url}, page, query }
