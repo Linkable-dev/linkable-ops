@@ -13,6 +13,18 @@ import { parseColumnFilters, filterConditions, textFilter } from "../lib/tableQu
 // the system is waiting on to act. Verified against chats data 2026-05-12.
 const LINK_ACCEPTED = 3;
 const LINK_INVITED = 1;
+const LINK_APPLIED = 2;
+const LINK_REJECTED = 4;
+const LINK_ENDED = 5;
+
+// Quick-filter chips (server-side so totals, paging and the empty state stay honest).
+// creators_accepted includes external creators, who never get a sample shipped, so
+// the shipping test compares against platform acceptances only.
+const QUICK_FILTERS = {
+  "no-applications": "creators_applied = 0",
+  "stuck-shipping":  "(creators_accepted - externals_accepted) > 0 AND products_shipped < (creators_accepted - externals_accepted)",
+  "no-sales":        "products_shipped > 0 AND sales = 0",
+};
 
 // `deleted` uses '-infinity' as sentinel for "not deleted" in this DB.
 const ND = `(deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -82,12 +94,14 @@ export function opsRoutes() {
          WHERE ${ND.replace(/deleted/g, "p.deleted")} AND p.status = ${PRODUCT_ACTIVE} AND ${searchClause}${countFilterSql}`,
         countParams
       );
-      const total = countRows[0]?.total || 0;
+      const baseTotal = countRows[0]?.total || 0;
+      const quick = QUICK_FILTERS[req.query.quick] ? req.query.quick : null;
+      const quickWhere = quick ? ` WHERE ${QUICK_FILTERS[quick]}` : "";
 
       // Compute aggregates for ALL matched products (active set is small —
       // ~tens, not thousands), then sort + paginate. Sort key may reference
       // an aggregate so we can't paginate before aggregating.
-      const mainParams = [searchPattern, LINK_ACCEPTED, limit, offset, LINK_INVITED];
+      const mainParams = [searchPattern, LINK_ACCEPTED, limit, offset, LINK_INVITED, LINK_APPLIED];
       const baseFilterSql = filterConditions(columnFilters, CAMPAIGN_FILTERS, mainParams)
         .map((c) => ` AND ${c}`).join("");
 
@@ -105,22 +119,23 @@ export function opsRoutes() {
           -- One row per creator per product. A creator can hold several links on the
           -- same campaign (re-invites, apply-after-invite); counting rows would
           -- overstate the funnel and disagree with the drill-down. Keep the most
-          -- advanced link (accepted > applied/other > invited), latest as tiebreak.
+          -- advanced link (accepted > applied > invited > rejected/ended), latest as tiebreak.
           SELECT DISTINCT ON (l.product_id, COALESCE(l.influencer_user_id::text, l.id::text))
                  l.product_id, l.status
           FROM links l
           WHERE l.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "l.deleted")}
           ORDER BY l.product_id, COALESCE(l.influencer_user_id::text, l.id::text),
-                   CASE l.status WHEN $2 THEN 0 WHEN $5 THEN 2 ELSE 1 END,
+                   CASE l.status WHEN $2 THEN 0 WHEN $6 THEN 1 WHEN $5 THEN 2 ELSE 3 END,
                    l.created DESC NULLS LAST
         ),
         link_agg AS (
           -- "Invited" = brand reached out, creator hasn't responded yet (link.status = pending_brand = 1).
-          -- "Applied" = creator-initiated or further along (anything except pending_brand). Once an
-          -- invited creator responds, status moves off pending_brand and they count as Applied.
+          -- "Applied" = the creator is in (pending_influencer = 2) or already accepted (3). Rejected (4)
+          -- and ended (5) links are NOT applications: a campaign whose invites were all declined
+          -- must read as zero applied, otherwise the outreach bottlenecks never trigger.
           SELECT lb.product_id,
                  COUNT(*) FILTER (WHERE lb.status = $5)                  AS creators_invited,
-                 COUNT(*) FILTER (WHERE lb.status IS DISTINCT FROM $5)   AS creators_applied,
+                 COUNT(*) FILTER (WHERE lb.status IN ($6, $2))           AS creators_applied,
                  COUNT(*) FILTER (WHERE lb.status = $2)                  AS creators_accepted
           FROM link_best lb
           GROUP BY lb.product_id
@@ -139,7 +154,7 @@ export function opsRoutes() {
           -- the creator responds the row moves off pending_brand and counts as applied.
           SELECT ecl.product_id,
                  COUNT(*) FILTER (WHERE ecl.status = $5)                    AS externals_invited,
-                 COUNT(*) FILTER (WHERE ecl.status IS DISTINCT FROM $5)     AS externals_applied,
+                 COUNT(*) FILTER (WHERE ecl.status IN ($6, $2))             AS externals_applied,
                  COUNT(*) FILTER (WHERE ecl.status = $2)                    AS externals_accepted
           FROM external_creator_links ecl
           WHERE ecl.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "ecl.deleted")}
@@ -161,7 +176,11 @@ export function opsRoutes() {
           SELECT l.product_id, COUNT(*) AS sales, COALESCE(SUM(o.shopify_amount), 0) AS revenue
           FROM orders o
           JOIN links l ON l.id = o.link_id
-          WHERE l.product_id IN (SELECT id FROM base) AND ${ND.replace(/deleted/g, "o.deleted")}
+          WHERE l.product_id IN (SELECT id FROM base)
+            AND ${ND.replace(/deleted/g, "o.deleted")}
+            -- same live-link predicate as link_best / clicks_agg / the drill-down, so the row total
+            -- never exceeds the sum of the expanded creators
+            AND ${ND.replace(/deleted/g, "l.deleted")}
           GROUP BY l.product_id
         ),
         enriched AS (
@@ -178,25 +197,38 @@ export function opsRoutes() {
             (COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0))::int AS creators_accepted,
             COALESCE(ea.externals_invited, 0)::int AS externals_invited,
             COALESCE(ea.externals_applied, 0)::int AS externals_applied,
+            COALESCE(ea.externals_accepted, 0)::int AS externals_accepted,
             COALESCE(sm.samples_accepted, 0)::int  AS samples_accepted,
             COALESCE(sm.products_shipped, 0)::int  AS products_shipped,
             COALESCE(ca.clicks, 0)::int            AS clicks,
             COALESCE(sa.sales, 0)::int             AS sales,
             COALESCE(sa.revenue, 0)                AS revenue,
-            -- Bottleneck severity: mirrors computeBottleneck() on the client.
-            -- Higher = more severe → sort DESC puts worst first.
+            -- Bottleneck: evaluated in funnel order (outreach → acceptance → shipping → sales), the
+            -- same order the badge is read in. The label is computed here too so the column sorts
+            -- by exactly what it shows. Shipping is judged against PLATFORM acceptances only:
+            -- external (email-invited) creators never get a sample_request row.
             CASE
-              WHEN COALESCE(sm.samples_accepted, 0) > 0
-                   AND COALESCE(sm.products_shipped, 0) < COALESCE(sm.samples_accepted, 0) THEN 3 -- danger: shipping
-              WHEN COALESCE(sm.products_shipped, 0)
-                   < COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0) THEN 3 -- danger: shipping
               WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0
-                   AND COALESCE(la.creators_invited, 0) + COALESCE(ea.externals_invited, 0) = 0 THEN 2 -- warn: no outreach
-              WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0 THEN 1     -- info: awaiting invite responses
-              WHEN COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0) = 0 THEN 2   -- warn: no accepts
-              WHEN COALESCE(sa.sales, 0) = 0 THEN 1                                               -- info: no sales
-              ELSE 0                                                                              -- healthy
-            END AS bottleneck_severity
+                   AND COALESCE(la.creators_invited, 0) + COALESCE(ea.externals_invited, 0) = 0 THEN 2
+              WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0 THEN 1
+              WHEN COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0) = 0 THEN 2
+              WHEN COALESCE(sm.samples_accepted, 0) > 0
+                   AND COALESCE(sm.products_shipped, 0) < COALESCE(sm.samples_accepted, 0) THEN 3
+              WHEN COALESCE(sm.products_shipped, 0) < COALESCE(la.creators_accepted, 0) THEN 3
+              WHEN COALESCE(sa.sales, 0) = 0 THEN 1
+              ELSE 0
+            END AS bottleneck_severity,
+            CASE
+              WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0
+                   AND COALESCE(la.creators_invited, 0) + COALESCE(ea.externals_invited, 0) = 0 THEN 'No outreach'
+              WHEN COALESCE(la.creators_applied, 0) + COALESCE(ea.externals_applied, 0) = 0 THEN 'Awaiting invite responses'
+              WHEN COALESCE(la.creators_accepted, 0) + COALESCE(ea.externals_accepted, 0) = 0 THEN 'No acceptances'
+              WHEN COALESCE(sm.samples_accepted, 0) > 0
+                   AND COALESCE(sm.products_shipped, 0) < COALESCE(sm.samples_accepted, 0) THEN 'Brand: accepted, not shipped'
+              WHEN COALESCE(sm.products_shipped, 0) < COALESCE(la.creators_accepted, 0) THEN 'Brand: not shipping'
+              WHEN COALESCE(sa.sales, 0) = 0 THEN 'Content: no sales'
+              ELSE NULL
+            END AS bottleneck_label
           FROM base p
           LEFT JOIN link_agg la    ON la.product_id = p.id
           LEFT JOIN clicks_agg ca  ON ca.product_id = p.id
@@ -204,12 +236,15 @@ export function opsRoutes() {
           LEFT JOIN sample_agg sm  ON sm.product_id = p.id
           LEFT JOIN sales_agg sa   ON sa.product_id = p.id
         )
-        SELECT * FROM enriched
+        SELECT *, COUNT(*) OVER()::int AS full_count FROM enriched${quickWhere}
         ORDER BY ${sortColumn} ${sortDir} NULLS LAST, created DESC NULLS LAST
         LIMIT $3 OFFSET $4
       `, mainParams);
 
-      res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir });
+      // With a quick filter the total is the filtered count (window function over the
+      // filtered set); without one the cheap base count is exact and survives an empty page.
+      const total = quick ? (rows[0]?.full_count ?? 0) : baseTotal;
+      res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir, quick });
     } catch (e) {
       console.error("[ops/campaigns]", e);
       res.status(500).json({ error: e.message });
@@ -235,7 +270,7 @@ export function opsRoutes() {
           SELECT DISTINCT ON (creator_key) *
           FROM nd
           ORDER BY creator_key,
-                   CASE status WHEN ${LINK_ACCEPTED} THEN 0 WHEN ${LINK_INVITED} THEN 2 ELSE 1 END,
+                   CASE status WHEN ${LINK_ACCEPTED} THEN 0 WHEN ${LINK_APPLIED} THEN 1 WHEN ${LINK_INVITED} THEN 2 ELSE 3 END,
                    created DESC NULLS LAST
         )
         SELECT
@@ -288,6 +323,8 @@ export function opsRoutes() {
         else if (srStatus === "accepted") status = "Sample Accepted";
         else if (r.link_status === LINK_ACCEPTED) status = "Accepted";
         else if (r.link_status === LINK_INVITED) status = "Invited";
+        else if (r.link_status === LINK_REJECTED) status = "Rejected";
+        else if (r.link_status === LINK_ENDED) status = "Ended";
         return {
           ...r,
           status,
@@ -302,6 +339,8 @@ export function opsRoutes() {
         let status = "Applied";
         if (r.link_status === LINK_ACCEPTED) status = "Accepted";
         else if (r.link_status === LINK_INVITED) status = "Invited";
+        else if (r.link_status === LINK_REJECTED) status = "Rejected";
+        else if (r.link_status === LINK_ENDED) status = "Ended";
         return {
           ...r,
           status,

@@ -68,3 +68,20 @@ select {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--lk-scrollbar); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { filter: brightness(0.85); }
+
+/* Home page: one 12-column grid per section so card edges align across sections.
+   Cards declare their width as a span; breakpoints re-flow them (6 → 3 → 1 per row). */
+.lk-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.lk-c2  { grid-column: span 2; }
+.lk-c3  { grid-column: span 3; }
+.lk-c4  { grid-column: span 4; }
+.lk-c6  { grid-column: span 6; }
+.lk-c12 { grid-column: span 12; }
+@media (max-width: 1180px) {
+  .lk-c2 { grid-column: span 4; }
+  .lk-c3 { grid-column: span 6; }
+  .lk-c4 { grid-column: span 6; }
+}
+@media (max-width: 720px) {
+  .lk-c2, .lk-c3, .lk-c4, .lk-c6 { grid-column: span 12; }
+}

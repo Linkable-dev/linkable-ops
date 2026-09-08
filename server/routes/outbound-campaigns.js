@@ -185,13 +185,19 @@ export function outboundCampaignsRoutes() {
   router.get("/campaigns/status-counts", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();
-      const { data, error } = await supabase
-        .from("email_campaigns")
-        .select("status")
-        .eq("team_id", teamId);
-      if (error) throw new Error(error.message);
-      const counts = { all: data.length };
-      for (const r of data) counts[r.status] = (counts[r.status] || 0) + 1;
+      // Exact HEAD counts per status: a plain select is capped by PostgREST's
+      // max-rows (1000), which would silently truncate the tab badges.
+      const STATUSES = ["active", "paused", "archived", "running"];
+      const countFor = async (status) => {
+        let q = supabase.from("email_campaigns").select("id", { count: "exact", head: true }).eq("team_id", teamId);
+        if (status) q = q.eq("status", status);
+        const { count, error } = await q;
+        if (error) throw new Error(error.message);
+        return count || 0;
+      };
+      const [all, ...per] = await Promise.all([countFor(null), ...STATUSES.map(countFor)]);
+      const counts = { all };
+      STATUSES.forEach((s, i) => { counts[s] = per[i]; });
       res.json(counts);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -559,18 +565,40 @@ export function outboundCampaignsRoutes() {
     try {
       const teamId = await getDefaultTeamId();
       const filters = parseLeadFilters(req);
-      // Same JS-side strategy as /leads — pull a window, count post-filter.
+      const hasRevenueFilter = filters.minRev != null || filters.maxRev != null;
+      if (!hasRevenueFilter) {
+        // Exact HEAD counts — no row cap, so the pool figure is right at any size.
+        const countFor = async (mod) => {
+          let q = supabase.from("storeleads_brands").select("id", { count: "exact", head: true }).eq("team_id", teamId);
+          q = applyDbFilters(q, filters);
+          if (mod) q = mod(q);
+          const { count, error } = await q;
+          if (error) throw new Error(error.message);
+          return count || 0;
+        };
+        const [total, qualified, emailed] = await Promise.all([
+          countFor(null),
+          countFor((q) => q.not("email", "is", null)),
+          countFor((q) => q.eq("emailed", true)),
+        ]);
+        return res.json({ total, qualified, emailed, capped: false });
+      }
+      // Revenue band lives in raw_data JSON (text), so it has to be filtered in JS
+      // over a window. PostgREST caps a single response at 1000 rows (Supabase
+      // max-rows), so the window is 1000 and `capped` tells the UI the figures
+      // are a lower bound whenever the window filled up.
+      const WINDOW = 1000;
       let query = supabase.from("storeleads_brands")
         .select("email, emailed, raw_data")
         .eq("team_id", teamId);
-      query = applyDbFilters(query, filters).limit(5000);
+      query = applyDbFilters(query, filters).limit(WINDOW);
       const { data, error } = await query;
       if (error) throw new Error(error.message);
       const inBand = (data || []).filter((r) => inRevenueBand(r, filters));
       const total     = inBand.length;
       const qualified = inBand.filter((r) => r.email).length;
       const emailed   = inBand.filter((r) => r.emailed).length;
-      res.json({ total, qualified, emailed });
+      res.json({ total, qualified, emailed, capped: (data || []).length >= WINDOW });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -981,16 +1009,18 @@ async function rollupCampaignMetrics(teamId, campaignId) {
     total: 0, sent: 0, delivered: 0, opened: 0, clicked: 0,
     replied: 0, bounced: 0, complained: 0,
   });
+  // A rate needs a denominator: with 0 sent/delivered it is unknown (null → "—"),
+  // not 100% or 200%. Falling back to 1 made a row with opened_at but no
+  // delivered_at (lost/out-of-order Resend webhook) read as "200% opened".
+  const rate = (n, d) => (d > 0 ? n / d : null);
   const finalizeRates = (b) => {
-    const s = b.sent || 1;
-    const d = b.delivered || 1;
     b.rates = {
-      delivered: b.delivered / s,
-      bounced: b.bounced / s,
-      complained: b.complained / s,
-      opened: b.opened / d,
-      clicked: b.clicked / d,
-      replied: b.replied / d,
+      delivered: rate(b.delivered, b.sent),
+      bounced: rate(b.bounced, b.sent),
+      complained: rate(b.complained, b.sent),
+      opened: rate(b.opened, b.delivered),
+      clicked: rate(b.clicked, b.delivered),
+      replied: rate(b.replied, b.delivered),
     };
     return b;
   };
@@ -1057,11 +1087,15 @@ const GROUP_DESCRIPTIONS = {
   G1: "Brands that already work with creators / affiliates / influencers. They get the model — pitch is 'measure what you're already doing, find the 5% that drive 80% of revenue'.",
   G2: "Summer-seasonal brands (drinks, swim, sun/bath/body, fragrance, outdoor). Pitch hinges on the 8-week peak window — wasted creator spend compounds during peak.",
   G3: "Cold catch-all. They may not work with creators yet. Pitch is educational + ROI: 'most brands overpay because they can't see who converts'.",
+  C1: "Macro creators (200k+ followers). Formal, business-first: brands on Linkable book on conversion, not vanity metrics.",
+  C2: "Mid-tier creators. Warm and specific, framed as a collaboration opportunity with low friction.",
+  C3: "Micro creators. Community-minded, hands-on, soft pitch that is more about the creator than the platform.",
 };
 const TOUCH_DESCRIPTIONS = {
   1: "First cold reach (T+0). Bold diagnosis of the problem + soft asymmetric ask.",
   2: "Second touch 3 days later (T+3). Different angle from touch 1 — case study, ROI math, or trial CTA.",
-  3: "Final touch 7 days after touch 1. Short reply ask — yes/no, last note, soft close.",
+  3: "Third touch 7 days after touch 1. Short reply ask — yes/no, last note, soft close.",
+  4: "Breakup touch ~12 days after touch 1. Acknowledge the silence, close the loop, leave a zero-pressure door open.",
 };
 
 // Single source of truth per slot: each (group, touch) holds exactly one
@@ -1075,8 +1109,11 @@ export async function generateDraftsForCampaign({ teamId, campaign, apiKey, grou
     ? `\nADDITIONAL DIRECTION (highest priority — override the reference if it conflicts):\n${refinementPrompt}\n`
     : "";
 
+  // Creator campaigns use the C1–C3 seed set; looking only at the brand set made
+  // "Rewrite with AI" a silent no-op for influencer campaigns.
+  const seedSet = campaign.audience_type === "influencer" ? CREATOR_SEQUENCE_TEMPLATES : SEQUENCE_TEMPLATES;
   const defaults = Object.fromEntries(
-    SEQUENCE_TEMPLATES.map((t) => [`${t.group}-T${t.touch}`, t])
+    seedSet.map((t) => [`${t.group}-T${t.touch}`, t])
   );
 
   const updated = [];

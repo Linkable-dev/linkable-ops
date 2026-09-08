@@ -16,6 +16,7 @@ import { Modal } from "../ui/Modal";
 import { Btn } from "../ui/Button";
 import { planLabel } from "../trials/planConfig";
 import { friendlyDate } from "../../lib/api";
+import { useNow } from "../../lib/useNow";
 
 export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged, onHiddenChanged, onGrantTrial, onWiped }) {
   const { theme, mode } = useTheme();
@@ -261,7 +262,7 @@ export default function ManageBrandModal({ row, isDev, onClose, onStartupChanged
 
 // One-line current trial state, mirroring deriveTrialState on the page.
 function TrialSummary({ row }) {
-  const [now] = useState(() => Date.now());
+  const now = useNow();
   const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
     ? new Date(row.trial_activation_date) : null;
   const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"

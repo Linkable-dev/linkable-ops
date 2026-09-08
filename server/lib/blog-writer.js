@@ -54,7 +54,12 @@ export function similarity(a, b) {
 export function tooSimilar(text, others, threshold = 0.6) {
   return others.find((o) => similarity(text, o) >= threshold) || null;
 }
-export const wordCount = (blocks) => (blocks || []).reduce((n, b) => n + (b.text ? b.text.split(/\s+/).length : 0) + (b.items ? b.items.join(" ").split(/\s+/).length : 0), 0);
+const countWords = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
+// Body words: paragraphs, headings, quotes and list items (FAQ answers are counted separately by the renderer).
+export const wordCount = (blocks) => (blocks || []).reduce((n, b) => n + countWords(b.text) + (b.items || []).reduce((m, it) => m + countWords(it), 0), 0);
+// Rules the validator enforces; the messages are built from the same numbers.
+export const LIMITS = { words: [600, 1150], title: [40, 65], meta: [110, 158], h2: [3, 6], faqs: [3, 5], lists: 2, wpm: 200 };
+export const readMinutes = (words) => Math.max(1, Math.round((words || 0) / LIMITS.wpm));
 
 const ArticleSchema = z.object({
   title: z.string(),
@@ -81,18 +86,18 @@ export function validateArticle(a) {
   const text = [a.title, a.excerpt, a.metaDescription, ...blocks.flatMap((b) => [b.text || "", ...(b.items || [])]), ...faqs.flatMap((f) => [f.q, f.a])].join("\n");
   const body = blocks.flatMap((b) => [b.text || "", ...(b.items || [])]).join(" ");
   const words = wordCount(blocks);
-  if (words < 600 || words > 1150) problems.push(`body has ${words} words, needs 700 to 1000`);
-  if (Math.round(words / 200) > MAX_READ_MINUTES) problems.push(`read time ${Math.round(words / 200)} min, maximum is ${MAX_READ_MINUTES}`);
-  if (a.title.length < 40 || a.title.length > 65) problems.push(`title is ${a.title.length} characters, needs 45 to 62`);
-  if (a.metaDescription.length < 110 || a.metaDescription.length > 158) problems.push(`meta description is ${a.metaDescription.length} characters, needs 120 to 155`);
+  if (words < LIMITS.words[0] || words > LIMITS.words[1]) problems.push(`body has ${words} words, needs ${LIMITS.words[0]} to ${LIMITS.words[1]} (aim for 700 to 1000)`);
+  if (readMinutes(words) > MAX_READ_MINUTES) problems.push(`read time ${readMinutes(words)} min, maximum is ${MAX_READ_MINUTES}`);
+  if (a.title.length < LIMITS.title[0] || a.title.length > LIMITS.title[1]) problems.push(`title is ${a.title.length} characters, needs ${LIMITS.title[0]} to ${LIMITS.title[1]} (aim for 45 to 62)`);
+  if (a.metaDescription.length < LIMITS.meta[0] || a.metaDescription.length > LIMITS.meta[1]) problems.push(`meta description is ${a.metaDescription.length} characters, needs ${LIMITS.meta[0]} to ${LIMITS.meta[1]} (aim for 120 to 155)`);
   if (/[—–]/.test(text)) problems.push("contains an em dash or en dash");
   if (/!/.test(text)) problems.push("contains an exclamation mark");
   const lists = blocks.filter((b) => b.type === "ul" || b.type === "ol").length;
-  if (lists > 2) problems.push(`${lists} lists, maximum is 2`);
+  if (lists > LIMITS.lists) problems.push(`${lists} lists, maximum is ${LIMITS.lists}`);
   const h2s = blocks.filter((b) => b.type === "h2");
-  if (h2s.length < 3 || h2s.length > 6) problems.push(`${h2s.length} H2 sections, needs 3 to 5`);
+  if (h2s.length < LIMITS.h2[0] || h2s.length > LIMITS.h2[1]) problems.push(`${h2s.length} H2 sections, needs ${LIMITS.h2[0]} to ${LIMITS.h2[1]}`);
   if (h2s.some((h) => /^(introduction|conclusion|final thoughts|wrapping up|summary)$/i.test((h.text || "").trim()))) problems.push("has an Introduction/Conclusion style heading");
-  if (faqs.length < 3 || faqs.length > 5) problems.push(`${faqs.length} FAQs, needs 3 or 4`);
+  if (faqs.length < LIMITS.faqs[0] || faqs.length > LIMITS.faqs[1]) problems.push(`${faqs.length} FAQs, needs ${LIMITS.faqs[0]} to ${LIMITS.faqs[1]}`);
   const lower = text.toLowerCase();
   const hits = banned.filter((w) => new RegExp(`(^|[^a-z])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\.\\\.\\\./g, ".*")}([^a-z]|$)`, "i").test(lower));
   if (hits.length) problems.push(`uses banned words: ${hits.join(", ")}`);
@@ -292,7 +297,7 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
     slug, title: article.title, description: article.metaDescription, excerpt: article.excerpt,
     category: article.category, keyword: topic.keyword, status: publish ? "published" : "draft", source: "ai",
     hero_image_id: article.heroImageId, hero_image_alt: heroImage?.alt || article.heroAlt, hero_image: heroImage, blocks: article.blocks, faqs: article.faqs,
-    word_count: words, read_minutes: Math.max(3, Math.round(words / 200)), published_at: publish ? date : null,
+    word_count: words, read_minutes: readMinutes(words), published_at: publish ? date : null,
     generation: { model, attempts, cost_usd: cost, valid, problems: problems || [], topic: topic.keyword }, created_by: createdBy,
   };
   const { data: post, error } = await supabase.from("blog_posts").insert(row).select().single();

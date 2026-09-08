@@ -386,9 +386,8 @@ async function setBrandHidden(userId, body) {
   return { hidden: rows[0].hidden };
 }
 
-// Plan rank expression mirrors the UsersPage SubscriptionCell so server-side sort/filter orders rows exactly like the
-// old client-side sort did. Higher plan rank = "more paying".
-const BRAND_PLAN_RANK_SQL = `CASE
+// Plan rank by price tier (from users.account_id). Higher = "more paying".
+const BRAND_PRICE_RANK_SQL = `CASE
   WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 100
   WHEN u.account_id LIKE '%shopify_199%' THEN 90
   WHEN u.account_id LIKE '%shopify_99%'  THEN 80
@@ -403,17 +402,33 @@ END`;
 const BRAND_TRIAL_ACTIVE_SQL   = `(b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW())`;
 const BRAND_TRIAL_GRANTED_SQL  = `(COALESCE(b.trial_plan_name, '') <> '' AND COALESCE(b.trial_activation_date, '-infinity'::timestamptz) = '-infinity'::timestamptz)`;
 
-const BRAND_SORTS = {
+// Sorting the Subscription column has to honour the state the pill shows: a
+// cancelled or payment-frozen $499 brand must not sort above a paying $199 one.
+const brandPlanRankSql = (hasAppSubs) => hasAppSubs ? `CASE
+  WHEN asub.status IN ('CANCELLED', 'CANCELED', 'EXPIRED', 'DECLINED') OR asub.cancelled_at IS NOT NULL THEN 20
+  WHEN asub.status = 'FROZEN' THEN 30
+  WHEN asub.status = 'ACTIVE' AND COALESCE(asub.price_amount, 0) = 0 THEN 50
+  ELSE ${BRAND_PRICE_RANK_SQL}
+END` : BRAND_PRICE_RANK_SQL;
+
+// The trial the brand is actually in: the Shopify subscription's trial end when
+// mirrored, else brands.trial_expiration_date (Linkable grants). The pill reads
+// the same pair, so the "In trial" filter and the pill now agree.
+const brandTrialEndSql = (hasAppSubs) => hasAppSubs
+  ? `COALESCE(asub.trial_ends_at, NULLIF(b.trial_expiration_date, '-infinity'::timestamptz))`
+  : `NULLIF(b.trial_expiration_date, '-infinity'::timestamptz)`;
+
+const brandSorts = (hasAppSubs) => ({
   store_name:      `LOWER(COALESCE(b.store_name, ''))`,
   email:           `LOWER(u.email)`,
   owner_name:      `LOWER(TRIM(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, '')))`,
   user_created:    `u.created`,
   last_sign_in:    `sig.last_sign_in`,
   // Merged Subscription column: rank by "how paying" (paid tier > trial > none).
-  subscription:    BRAND_PLAN_RANK_SQL,
-};
+  subscription:    brandPlanRankSql(hasAppSubs),
+});
 
-const BRAND_FILTERS = {
+const brandFilters = (hasAppSubs) => ({
   store_name:      textFilter("b.store_name", "b.store_website"),
   email:           textFilter("u.email"),
   owner_name:      textFilter(`(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, ''))`),
@@ -422,8 +437,8 @@ const BRAND_FILTERS = {
   // active Linkable grant; "offered" is a grant not yet started. These overlap
   // by design (they are different lenses on the same rows).
   subscription: enumFilter({
-    paying:  `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false)`,
-    trial:   `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true)`,
+    paying:  `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(${brandTrialEndSql(hasAppSubs)} > NOW(), false) = false)`,
+    trial:   `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(${brandTrialEndSql(hasAppSubs)} > NOW(), false) = true)`,
     granted: BRAND_TRIAL_ACTIVE_SQL,
     offered: BRAND_TRIAL_GRANTED_SQL,
     no_plan: `(COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan'))`,
@@ -434,7 +449,7 @@ const BRAND_FILTERS = {
     visible: `COALESCE(b.hidden, false) = false`,
     hidden:  `COALESCE(b.hidden, false) = true`,
   }),
-};
+});
 
 async function listBrands(query) {
   const { q = "", limit = "50", offset = "0" } = query;
@@ -444,15 +459,15 @@ async function listBrands(query) {
     params.push(`%${q}%`);
     where += ` AND (u.email ILIKE $3 OR b.store_name ILIKE $3 OR b.store_website ILIKE $3 OR b.first_name ILIKE $3 OR b.last_name ILIKE $3)`;
   }
-  for (const cond of filterConditions(parseColumnFilters(query), BRAND_FILTERS, params)) {
-    where += ` AND ${cond}`;
-  }
-  const orderBy = orderBySql(query, BRAND_SORTS, "u.created DESC");
 
   // Pull the brand's authoritative Shopify subscription from app_subscriptions
   // when the table exists on this target. Prefer an ACTIVE row, else the most
   // recently synced (so a lone CANCELLED/EXPIRED row still surfaces as such).
   const hasAppSubs = await appSubscriptionsAvailable();
+  for (const cond of filterConditions(parseColumnFilters(query), brandFilters(hasAppSubs), params)) {
+    where += ` AND ${cond}`;
+  }
+  const orderBy = orderBySql(query, brandSorts(hasAppSubs), "u.created DESC");
   const subSelect = hasAppSubs
     ? `asub.status              AS sub_status,
             asub.name                AS sub_name,
@@ -486,7 +501,8 @@ async function listBrands(query) {
     : "";
 
   return cloudSqlQuery(
-    `SELECT u.id          AS user_id,
+    `SELECT COUNT(*) OVER()::int AS total_count,
+            u.id          AS user_id,
             u.email,
             u.created     AS user_created,
             u.role,
@@ -568,13 +584,14 @@ async function listBrands(query) {
 async function listDeletedBrands(query) {
   const { q = "", limit = "100", offset = "0" } = query;
   const params = [Number(limit) || 100, Number(offset) || 0];
-  let where = `u.role = ${ROLE_BRAND} AND u.deleted <> ${USER_ACTIVE}`;
+  let where = `u.role = ${ROLE_BRAND} AND u.deleted <> ${USER_ACTIVE} AND u.deleted <> '-infinity'::timestamptz`;
   if (q) {
     params.push(`%${q}%`);
     where += ` AND (u.email ILIKE $3 OR b.store_name ILIKE $3 OR b.store_website ILIKE $3 OR b.first_name ILIKE $3 OR b.last_name ILIKE $3)`;
   }
   return cloudSqlQuery(
-    `SELECT u.id          AS user_id,
+    `SELECT COUNT(*) OVER()::int AS total_count,
+            u.id          AS user_id,
             u.email,
             u.created     AS user_created,
             u.role,
@@ -583,7 +600,7 @@ async function listDeletedBrands(query) {
             u.deletion_scheduled_for,
             u.deletion_reason,
             CASE WHEN u.deletion_scheduled_for IS NULL THEN NULL
-                 ELSE GREATEST(0, CEIL(EXTRACT(EPOCH FROM (u.deletion_scheduled_for - NOW())) / 86400))::int
+                 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (u.deletion_scheduled_for - NOW())) / 86400))::int
             END           AS days_until_purge,
             (u.deletion_scheduled_for IS NOT NULL AND u.deletion_scheduled_for <= NOW()) AS purge_overdue,
             b.id          AS brand_id,
@@ -639,7 +656,8 @@ async function listCreators(query) {
   }
   const orderBy = orderBySql(query, CREATOR_SORTS, "u.created DESC");
   return cloudSqlQuery(
-    `SELECT u.id          AS user_id,
+    `SELECT COUNT(*) OVER()::int AS total_count,
+            u.id          AS user_id,
             u.email,
             u.created     AS user_created,
             u.role,

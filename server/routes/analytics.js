@@ -13,7 +13,8 @@ export function analyticsRoutes() {
         cloudSqlQuery(`SELECT COUNT(*) as total FROM influencers WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM external_creators WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM products WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
-        cloudSqlQuery(`SELECT COUNT(*) as total FROM links WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
+        // links.status 3 = accepted (the only state that is live for tracking); total includes pending/rejected/ended
+        cloudSqlQuery(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 3) as active FROM links WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM orders WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM chats WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM campaign_matches WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
@@ -98,7 +99,9 @@ export function analyticsRoutes() {
         // Top brands by product count
         cloudSqlQuery(`SELECT b.store_name as name, COUNT(p.id) as products
           FROM brands b JOIN products p ON p.brand_id = b.id
-          WHERE b.deleted IS NULL AND p.deleted IS NULL AND b.store_name IS NOT NULL
+          WHERE (b.deleted IS NULL OR b.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+            AND (p.deleted IS NULL OR p.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+            AND b.store_name IS NOT NULL AND b.store_name != ''
           GROUP BY b.store_name ORDER BY products DESC LIMIT 8`),
 
         // Avg followers for influencers
@@ -113,9 +116,12 @@ export function analyticsRoutes() {
           COUNT(*) as total,
           COUNT(*) FILTER (WHERE stripe_customer_id IS NOT NULL AND stripe_customer_id != '') as has_stripe,
           COUNT(*) FILTER (WHERE default_payment_method_id IS NOT NULL AND default_payment_method_id != '') as has_payment_method,
-          COUNT(*) FILTER (WHERE trial_plan_name IS NOT NULL AND trial_plan_name != '') as on_trial,
+          -- Any trial ever set (standard Shopify 14-day or Linkable-granted): the three
+          -- buckets below partition the brand base, so Active + Expired + Never = total.
+          COUNT(*) FILTER (WHERE trial_expiration_date IS NOT NULL AND trial_expiration_date > '-infinity'::timestamptz AND trial_expiration_date < 'infinity'::timestamptz) as on_trial,
           COUNT(*) FILTER (WHERE trial_expiration_date IS NOT NULL AND trial_expiration_date > NOW() AND trial_expiration_date < 'infinity'::timestamptz) as active_trial,
-          COUNT(*) FILTER (WHERE trial_expiration_date IS NOT NULL AND trial_expiration_date <= NOW() AND trial_expiration_date > '-infinity'::timestamptz AND trial_plan_name IS NOT NULL AND trial_plan_name != '') as expired_trial
+          COUNT(*) FILTER (WHERE trial_expiration_date IS NOT NULL AND trial_expiration_date <= NOW() AND trial_expiration_date > '-infinity'::timestamptz) as expired_trial,
+          COUNT(*) FILTER (WHERE trial_plan_name IS NOT NULL AND trial_plan_name != '') as granted_trial
           FROM brands WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
 
         // Trial plan breakdown
@@ -129,14 +135,18 @@ export function analyticsRoutes() {
           COALESCE(SUM(shopify_amount), 0) as total_revenue,
           COUNT(*) as total_orders,
           COALESCE(AVG(shopify_amount), 0) as avg_order_value,
-          COUNT(DISTINCT link_id) as unique_links_with_orders
+          COUNT(DISTINCT link_id) as unique_links_with_orders,
+          (SELECT json_agg(json_build_object('currency', c.cur, 'total', c.amt, 'orders', c.n) ORDER BY c.amt DESC)
+             FROM (SELECT COALESCE(NULLIF(shopify_currency, ''), 'USD') AS cur, COALESCE(SUM(shopify_amount), 0) AS amt, COUNT(*) AS n
+                     FROM orders WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+                    GROUP BY 1) c) as by_currency
           FROM orders WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
 
         // Creator Stripe connectivity
         cloudSqlQuery(`SELECT
           COUNT(*) as total,
           COUNT(*) FILTER (WHERE stripe_account_id IS NOT NULL AND stripe_account_id != '') as stripe_connected
-          FROM users WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
+          FROM users WHERE role = 3 /* ROLE_INFLUENCER */ AND (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
 
         // Payout stats
         cloudSqlQuery(`SELECT status, COUNT(*) as count, COALESCE(SUM(amount_value::numeric), 0) as total_amount
@@ -164,6 +174,7 @@ export function analyticsRoutes() {
           externalCreators: parseInt(externalCreatorsCount.rows[0].total),
           products: parseInt(productsCount.rows[0].total),
           links: parseInt(linksCount.rows[0].total),
+          activeLinks: parseInt(linksCount.rows[0].active || 0),
           orders: parseInt(ordersCount.rows[0].total),
           chats: parseInt(chatsCount.rows[0].total),
           matches: parseInt(matchesCount.rows[0].total),
@@ -209,6 +220,7 @@ export function analyticsRoutes() {
           onTrial: parseInt(brandMonetization.rows[0]?.on_trial || 0),
           activeTrial: parseInt(brandMonetization.rows[0]?.active_trial || 0),
           expiredTrial: parseInt(brandMonetization.rows[0]?.expired_trial || 0),
+          grantedTrial: parseInt(brandMonetization.rows[0]?.granted_trial || 0),
           trialPlans: trialPlans.rows.map(r => ({ plan: r.plan, interval: r.interval, count: parseInt(r.count) })),
         },
         revenue: {
@@ -216,6 +228,7 @@ export function analyticsRoutes() {
           totalOrders: parseInt(revenueStats.rows[0]?.total_orders || 0),
           avgOrderValue: parseFloat(parseFloat(revenueStats.rows[0]?.avg_order_value || 0).toFixed(2)),
           uniqueLinksWithOrders: parseInt(revenueStats.rows[0]?.unique_links_with_orders || 0),
+          byCurrency: (revenueStats.rows[0]?.by_currency || []).map((c) => ({ currency: c.currency, total: parseFloat(c.total || 0), orders: parseInt(c.orders || 0) })),
         },
         creatorPayments: {
           stripeConnected: parseInt(creatorStripe.rows[0]?.stripe_connected || 0),
@@ -335,6 +348,9 @@ export function analyticsRoutes() {
             (SELECT COUNT(DISTINCT influencer_user_id) FROM links WHERE status = 3 AND deleted = '-infinity'::timestamptz) AS creators_active,
             (SELECT COUNT(*) FROM products WHERE status = 2 AND deleted = '-infinity'::timestamptz) AS active_campaigns,
             (SELECT COALESCE(SUM(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS gmv,
+            -- the currency most orders were placed in (orders are stored in the shop currency, not converted)
+            (SELECT COALESCE(NULLIF(shopify_currency, ''), 'USD') FROM orders WHERE deleted = '-infinity'::timestamptz
+              GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1) AS gmv_currency,
             (SELECT COALESCE(SUM((commission)::numeric), 0) FROM orders WHERE deleted = '-infinity'::timestamptz AND commission ~ '^[0-9]+(\\.[0-9]+)?$') AS commission_paid,
             (SELECT COUNT(*) FROM orders WHERE deleted = '-infinity'::timestamptz) AS orders,
             (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks`),
@@ -405,6 +421,7 @@ export function analyticsRoutes() {
           creatorsActive: parseInt(mk.creators_active || 0),
           activeCampaigns: parseInt(mk.active_campaigns || 0),
           gmv: parseFloat(mk.gmv || 0),
+          gmvCurrency: mk.gmv_currency || "USD",
           commissionPaid: parseFloat(mk.commission_paid || 0),
           orders: parseInt(mk.orders || 0),
           clicks: parseInt(mk.clicks || 0),
@@ -460,7 +477,11 @@ export function analyticsRoutes() {
       const { rows: columns } = await cloudSqlQuery(
         `SELECT column_name, data_type FROM information_schema.columns
          WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`, [table]);
-      const { rows: countRows } = await cloudSqlQuery(`SELECT COUNT(*) as total FROM "${table}"`);
+      // Soft-deleted rows ('deleted' holds a real timestamp; 'infinity'/'-infinity'/NULL mean live)
+      // are excluded everywhere below so this page agrees with the Dashboard KPIs and the table view.
+      const hasDeleted = columns.some((c) => c.column_name === "deleted");
+      const live = hasDeleted ? `("deleted" IS NULL OR "deleted" IN ('infinity'::timestamptz, '-infinity'::timestamptz))` : "TRUE";
+      const { rows: countRows } = await cloudSqlQuery(`SELECT COUNT(*) as total FROM "${table}" WHERE ${live}`);
       const total = parseInt(countRows[0].total);
 
       // Pick text columns for distributions — prioritize meaningful ones
@@ -478,10 +499,10 @@ export function analyticsRoutes() {
       for (const col of textCols.slice(0, 5)) {
         const { rows: dist } = await cloudSqlQuery(
           `SELECT "${col.column_name}" as value, COUNT(*) as count FROM "${table}"
-           WHERE "${col.column_name}" IS NOT NULL AND "${col.column_name}" != ''
+           WHERE ${live} AND "${col.column_name}" IS NOT NULL AND "${col.column_name}" != ''
            GROUP BY "${col.column_name}" ORDER BY count DESC LIMIT 10`);
         // Only include if it's a real distribution (not all unique values)
-        if (dist.length >= 2 && dist.length <= 15 && parseInt(dist[0].count) > 1) {
+        if (dist.length >= 2 && parseInt(dist[0].count) > 1) {
           distributions[col.column_name] = dist;
         }
       }
@@ -495,7 +516,7 @@ export function analyticsRoutes() {
         const { rows: stats } = await cloudSqlQuery(
           `SELECT MIN("${col.column_name}") as min, MAX("${col.column_name}") as max,
            AVG("${col.column_name}")::numeric(20,2) as avg, COUNT("${col.column_name}") as non_null_count
-           FROM "${table}" WHERE "${col.column_name}" IS NOT NULL`);
+           FROM "${table}" WHERE ${live} AND "${col.column_name}" IS NOT NULL`);
         if (stats[0] && stats[0].min !== null) {
           numericStats[col.column_name] = stats[0];
         }
@@ -510,7 +531,7 @@ export function analyticsRoutes() {
       for (const col of tsCols.slice(0, 1)) {
         const { rows: ts } = await cloudSqlQuery(
           `SELECT DATE_TRUNC('week', "${col.column_name}")::date as date, COUNT(*) as count
-           FROM "${table}" WHERE "${col.column_name}" > '2020-01-01' AND "${col.column_name}" < NOW()
+           FROM "${table}" WHERE ${live} AND "${col.column_name}" > '2020-01-01' AND "${col.column_name}" < NOW()
            GROUP BY DATE_TRUNC('week', "${col.column_name}") ORDER BY date`);
         if (ts.length >= 2) timeSeries[col.column_name] = ts;
       }

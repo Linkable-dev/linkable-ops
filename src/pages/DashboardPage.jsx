@@ -83,6 +83,10 @@ export default function DashboardPage() {
   );
 
   const { kpis, growth, trends, distributions, igStats, monetization, revenue, creatorPayments, payouts } = data;
+  // Only payouts that actually went out count as "paid out"; pending/failed/reversed are reported separately.
+  const isPaid = (p) => /^(paid|succeeded|completed|complete)$/i.test(p.status || "");
+  const paidOut = payouts.filter(isPaid).reduce((a, p) => ({ amount: a.amount + p.amount, count: a.count + p.count }), { amount: 0, count: 0 });
+  const pendingPayouts = payouts.filter((p) => !isPaid(p)).reduce((a, p) => ({ amount: a.amount + p.amount, count: a.count + p.count }), { amount: 0, count: 0 });
 
   return (
     <div>
@@ -91,7 +95,7 @@ export default function DashboardPage() {
         <Kpi theme={theme} label="Brands" value={kpis.brands} growth={growth.brands} link="/tables/brands" />
         <Kpi theme={theme} label="Creators" value={kpis.influencers + kpis.externalCreators} sub={`${kpis.influencers} registered · ${kpis.externalCreators} external`} link="/tables/influencers" />
         <Kpi theme={theme} label="Products" value={kpis.products} link="/tables/products" />
-        <Kpi theme={theme} label="Active Links" value={kpis.links} growth={growth.links} link="/tables/links" />
+        <Kpi theme={theme} label="Links" value={kpis.links} growth={growth.links} sub={`${friendlyNumber(kpis.activeLinks)} accepted (live)`} link="/tables/links" />
         <Kpi theme={theme} label="Orders" value={kpis.orders} link="/tables/orders" />
         <Kpi theme={theme} label="Users" value={kpis.users} growth={growth.users} link="/tables/users" />
       </div>
@@ -112,11 +116,11 @@ export default function DashboardPage() {
           <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>Money</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-          <MetricCell theme={theme} label="Revenue" value={`$${friendlyNumber(revenue.total)}`} />
+          <MetricCell theme={theme} label="Revenue" value={moneyByCurrency(revenue.byCurrency, revenue.total)} sub={revenue.byCurrency.length > 1 ? "mixed currencies, not converted" : null} />
           <MetricCell theme={theme} label="Orders" value={revenue.totalOrders} border />
-          <MetricCell theme={theme} label="Avg Order" value={`$${friendlyNumber(revenue.avgOrderValue)}`} border />
-          <MetricCell theme={theme} label="Paid Out" value={`$${friendlyNumber(payouts.reduce((s, p) => s + p.amount, 0))}`} sub={`${payouts.reduce((s, p) => s + p.count, 0)} payouts`} border />
-          <MetricCell theme={theme} label="Links That Sold" value={revenue.uniqueLinksWithOrders} sub={`of ${kpis.links} total`} border />
+          <MetricCell theme={theme} label="Avg Order" value={money(revenue.avgOrderValue, primaryCurrency(revenue.byCurrency), { cents: true })} border />
+          <MetricCell theme={theme} label="Paid Out" value={money(paidOut.amount, "USD")} sub={`${paidOut.count} paid payout${paidOut.count === 1 ? "" : "s"}${pendingPayouts.count ? ` · ${pendingPayouts.count} not paid` : ""}`} border />
+          <MetricCell theme={theme} label="Links That Sold" value={revenue.uniqueLinksWithOrders} sub={`of ${kpis.links} links`} border />
         </div>
       </Card>
 
@@ -269,8 +273,23 @@ export default function DashboardPage() {
   );
 }
 
+// Money is shown in full with its currency (no 1.2K abbreviations, no hard-coded "$").
+function money(n, currency = "USD", { cents = false } = {}) {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 }).format(Number(n || 0));
+  } catch { return `${currency} ${Number(n || 0).toLocaleString()}`; }
+}
+function primaryCurrency(byCurrency) { return byCurrency?.[0]?.currency || "USD"; }
+// One currency → a single figure; several → each shown, never summed across currencies.
+function moneyByCurrency(byCurrency, fallbackTotal) {
+  if (!byCurrency || byCurrency.length === 0) return money(fallbackTotal, "USD");
+  if (byCurrency.length === 1) return money(byCurrency[0].total, byCurrency[0].currency);
+  return byCurrency.map((c) => money(c.total, c.currency)).join(" + ");
+}
+
 function Kpi({ theme, label, value, growth, sub, link }) {
-  const growthText = growth ? `${growth.last7} this week · ${growth.last30} this month` : null;
+  // Rolling windows (NOW() - 7/30 days), not calendar week/month.
+  const growthText = growth ? `${growth.last7} last 7 days · ${growth.last30} last 30 days` : null;
   const content = (
     <div style={{
       background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10,
@@ -281,7 +300,7 @@ function Kpi({ theme, label, value, growth, sub, link }) {
       <div style={{ fontSize: 24, fontWeight: 700, color: theme.text }}>{friendlyNumber(value)}</div>
       {growthText && (
         <div style={{ fontSize: 11, color: theme.textMid, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={growthText}>
-          <span style={{ fontWeight: 600 }}>{growth.last7}</span> this week · <span style={{ fontWeight: 600 }}>{growth.last30}</span> this month
+          <span style={{ fontWeight: 600 }}>{growth.last7}</span> last 7 days · <span style={{ fontWeight: 600 }}>{growth.last30}</span> last 30 days
         </div>
       )}
       {sub && <div style={{ fontSize: 11, color: theme.textMid, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={sub}>{sub}</div>}
@@ -304,6 +323,12 @@ function MiniStat({ theme, label, value }) {
 }
 
 function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
+  // "all time" series are bucketed by month on the server; the rest by week.
+  const monthly = /all time/i.test(period || "");
+  const tickLabel = (d) => new Date(d).toLocaleDateString(undefined, monthly ? { month: "short", year: "2-digit" } : { month: "short", day: "numeric" });
+  const tipLabel = (d) => monthly
+    ? new Date(d).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+    : `Week of ${new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
   if (!data || data.length < 2) return (
     <Card style={{ marginBottom: 0 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>{title}</div>
@@ -312,7 +337,7 @@ function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
   );
   return (
     <Card style={{ marginBottom: 0 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>{title} <span style={{ fontWeight: 400, color: theme.textMuted, fontSize: 11 }}>{period || "last 30 days"}</span></div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>{title} <span style={{ fontWeight: 400, color: theme.textMuted, fontSize: 11 }}>{period || "last 30 days"}{monthly ? " · per month" : " · per week"}</span></div>
       <ResponsiveContainer width="100%" height={180}>
         <AreaChart data={data}>
           <defs>
@@ -322,10 +347,9 @@ function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.border} vertical={false} />
-          <XAxis dataKey="date" tick={{ fontSize: 9, fill: theme.textMuted }} tickLine={false}
-            tickFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
+          <XAxis dataKey="date" tick={{ fontSize: 9, fill: theme.textMuted }} tickLine={false} tickFormatter={tickLabel} />
           <YAxis tick={{ fontSize: 9, fill: theme.textMuted }} axisLine={false} tickLine={false} allowDecimals={false} />
-          <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => new Date(d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} />
+          <Tooltip contentStyle={tooltipStyle} labelFormatter={tipLabel} />
           <Area type="monotone" dataKey="count" stroke={color} strokeWidth={2} fill={`url(#g-${String(title).replace(/\W+/g, "-")})`} />
         </AreaChart>
       </ResponsiveContainer>

@@ -5,12 +5,13 @@ import { useDbTarget } from "../contexts/DbTargetContext";
 import { Skeleton, SkeletonStat, SkeletonBars } from "../components/ui/Skeleton";
 
 // ── formatters ──────────────────────────────────────────────────────────────
-const money = (n, { cents } = {}) =>
-  "$" +
-  Number(n || 0).toLocaleString("en-US", {
-    minimumFractionDigits: cents ? 2 : 0,
-    maximumFractionDigits: cents ? 2 : 0,
-  });
+const money = (n, { cents, currency = "USD" } = {}) => {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 }).format(Number(n || 0));
+  } catch {
+    return `${currency} ${Number(n || 0).toLocaleString("en-US")}`;
+  }
+};
 const num = (n) => Number(n || 0).toLocaleString("en-US");
 const pct = (part, base) => (base > 0 ? Math.round((part / base) * 100) : 0);
 
@@ -36,17 +37,19 @@ function Section({ title, hint, children }) {
   );
 }
 
-function Card({ children, span = 1, pad = 18 }) {
+function Card({ children, span = 3, pad = 18, style }) {
   const { theme } = useTheme();
   return (
     <div
+      className={`lk-c${span}`}
       style={{
-        gridColumn: `span ${span}`,
         background: theme.surface,
         border: `1px solid ${theme.border}`,
         borderRadius: 12,
         padding: pad,
         minWidth: 0,
+        boxSizing: "border-box",
+        ...style,
       }}
     >
       {children}
@@ -54,24 +57,18 @@ function Card({ children, span = 1, pad = 18 }) {
   );
 }
 
-function Stat({ label, value, sub, accent, big, span = 1 }) {
+function Stat({ label, value, sub, accent, big, span = 3 }) {
   const { theme } = useTheme();
   return (
     <Card span={span}>
       <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: accent || theme.text, lineHeight: 1.1, letterSpacing: -0.5 }}>
+      <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: accent || theme.text, lineHeight: 1.1, letterSpacing: -0.5, overflowWrap: "anywhere" }}>
         {value}
       </div>
       {sub && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>{sub}</div>}
     </Card>
   );
 }
-
-const grid = (cols) => ({
-  display: "grid",
-  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-  gap: 14,
-});
 
 export default function HomePage() {
   const { theme } = useTheme();
@@ -96,15 +93,13 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <div style={{ maxWidth: 1120 }}>
+      <div style={{ maxWidth: 1280 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 24 }}>Home</div>
         {/* Same sections, grids and card shapes as the loaded page. */}
         <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
-          <div style={grid(4)}>
-            {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} variant="stat" big={i < 2} seed={i} />)}
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <Card pad={18}>
+          <div className="lk-grid">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" big={i < 2} seed={i} /></div>)}
+            <Card pad={18} span={12}>
               <Skeleton width={80} height={12} />
               <div style={{ height: 14 }} />
               <SkeletonBars rows={2} labelWidth={64} valueWidth={150} barHeight={10} gap={12} />
@@ -117,16 +112,13 @@ export default function HomePage() {
           </Card>
         </Section>
         <Section title="Marketplace" hint="the two-sided activity brands and creators generate">
-          <div style={grid(4)}>
-            {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} variant="stat" seed={i + 4} sub={i !== 1} />)}
+          <div className="lk-grid">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" seed={i + 4} sub={i !== 1} /></div>)}
           </div>
         </Section>
         <Section title="Subscription & trial health" hint="how the active brand base breaks down today">
-          <div style={grid(5)}>
-            {[0, 1, 2, 3, 4].map((i) => <SkeletonStat key={i} variant="stat" seed={i + 8} sub={i !== 0} />)}
-          </div>
-          <div style={{ ...grid(5), marginTop: 14 }}>
-            <SkeletonStat variant="stat" seed={13} />
+          <div className="lk-grid">
+            {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="lk-c2"><SkeletonStat variant="stat" seed={i + 8} sub={i !== 0} /></div>)}
           </div>
         </Section>
       </div>
@@ -135,7 +127,7 @@ export default function HomePage() {
 
   if (error) {
     return (
-      <div style={{ maxWidth: 1120 }}>
+      <div style={{ maxWidth: 1280 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 12 }}>Home</div>
         <div style={{ padding: 16, borderRadius: 10, border: `1px solid ${RED}`, color: RED, fontSize: 13 }}>
           Failed to load metrics: {error}
@@ -158,8 +150,8 @@ export default function HomePage() {
   const momentumDelta = brands.newThisMonth - brands.newLastMonth;
 
   return (
-    <div style={{ maxWidth: 1120 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 24 }}>
+    <div style={{ maxWidth: 1280 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: "4px 12px", marginBottom: 24 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text }}>Home</div>
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           Live metrics · <span style={{ textTransform: "uppercase", fontWeight: 600 }}>{target}</span>
@@ -168,7 +160,7 @@ export default function HomePage() {
 
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
       <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
-        <div style={grid(4)}>
+        <div className="lk-grid">
           <Stat label="MRR" value={money(revenue.mrr)} accent={GREEN} big sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} />
           <Stat label="ARR" value={money(revenue.arr)} big sub="MRR × 12" />
           <Stat label="ARPA" value={money(revenue.arpa, { cents: true })} sub="avg revenue / paying brand" />
@@ -181,7 +173,7 @@ export default function HomePage() {
         </div>
 
         {revenue.byTier.length > 0 && (
-          <Card pad={18}>
+          <Card pad={18} style={{ marginTop: 14 }}>
             <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 14 }}>MRR by plan</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {revenue.byTier.map((t) => (
@@ -231,28 +223,26 @@ export default function HomePage() {
 
       {/* ── Marketplace ───────────────────────────────────────────────────── */}
       <Section title="Marketplace" hint="the two-sided activity brands and creators generate">
-        <div style={grid(4)}>
+        <div className="lk-grid">
           <Stat label="Creators" value={num(marketplace.creatorsTotal)} sub={`${num(marketplace.creatorsActive)} active (accepted a campaign)`} />
           <Stat label="Active campaigns" value={num(marketplace.activeCampaigns)} />
-          <Stat label="GMV" value={money(marketplace.gmv)} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} />
-          <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true })} sub={`${num(marketplace.clicks)} link clicks`} />
+          <Stat label="GMV" value={money(marketplace.gmv, { currency: marketplace.gmvCurrency })} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} />
+          <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.clicks)} link clicks`} />
         </div>
       </Section>
 
       {/* ── Subscription & trial health ───────────────────────────────────── */}
       <Section title="Subscription & trial health" hint="how the active brand base breaks down today">
-        <div style={grid(5)}>
-          <Stat label="Paying" value={num(subscriptions.paying)} accent={GREEN} />
-          <Stat label="In free trial" value={num(subscriptions.inTrial)} accent={AMBER} sub="on a plan, not yet billed" />
-          <Stat label="Linkable extended trials" value={num(subscriptions.extendedTrialActive)} accent={BLUE} sub="admin-granted, active" />
-          <Stat label="Cancelled · in grace" value={num(subscriptions.cancelledInGrace)} accent={ROSE} sub="cancelled, trial access ending" />
-          <Stat label="No plan yet" value={num(subscriptions.noPaidPlan)} sub="never subscribed / lapsed" />
-        </div>
-        <div style={{ ...grid(5), marginTop: 14 }}>
+        <div className="lk-grid">
+          <Stat span={2} label="Paying" value={num(subscriptions.paying)} accent={GREEN} />
+          <Stat span={2} label="In free trial" value={num(subscriptions.inTrial)} accent={AMBER} sub="on a plan, not yet billed" />
+          <Stat span={2} label="Linkable extended trials" value={num(subscriptions.extendedTrialActive)} accent={BLUE} sub="admin-granted, active" />
+          <Stat span={2} label="Cancelled · in grace" value={num(subscriptions.cancelledInGrace)} accent={ROSE} sub="cancelled, trial access ending" />
+          <Stat span={2} label="No plan yet" value={num(subscriptions.noPaidPlan)} sub="never subscribed / lapsed" />
           <Stat
             label="New brands this month"
             value={num(brands.newThisMonth)}
-            span={1}
+            span={2}
             sub={
               momentumDelta === 0
                 ? `same as last month (${num(brands.newLastMonth)})`

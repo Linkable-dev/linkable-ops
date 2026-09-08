@@ -185,16 +185,19 @@ export function outboundRoutes() {
         if (r.complained_at) stats.complained++;
       }
       // Engagement rates use delivered as denominator (industry convention —
-      // a bounced email can't be opened). Bounce rate uses sent. Guard div-by-0.
-      const sent = stats.sent || 1;
-      const delivered = stats.delivered || 1;
+      // a bounced email can't be opened). Bounce rate uses sent. No denominator
+      // → null (rendered as "—"), never a fake 100%.
+      const rate = (n, d) => (d > 0 ? n / d : null);
       stats.rates = {
-        delivered: stats.delivered / sent,
-        bounced: stats.bounced / sent,
-        opened: stats.opened / delivered,
-        clicked: stats.clicked / delivered,
-        replied: stats.replied / delivered,
+        delivered: rate(stats.delivered, stats.sent),
+        bounced: rate(stats.bounced, stats.sent),
+        opened: rate(stats.opened, stats.delivered),
+        clicked: rate(stats.clicked, stats.delivered),
+        replied: rate(stats.replied, stats.delivered),
       };
+      // Rows still waiting to go out. `total` is every row in the window (sent,
+      // bounced and cancelled included), so it must not be labelled "queued".
+      stats.queued = (stats.byStatus.pending || 0) + (stats.byStatus.scheduled || 0);
       res.json(stats);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -376,6 +379,16 @@ export function outboundRoutes() {
           .eq("team_id", teamId)
           .order("updated_at", { ascending: false })
           .limit(limit);
+
+        // Same "Needs reply / Handled" lens as the manual branch. An AI thread
+        // needs attention when it is active/escalated AND a reply has come in;
+        // everything else (booked, qualified, dead, opted out, no inbound yet)
+        // counts as handled.
+        if (status === "unhandled") {
+          q = q.in("status", ["active", "escalated"]).not("last_inbound_at", "is", null);
+        } else if (status === "handled") {
+          q = q.or("status.not.in.(active,escalated),last_inbound_at.is.null");
+        }
 
         if (search) {
           const esc = search.replace(/[,()*]/g, " ");

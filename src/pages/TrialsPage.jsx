@@ -24,6 +24,7 @@ import { Input } from "../components/ui/Input";
 import { SkeletonListRows } from "../components/ui/Skeleton";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
+import { useNow } from "../lib/useNow";
 
 export default function TrialsPage() {
   const { theme } = useTheme();
@@ -155,7 +156,8 @@ export default function TrialsPage() {
 }
 
 function BrandResultRow({ row, theme, isLast, onGrantTrial }) {
-  const trial = useMemo(() => describeTrial(row, theme), [row, theme]);
+  const now = useNow();
+  const trial = useMemo(() => describeTrial(row, theme, now), [row, theme, now]);
   const initials = useMemo(() => initialsFor(row), [row]);
 
   return (
@@ -209,16 +211,25 @@ function BrandResultRow({ row, theme, isLast, onGrantTrial }) {
   );
 }
 
-function describeTrial(row, theme) {
+function describeTrial(row, theme, now = Date.now()) {
   const plan = row.trial_plan_name || "";
   const days = row.trial_days || 0;
   const activated = row.trial_activation_date && row.trial_activation_date !== "-infinity"
     ? new Date(row.trial_activation_date) : null;
   const expires = row.trial_expiration_date && row.trial_expiration_date !== "-infinity"
     ? new Date(row.trial_expiration_date) : null;
-  const isExpired = expires && expires.getTime() <= Date.now();
+  const isExpired = expires && expires.getTime() <= now;
 
   if (!plan && !days) {
+    // No Linkable grant. The main app also writes trial_* for the standard Shopify
+    // 14-day trial (without a plan name), so say which situation this is — the
+    // Users page shows the same brand as "Trial · N days left" in that case.
+    if (expires && !isExpired) {
+      return { label: "No Linkable grant", subLabel: `Shopify trial ends ${friendlyDate(row.trial_expiration_date)}`, color: theme.textMid };
+    }
+    if (expires && isExpired) {
+      return { label: "No Linkable grant", subLabel: `Shopify trial ended ${friendlyDate(row.trial_expiration_date)}`, color: theme.textMuted };
+    }
     return { label: "No trial set", subLabel: null, color: theme.textMuted };
   }
   if (!activated) {

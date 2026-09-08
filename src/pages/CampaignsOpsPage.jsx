@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -6,6 +6,8 @@ import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/u
 import { useColumnWidths, ResizeHandle, ColumnFilter } from "../components/table/tableTools";
 
 const STATUS_COLORS = {
+  Rejected:          { bg: "#FEE2E2", fg: "#991B1B", bgDark: "#3F1313", fgDark: "#FCA5A5" },
+  Ended:             { bg: "#F3F4F6", fg: "#4B5563", bgDark: "#1F2937", fgDark: "#9CA3AF" },
   Invited:           { bg: "#F3E8FF", fg: "#6B21A8", bgDark: "#2A1B47", fgDark: "#C4B5FD" },
   Applied:           { bg: "#FEF3C7", fg: "#92400E", bgDark: "#3B2A0E", fgDark: "#FCD34D" },
   Accepted:          { bg: "#DBEAFE", fg: "#1E40AF", bgDark: "#0F2547", fgDark: "#93C5FD" },
@@ -92,14 +94,14 @@ export default function CampaignsOpsPage() {
     setLoading(true);
     setError(null);
     setExpandedId(null);
-    api.getOpsCampaigns({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: debouncedSearch, sortBy, sortDir, filters })
+    api.getOpsCampaigns({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: debouncedSearch, sortBy, sortDir, filters, quick: filter === "all" ? undefined : filter })
       .then((res) => {
         setCampaigns(res.rows || []);
         setTotal(res.total || 0);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [page, debouncedSearch, sortBy, sortDir, filters]);
+  }, [page, debouncedSearch, sortBy, sortDir, filters, filter]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -117,18 +119,9 @@ export default function CampaignsOpsPage() {
     }
   };
 
-  const filtered = useMemo(() => {
-    // Quick-filter chips operate on the visible page only.
-    let list = campaigns;
-    if (filter === "stuck-shipping") {
-      list = list.filter((c) => c.creators_accepted > 0 && c.products_shipped < c.creators_accepted);
-    } else if (filter === "no-sales") {
-      list = list.filter((c) => c.products_shipped > 0 && c.sales === 0);
-    } else if (filter === "no-applications") {
-      list = list.filter((c) => Number(c.creators_applied) === 0);
-    }
-    return list;
-  }, [campaigns, filter]);
+  // Quick-filter chips are applied server-side (see QUICK_FILTERS in ops.js), so the
+  // total, the pager and the empty state all describe the filtered set.
+  const filtered = campaigns;
 
   if (error) return (
     <Card><div style={{ color: theme.text }}>Failed to load campaigns: {error}</div></Card>
@@ -164,7 +157,7 @@ export default function CampaignsOpsPage() {
         ].map(([k, label]) => (
           <button
             key={k}
-            onClick={() => setFilter(k)}
+            onClick={() => { setFilter(k); setPage(0); }}
             style={{
               height: 34, padding: "0 12px", borderRadius: 8, fontSize: 12, fontWeight: 500,
               border: `1px solid ${filter === k ? theme.text : theme.border}`,
@@ -228,7 +221,7 @@ export default function CampaignsOpsPage() {
               )}
               {filtered.map((c) => {
                 const isOpen = expandedId === c.id;
-                const bottleneck = computeBottleneck(c);
+                const bottleneck = c.bottleneck_label ? { label: c.bottleneck_label, tone: SEVERITY_TONE[c.bottleneck_severity] || "info" } : computeBottleneck(c);
                 return (
                   <CampaignRows key={c.id}>
                     <tr
@@ -338,10 +331,15 @@ function SplitCount({ theme, total, ext }) {
   );
 }
 
+// Server rows carry bottleneck_label/bottleneck_severity (same rules, evaluated in
+// SQL so sorting matches the badge); this is the fallback for older payloads.
+const SEVERITY_TONE = { 3: "danger", 2: "warn", 1: "info" };
 function computeBottleneck(c) {
   const invited = Number(c.creators_invited || 0);
   const applied = Number(c.creators_applied || 0);
   const accepted = Number(c.creators_accepted || 0);
+  // External (email-invited) creators never get a sample shipped, so shipping is judged on platform acceptances.
+  const platformAccepted = accepted - Number(c.externals_accepted || 0);
   const samplesAccepted = Number(c.samples_accepted || 0);
   const shipped = Number(c.products_shipped || 0);
   const sales = Number(c.sales || 0);
@@ -349,7 +347,7 @@ function computeBottleneck(c) {
   if (applied === 0) return { label: "Awaiting invite responses", tone: "info" };
   if (accepted === 0) return { label: "No acceptances", tone: "warn" };
   if (samplesAccepted > 0 && shipped < samplesAccepted) return { label: "Brand: accepted, not shipped", tone: "danger" };
-  if (shipped < accepted) return { label: "Brand: not shipping", tone: "danger" };
+  if (shipped < platformAccepted) return { label: "Brand: not shipping", tone: "danger" };
   if (sales === 0) return { label: "Content: no sales", tone: "info" };
   return null;
 }

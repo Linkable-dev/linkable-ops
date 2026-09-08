@@ -85,7 +85,7 @@ export default function TableAnalyticsPage() {
       {hasTrends && Object.entries(data.timeSeries).map(([col, ts]) => (
         <Card key={col} style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>
-            Growth over time
+            New records per week
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={ts.map((d) => ({ date: d.date, count: parseInt(d.count) }))}>
@@ -99,7 +99,7 @@ export default function TableAnalyticsPage() {
               <XAxis dataKey="date" tick={{ fontSize: 9, fill: theme.textMuted }} tickLine={false}
                 tickFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
               <YAxis tick={{ fontSize: 9, fill: theme.textMuted }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => new Date(d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} />
+              <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => `Week of ${new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`} />
               <Area type="monotone" dataKey="count" stroke={theme.accent} strokeWidth={2} fill={`url(#tg-${col})`} name="New records" />
             </AreaChart>
           </ResponsiveContainer>
@@ -121,7 +121,7 @@ export default function TableAnalyticsPage() {
             return (
               <Card key={col} style={{ marginBottom: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12, textTransform: "capitalize" }}>
-                  {friendlyName(col)}
+                  {friendlyName(col)} <span style={{ fontWeight: 400, color: theme.textMuted, fontSize: 11, textTransform: "none" }}>top 10 values</span>
                 </div>
                 {usePie ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 16 }}>

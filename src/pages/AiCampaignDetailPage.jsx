@@ -18,7 +18,15 @@ const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },
   G2: { bg: "#FCE7F3", fg: "#9D174D" },
   G3: { bg: "#F3F4F6", fg: "#374151" },
+  C1: { bg: "#E0E7FF", fg: "#3730A3" },
+  C2: { bg: "#FCE7F3", fg: "#9D174D" },
+  C3: { bg: "#F3F4F6", fg: "#374151" },
 };
+// Sequences have 4 touches. Brand campaigns use groups G1–G3, creator campaigns C1–C3.
+const TOUCHES = [1, 2, 3, 4];
+const TOUCH_OFFSET = { 1: 0, 2: 3, 3: 7, 4: 12 };
+const groupsFor = (campaign) => (campaign?.audience_type === "influencer" ? ["C1", "C2", "C3"] : ["G1", "G2", "G3"]);
+const slotsFor = (campaign) => groupsFor(campaign).flatMap((g) => TOUCHES.map((t) => [g, t]));
 const STATUS_TINTS = {
   active:   { bg: "#D1FAE5", fg: "#065F46" },
   paused:   { bg: "#FEF3C7", fg: "#92400E" },
@@ -40,8 +48,7 @@ const SEND_STATUS_TINTS = {
   bounced:   { bg: "#FED7AA", fg: "#9A3412" },
 };
 const SEND_STATUS_FILTERS = ["all", "pending", "scheduled", "sent", "failed", "cancelled", "bounced"];
-const SEND_GROUP_FILTERS = ["all", "G1", "G2", "G3"];
-const SEND_TOUCH_FILTERS = ["all", "1", "2", "3"];
+const SEND_TOUCH_FILTERS = ["all", "1", "2", "3", "4"];
 
 function sendDisplayStatus(r) {
   if (r.replied_at) return "replied";
@@ -54,10 +61,7 @@ function sendRunLabel(runSel) {
   if (runSel === "all") return "all runs";
   return `run ${runSel}`;
 }
-function sendRatePct(rate) {
-  if (rate == null || !isFinite(rate)) return "—";
-  return `${(rate * 100).toFixed(1)}%`;
-}
+function sendRatePct(x) { return x == null ? "— (nothing delivered yet)" : `${(x * 100).toFixed(1)}%`; }
 
 export default function AiCampaignDetailPage() {
   const { theme } = useTheme();
@@ -214,17 +218,21 @@ function OverviewTab({ campaign, metrics, templates, theme, onJump }) {
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
-        <ClickStat label="Lead pool" value={poolCounts?.qualified ?? "—"}
-          sub={poolCounts ? `${poolCounts.emailed} contacted · ${poolCounts.total - poolCounts.qualified} skipped` : "loading"}
+        <ClickStat label="Lead pool" value={poolCounts ? `${poolCounts.qualified.toLocaleString()}${poolCounts.capped ? "+" : ""}` : "—"}
+          sub={poolCounts ? `${poolCounts.emailed.toLocaleString()} contacted by any campaign · ${(poolCounts.total - poolCounts.qualified).toLocaleString()} without email${poolCounts.capped ? " · lower bound" : ""}` : "loading"}
           onClick={() => onJump("leads")} theme={theme} />
         <ClickStat label="Templates" value={templates?.length || 0}
-          sub={templates?.length === 9 ? "all 9 slots filled" : `${9 - (templates?.length || 0)} slots empty`}
+          sub={(() => {
+            const slots = slotsFor(campaign);
+            const filled = new Set((templates || []).map((t) => t.template_key || `${t.brand_group}-T${t.touch_number}`)).size;
+            return filled >= slots.length ? `all ${slots.length} slots filled` : `${slots.length - filled} of ${slots.length} slots empty`;
+          })()}
           onClick={() => onJump("templates")} theme={theme} />
         <ClickStat label="Auto-reply" value={campaign.auto_reply ? "On" : "Off"}
           sub={campaign.auto_reply ? "AI persona linked" : "Manual triage in AI Inbox"}
           onClick={() => onJump("settings")} theme={theme} />
         <ClickStat label="Last discovery" value={recentRun ? recentRun.status : "—"}
-          sub={recentRun ? `${recentRun.sent} qualified · ${recentRun.processed} inspected` : "no runs yet"}
+          sub={recentRun ? `${recentRun.sent} enrolled · ${recentRun.processed} inspected` : "no runs yet"}
           onClick={() => onJump("leads")} theme={theme} />
       </div>
 
@@ -297,23 +305,22 @@ function MetricsCard({ metrics, theme }) {
     </Card>
   );
 }
-function pct(x) { return x ? `${(x * 100).toFixed(1)}%` : "0%"; }
+// null = no denominator yet (nothing delivered/sent) → "—", distinct from a real 0%.
+function pct(x) { return x == null ? "—" : `${(x * 100).toFixed(1)}%`; }
 
 // Per-slot / per-group / per-touch performance breakdown. Same metrics as the
 // overall Deliverability card but bucketed, so you can see which template set
 // is pulling its weight and which isn't.
 function PerformanceBreakdownCard({ metrics, theme }) {
   if (!metrics) return null;
-  const slotKeys = ["G1-T1","G1-T2","G1-T3","G2-T1","G2-T2","G2-T3","G3-T1","G3-T2","G3-T3"];
-  const slotRows = slotKeys
-    .map((k) => ({ label: k, bucket: metrics.bySlot?.[k] }))
+  // Keys come from the data itself so T4 and creator groups (C1–C3) are never dropped,
+  // and this card always reconciles with the Deliverability card above it.
+  const rowsFrom = (obj) => Object.keys(obj || {}).sort()
+    .map((k) => ({ label: k, bucket: obj[k] }))
     .filter((r) => r.bucket && r.bucket.sent > 0);
-  const groupRows = ["G1","G2","G3"]
-    .map((k) => ({ label: k, bucket: metrics.byGroup?.[k] }))
-    .filter((r) => r.bucket && r.bucket.sent > 0);
-  const touchRows = ["T1","T2","T3"]
-    .map((k) => ({ label: k, bucket: metrics.byTouch?.[k] }))
-    .filter((r) => r.bucket && r.bucket.sent > 0);
+  const slotRows = rowsFrom(metrics.bySlot);
+  const groupRows = rowsFrom(metrics.byGroup);
+  const touchRows = rowsFrom(metrics.byTouch);
 
   if (!slotRows.length && !groupRows.length && !touchRows.length) return null;
 
@@ -593,7 +600,7 @@ function SendsTab({ campaign, theme }) {
             Array.from({ length: 6 }).map((_, i) => <SkeletonStat key={i} variant="send" seed={i} />)
           ) : (
             <>
-              <SendStatCard label="Sent" value={stats.sent ?? 0} sub={`${stats.total ?? 0} queued`} theme={theme} tint={SEND_STATUS_TINTS.sent} />
+              <SendStatCard label="Sent" value={stats.sent ?? 0} sub={`${(stats.queued ?? 0).toLocaleString()} still queued · ${(stats.total ?? 0).toLocaleString()} in window`} theme={theme} tint={SEND_STATUS_TINTS.sent} />
               <SendStatCard label="Delivered" value={stats.delivered ?? 0} sub={sendRatePct(stats.rates?.delivered)} theme={theme} tint={SEND_STATUS_TINTS.sent} />
               <SendStatCard label="Opened" value={stats.opened ?? 0} sub={sendRatePct(stats.rates?.opened)} theme={theme} tint={SEND_STATUS_TINTS.opened} />
               <SendStatCard label="Clicked" value={stats.clicked ?? 0} sub={sendRatePct(stats.rates?.clicked)} theme={theme} tint={SEND_STATUS_TINTS.clicked} />
@@ -645,10 +652,10 @@ function SendsTab({ campaign, theme }) {
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select value={group} onChange={(e) => setGroup(e.target.value)} style={sendSelectStyle(theme)}>
-          {SEND_GROUP_FILTERS.map((g) => <option key={g} value={g}>{g === "all" ? "Any group" : g}</option>)}
+          {["all", ...groupsFor(campaign)].map((g) => <option key={g} value={g}>{g === "all" ? "Any group" : g}</option>)}
         </select>
         <select value={touch} onChange={(e) => setTouch(e.target.value)} style={sendSelectStyle(theme)}>
-          {SEND_TOUCH_FILTERS.map((t) => <option key={t} value={t}>{t === "all" ? "Any touch" : `T+${t === "1" ? "0" : t === "2" ? "3" : "7"}`}</option>)}
+          {SEND_TOUCH_FILTERS.map((t) => <option key={t} value={t}>{t === "all" ? "Any touch" : `T+${TOUCH_OFFSET[t]}`}</option>)}
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value)} style={sendSelectStyle(theme)}>
           {SEND_STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "all" ? "Any status" : s}</option>)}
@@ -1413,11 +1420,12 @@ function DiscoveryRunsPanel({ campaign, theme }) {
         </thead>
         <tbody>
           {runs.map((r) => {
-            // Target is qualified leads, not brands inspected — the loop exits
-            // at sent === total. Showing processed / total made progress
-            // overshoot 100% whenever any brands got skipped/failed.
+            // Progress = brands processed out of the run's target. `sent` is the
+            // outcome (enrolled), shown beside it; using it for the bar stranded
+            // finished runs at e.g. 62% whenever leads were skipped or failed.
             const target = r.total || 1;
-            const pct = Math.min(100, Math.round((r.sent / target) * 100));
+            const done = r.status === "complete" ? target : Math.min(target, r.processed || 0);
+            const pct = Math.min(100, Math.round((done / target) * 100));
             return (
               <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
                 <td style={runTd}>
@@ -1633,23 +1641,22 @@ function shortDate(iso) {
 
 // ---------- TEMPLATES ----------
 
-const SLOTS = [
-  ["G1", 1], ["G1", 2], ["G1", 3],
-  ["G2", 1], ["G2", 2], ["G2", 3],
-  ["G3", 1], ["G3", 2], ["G3", 3],
-];
-
 const GROUP_LABELS = {
   G1: "G1 · Creator-active",
   G2: "G2 · Summer-seasonal",
   G3: "G3 · Cold catch-all",
+  C1: "C1 · Macro (200k+)",
+  C2: "C2 · Mid-tier",
+  C3: "C3 · Micro",
 };
 
 function TemplatesCard({ campaign, templates, theme, onChange }) {
   const [generating, setGenerating] = useState(false);
   const [genErr, setGenErr] = useState(null);
   const [refinementPrompt, setRefinementPrompt] = useState("");
-  const [activeGroup, setActiveGroup] = useState("G1");
+  const groups = groupsFor(campaign);
+  const SLOTS = useMemo(() => slotsFor(campaign), [campaign]);
+  const [activeGroup, setActiveGroup] = useState(groups[0]);
 
   async function generate() {
     setGenerating(true); setGenErr(null);
@@ -1672,16 +1679,16 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
       (m[k] ||= []).push(t);
     }
     return m;
-  }, [templates]);
+  }, [templates, SLOTS]);
 
   // Per-group counts feed the tab badges.
   const countsByGroup = useMemo(() => {
-    const c = { G1: 0, G2: 0, G3: 0 };
+    const c = Object.fromEntries(groups.map((g) => [g, 0]));
     for (const t of templates || []) {
       if (c[t.brand_group] != null) c[t.brand_group]++;
     }
     return c;
-  }, [templates]);
+  }, [templates, groups]);
 
   const visibleSlots = SLOTS.filter(([g]) => g === activeGroup);
 
@@ -1693,7 +1700,7 @@ function TemplatesCard({ campaign, templates, theme, onChange }) {
       </div>
 
       <TabBar
-        tabs={["G1", "G2", "G3"].map((g) => [g, `${GROUP_LABELS[g]} (${countsByGroup[g]})`])}
+        tabs={groups.map((g) => [g, `${GROUP_LABELS[g] || g} (${countsByGroup[g]})`])}
         active={activeGroup}
         onSelect={setActiveGroup}
       />
@@ -1733,7 +1740,7 @@ function SlotBlock({ group, touch, templates, theme, onChange }) {
     <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <Pill tint={GROUP_TINTS[group] || {}}>{group}</Pill>
-        <span style={{ fontSize: 13, fontWeight: 500, color: theme.text }}>T+{touch === 1 ? "0" : touch === 2 ? "3" : "7"}</span>
+        <span style={{ fontSize: 13, fontWeight: 500, color: theme.text }}>T+{TOUCH_OFFSET[touch] ?? touch}</span>
         <span style={{ fontSize: 11, color: theme.textMuted }}>({templates.length} variant{templates.length === 1 ? "" : "s"})</span>
       </div>
       {templates.length === 0 ? (

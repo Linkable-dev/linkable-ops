@@ -2,7 +2,7 @@
 // (blog_posts / blog_topics, migration 018). Mounted with requireOpsAdmin.
 import express from "express";
 import { blogDb as supabase } from "../lib/blog-supabase.js";
-import { generatePost, proposeTopics, triggerSiteRebuild, validateArticle, wordCount, slugify, IMAGE_POOL } from "../lib/blog-writer.js";
+import { generatePost, proposeTopics, triggerSiteRebuild, validateArticle, wordCount, readMinutes, slugify, IMAGE_POOL } from "../lib/blog-writer.js";
 import { searchPhotos } from "../lib/blog-images.js";
 
 const EDITABLE = ["slug", "title", "description", "excerpt", "category", "keyword", "status", "author_name", "hero_image_id", "hero_image_alt", "hero_image", "blocks", "faqs", "published_at"];
@@ -13,7 +13,7 @@ function pickEditable(body) {
   if (out.slug) out.slug = slugify(out.slug);
   if (out.blocks) {
     out.word_count = wordCount(out.blocks);
-    out.read_minutes = Math.max(3, Math.round(out.word_count / 200));
+    out.read_minutes = readMinutes(out.word_count);
   }
   return out;
 }

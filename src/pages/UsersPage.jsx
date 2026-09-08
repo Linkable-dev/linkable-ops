@@ -6,6 +6,7 @@ import { TabBar } from "../components/ui/TabBar";
 import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
 import { SkeletonGridRows } from "../components/ui/Skeleton";
+import { useNow } from "../lib/useNow";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
@@ -422,7 +423,7 @@ export default function UsersPage() {
 
       {!loading && rows.length > 0 && (
         <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
-          Showing {rows.length} {tabLabel} {rows.length === 100 ? "(capped — refine search)" : ""}
+          Showing {rows.length}{rows[0]?.total_count != null ? <> of {Number(rows[0].total_count).toLocaleString()}</> : null} {tabLabel}{rows[0]?.total_count != null && Number(rows[0].total_count) > rows.length ? " — refine the search to see the rest" : ""}
         </div>
       )}
     </div>
@@ -615,7 +616,8 @@ function PurgeCell({ row, theme }) {
     label = "overdue";
     color = "#EF4444";
   } else {
-    label = `${days} day${days === 1 ? "" : "s"}`;
+    // days_until_purge is whole days remaining (floored): 0 means later today.
+    label = days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"}`;
     color = days <= 3 ? "#EF4444" : days <= 7 ? "#F59E0B" : theme.textMid;
   }
 
@@ -636,10 +638,9 @@ function PurgeCell({ row, theme }) {
   );
 }
 
-// Maps users.account_id (set by the main app's subscription flow) to a coarse
-// plan tier. Mirrors planNameFromAccountId in main-app payment_service.ts —
-// 2026-07 lineup: Scale = $499 family (legacy $299 grandfathers in), Growth =
-// $199 family (legacy Grow/Starter prices map here by price fidelity).
+// Maps users.account_id (set by the main app's subscription flow) to the
+// customer-facing plan label. Internally the app calls the $499 family "Scale"
+// and the $199 family "Growth"; brands see them as "Growth" and "Starter".
 function paidPlanFromAccountId(accountId) {
   if (!accountId) return null;
   // Customer-facing labels (2026-07 rebrand): the $499 tier shows to brands as
@@ -726,7 +727,7 @@ function StatePill({ text, color }) {
 // old separate "Linkable trial" column carried — a Linkable-granted trial is
 // delivered as a real Shopify subscription, so it belongs in the same cell.
 function SubscriptionCell({ row, theme }) {
-  const [now] = useState(() => Date.now());
+  const now = useNow();
   const accountId = row.account_id || "";
   // A row can report status='ACTIVE' while cancelled_at is set — an out-of-order
   // Shopify webhook that landed after the cancellation. That subscription is

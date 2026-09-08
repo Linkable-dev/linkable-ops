@@ -25,13 +25,13 @@ const STATUS_TINTS = {
   stopped:  { bg: "#F3F4F6", fg: "#374151" },
 };
 
+// email_campaigns.status is only ever active / paused / archived (plus a legacy
+// "running" written by an old importer). Tabs for states that never occur would
+// just render empty lists.
 const TABS = [
   ["all",      "All"],
-  ["running",  "Running"],
-  ["complete", "Complete"],
-  ["failed",   "Failed"],
+  ["active",   "Active"],
   ["paused",   "Paused"],
-  ["pending",  "Pending"],
   ["archived", "Archived"],
 ];
 
@@ -153,7 +153,7 @@ export default function AiCampaignsPage() {
         />
       </div>
       <TabBar
-        tabs={TABS.map(([id, label]) => {
+        tabs={[...TABS, ...(counts.running ? [["running", "Running (legacy)"]] : [])].map(([id, label]) => {
           const n = counts[id];
           return [id, n != null ? `${label} (${n})` : label];
         })}
@@ -292,7 +292,7 @@ function summarizeTargets(tf = {}, audienceType = "brand") {
     if (tf.niches?.length) parts.push(`${tf.niches.length} niches`);
   } else {
     if (tf.min_revenue || tf.max_revenue) {
-      const fmt = (n) => n ? `$${(n / 1_000_000).toFixed(1)}M` : "?";
+      const fmt = (n) => !n ? "?" : n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M` : n >= 1_000 ? `$${Math.round(n / 1_000)}K` : `$${n}`;
       parts.push(`${fmt(tf.min_revenue)}–${fmt(tf.max_revenue)}/mo`);
     }
     if (tf.categories?.length) parts.push(`${tf.categories.length} sectors`);
@@ -544,7 +544,7 @@ function ImportCreatorsCsvCard({ theme, onClose }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <Field label="CSV file" theme={theme}>
           <input type="file" accept=".csv,text/csv" onChange={onFile} style={{ fontSize: 13, color: theme.text }} />
-          {fileName && <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>{fileName} · {csvText.split("\n").length - 1} lines</div>}
+          {fileName && <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>{fileName} · {Math.max(0, csvText.split(/\r?\n/).filter((l) => l.trim()).length - 1)} data rows</div>}
         </Field>
         <Field label="List tag (campaigns target this via 'Creator list tag')" theme={theme}>
           <Input value={listTag} onChange={(e) => setListTag(e.target.value)} placeholder="e.g. glow-jul26" />

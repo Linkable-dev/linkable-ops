@@ -37,6 +37,8 @@ export default function BlogPage() {
     try {
       const r = await api.getBlogPosts({ status: filter === "all" ? undefined : filter, limit: PAGE, offset });
       setPosts(r.items); setTotal(r.total); setError(null);
+      // Deleting the last article on the last page leaves offset past the end ("26–25 of 25"): step back.
+      if (offset > 0 && offset >= r.total) setOffset(Math.max(0, Math.floor(Math.max(0, r.total - 1) / PAGE) * PAGE));
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [filter, offset]);

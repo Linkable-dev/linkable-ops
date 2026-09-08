@@ -78,8 +78,8 @@ export const api = {
   getTableAnalytics: (table) => request(`/analytics/${table}`),
 
   // Operations
-  getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters } = {}) =>
-    request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters })}`),
+  getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters, quick } = {}) =>
+    request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters, quick })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
 
   // AI conversation manager
