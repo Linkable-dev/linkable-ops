@@ -30,8 +30,7 @@ export default function BlogPage() {
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(null); // id or action being processed
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [genOpen, setGenOpen] = useState(false);
-  const [topicsOpen, setTopicsOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,15 +82,10 @@ export default function BlogPage() {
             <button key={id} onClick={() => changeFilter(id)} style={{ ...link, padding: "6px 12px", background: filter === id ? t.surface : "transparent", color: filter === id ? t.text : t.textMuted, fontWeight: filter === id ? 600 : 400, boxShadow: filter === id ? t.shadow : "none" }}>{label}</button>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn size="sm" variant="outline" onClick={() => setTopicsOpen(true)}>Topics</Btn>
-          <Btn size="sm" variant="outline" onClick={deploy} loading={busy === "deploy"} title="Re-render the website from the database now">Publish to site</Btn>
-          <Btn size="sm" variant="outline" onClick={() => setGenOpen(true)}>Generate with AI</Btn>
-          <Btn size="sm" onClick={() => navigate("/blog/new")}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
-            New article
-          </Btn>
-        </div>
+        <Btn size="sm" onClick={() => setNewOpen(true)}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
+          New article
+        </Btn>
       </div>
 
       {error && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
@@ -139,7 +133,12 @@ export default function BlogPage() {
       </Card>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
-        <span>{total === 0 ? "No articles" : `${pageStart}–${pageEnd} of ${total}`}</span>
+        <span>
+          {total === 0 ? "No articles" : `${pageStart}–${pageEnd} of ${total}`}
+          <span style={{ margin: "0 8px" }}>·</span>
+          Changes reach the website within 10 minutes.{" "}
+          <button onClick={deploy} disabled={busy === "deploy"} style={{ background: "none", border: "none", padding: 0, color: t.textMid, textDecoration: "underline", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>{busy === "deploy" ? "Publishing…" : "Publish now"}</button>
+        </span>
         <div style={{ display: "flex", gap: 6 }}>
           <button style={link} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
           <button style={link} disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
@@ -154,14 +153,14 @@ export default function BlogPage() {
         </div>
       </Modal>
 
-      <GenerateModal open={genOpen} onClose={() => setGenOpen(false)} onDone={(post) => { setGenOpen(false); navigate(`/blog/${post.id}`); }} />
-      <TopicsModal open={topicsOpen} onClose={() => setTopicsOpen(false)} />
+      <NewArticleModal open={newOpen} onClose={() => setNewOpen(false)} onManual={() => { setNewOpen(false); navigate("/blog/new"); }} onDone={(post) => { setNewOpen(false); navigate(`/blog/${post.id}`); }} />
     </div>
   );
 }
 
-function GenerateModal({ open, onClose, onDone }) {
+function NewArticleModal({ open, onClose, onManual, onDone }) {
   const { theme: t } = useTheme();
+  const [step, setStep] = useState("choose"); // choose | ai | topics
   const [topics, setTopics] = useState([]);
   const [topicId, setTopicId] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -170,12 +169,10 @@ function GenerateModal({ open, onClose, onDone }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    if (!open) return;
-    api.getBlogTopics().then((all) => setTopics(all.filter((x) => x.status === "queued"))).catch(() => {});
-    setError(null);
-  }, [open]);
+  const loadTopics = useCallback(() => api.getBlogTopics().then(setTopics).catch((e) => setError(e.message)), []);
+  useEffect(() => { if (open) { setStep("choose"); setError(null); setTopicId(""); setKeyword(""); setAngle(""); loadTopics(); } }, [open, loadTopics]);
 
+  const queued = topics.filter((x) => x.status === "queued");
   const run = async () => {
     setRunning(true); setError(null);
     try {
@@ -188,73 +185,98 @@ function GenerateModal({ open, onClose, onDone }) {
   };
 
   const sel = { width: "100%", boxSizing: "border-box", background: t.bg, border: `1.5px solid ${t.border}`, borderRadius: 8, color: t.text, fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none" };
+  const option = (title, desc, onClick) => (
+    <button onClick={onClick} style={{ flex: 1, textAlign: "left", padding: 18, borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.bg, cursor: "pointer", fontFamily: "inherit", color: t.text }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5 }}>{desc}</div>
+    </button>
+  );
+  const back = (to, label) => <button onClick={() => setStep(to)} style={{ background: "none", border: "none", color: t.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 13, padding: 0, marginBottom: 14 }}>← {label}</button>;
+  const title = step === "choose" ? "New article" : step === "ai" ? "New article with AI" : "Topic backlog";
 
   return (
-    <Modal open={open} onClose={running ? () => {} : onClose} title="Generate an article with AI" width={560}>
-      <div style={{ marginBottom: 14 }}>
-        <Label>Next topic from the backlog</Label>
-        <select style={sel} value={topicId} onChange={(e) => setTopicId(e.target.value)}>
-          <option value="">Custom keyword (below)</option>
-          {topics.map((x) => <option key={x.id} value={x.id}>{x.keyword}{x.category ? ` · ${x.category}` : ""}</option>)}
-        </select>
-      </div>
-      {!topicId && (
+    <Modal open={open} onClose={running ? () => {} : onClose} title={title} width={step === "topics" ? 680 : 560}>
+      {step === "choose" && (
+        <div style={{ display: "flex", gap: 12 }}>
+          {option("Write it myself", "Open a blank editor: title, body, FAQ and photo, with a quality check against the style rules.", onManual)}
+          {option("Generate with AI", "Pick a topic from the backlog or type a keyword. The draft is checked against the style rules and the verified facts, then opens in the editor.", () => setStep("ai"))}
+        </div>
+      )}
+
+      {step === "ai" && (
         <>
-          <div style={{ marginBottom: 14 }}><Label>Target keyword</Label><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="e.g. creator seeding strategy for skincare brands" /></div>
-          <div style={{ marginBottom: 14 }}><Label>Angle (optional)</Label><Input value={angle} onChange={(e) => setAngle(e.target.value)} placeholder="What the article should argue or teach" /></div>
+          {back("choose", "Back")}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <Label>Topic from the backlog ({queued.length} queued)</Label>
+              <button onClick={() => setStep("topics")} style={{ background: "none", border: "none", color: t.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline", padding: 0 }}>Manage backlog</button>
+            </div>
+            <select style={sel} value={topicId} onChange={(e) => setTopicId(e.target.value)}>
+              <option value="">Custom keyword (below)</option>
+              {queued.map((x) => <option key={x.id} value={x.id}>{x.keyword}{x.category ? ` · ${x.category}` : ""}</option>)}
+            </select>
+          </div>
+          {!topicId && (
+            <>
+              <div style={{ marginBottom: 14 }}><Label>Target keyword</Label><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="e.g. creator seeding strategy for skincare brands" /></div>
+              <div style={{ marginBottom: 14 }}><Label>Angle (optional)</Label><Input value={angle} onChange={(e) => setAngle(e.target.value)} placeholder="What the article should argue or teach" /></div>
+            </>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.textMid, marginBottom: 16 }}>
+            <input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Publish immediately if it passes every check (otherwise saved as a draft)
+          </label>
+          <p style={{ fontSize: 12, color: t.textMuted, margin: "0 0 16px" }}>Takes one to three minutes and costs at most about 10 cents.</p>
+          {error && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Btn size="sm" variant="outline" onClick={onClose} disabled={running}>Cancel</Btn>
+            <Btn size="sm" onClick={run} loading={running}>{running ? "Writing…" : "Generate"}</Btn>
+          </div>
         </>
       )}
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.textMid, marginBottom: 16 }}>
-        <input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Publish immediately (otherwise saved as a draft for review)
-      </label>
-      <p style={{ fontSize: 12, color: t.textMuted, margin: "0 0 16px" }}>Takes two to four minutes. The draft is checked against the style rules and the verified facts before it is saved.</p>
-      {error && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <Btn size="sm" variant="outline" onClick={onClose} disabled={running}>Cancel</Btn>
-        <Btn size="sm" onClick={run} loading={running}>{running ? "Writing…" : "Generate"}</Btn>
-      </div>
+
+      {step === "topics" && (
+        <>
+          {back("ai", "Back to generation")}
+          <TopicsPanel topics={topics} reload={loadTopics} onError={setError} />
+          {error && <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
+        </>
+      )}
     </Modal>
   );
 }
 
-function TopicsModal({ open, onClose }) {
+function TopicsPanel({ topics, reload, onError }) {
   const { theme: t } = useTheme();
-  const [topics, setTopics] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [angle, setAngle] = useState("");
   const [busy, setBusy] = useState(null);
-  const [error, setError] = useState(null);
-
-  const load = useCallback(() => api.getBlogTopics().then(setTopics).catch((e) => setError(e.message)), []);
-  useEffect(() => { if (open) load(); }, [open, load]);
 
   const add = async () => {
     if (!keyword.trim()) return;
     setBusy("add");
-    try { await api.createBlogTopic({ keyword: keyword.trim(), angle: angle.trim() }); setKeyword(""); setAngle(""); await load(); }
-    catch (e) { setError(e.message); } finally { setBusy(null); }
+    try { await api.createBlogTopic({ keyword: keyword.trim(), angle: angle.trim() }); setKeyword(""); setAngle(""); await reload(); }
+    catch (e) { onError(e.message); } finally { setBusy(null); }
   };
   const propose = async () => {
     setBusy("propose");
-    try { await api.proposeBlogTopics(); await load(); } catch (e) { setError(e.message); } finally { setBusy(null); }
+    try { await api.proposeBlogTopics(); await reload(); } catch (e) { onError(e.message); } finally { setBusy(null); }
   };
   const remove = async (id) => {
     setBusy(id);
-    try { await api.deleteBlogTopic(id); await load(); } catch (e) { setError(e.message); } finally { setBusy(null); }
+    try { await api.deleteBlogTopic(id); await reload(); } catch (e) { onError(e.message); } finally { setBusy(null); }
   };
 
   const queued = topics.filter((x) => x.status === "queued");
   const used = topics.filter((x) => x.status !== "queued");
   return (
-    <Modal open={open} onClose={onClose} title={`Topic backlog · ${queued.length} queued`} width={680}>
+    <>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}><Label>Keyword</Label><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="what a brand owner would search" /></div>
         <div style={{ flex: 1.4 }}><Label>Angle</Label><Input value={angle} onChange={(e) => setAngle(e.target.value)} placeholder="optional" /></div>
         <Btn size="sm" onClick={add} loading={busy === "add"} style={{ height: 41 }}>Add</Btn>
         <Btn size="sm" variant="outline" onClick={propose} loading={busy === "propose"} style={{ height: 41, whiteSpace: "nowrap" }}>Propose 10 with AI</Btn>
       </div>
-      {error && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
-      <div style={{ maxHeight: 420, overflowY: "auto", border: `1px solid ${t.border}`, borderRadius: 8 }}>
+      <div style={{ maxHeight: 400, overflowY: "auto", border: `1px solid ${t.border}`, borderRadius: 8 }}>
         {queued.map((x) => (
           <div key={x.id} style={{ display: "flex", gap: 12, padding: "10px 12px", borderBottom: `1px solid ${t.border}`, alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}>
@@ -267,7 +289,7 @@ function TopicsModal({ open, onClose }) {
         ))}
         {queued.length === 0 && <div style={{ padding: 14, fontSize: 13, color: t.textMuted }}>Backlog is empty. The daily article will ask AI for new topics, or add some above.</div>}
       </div>
-      {used.length > 0 && <div style={{ fontSize: 12, color: t.textMuted, marginTop: 10 }}>{used.length} topic{used.length === 1 ? "" : "s"} already written.</div>}
-    </Modal>
+      <div style={{ fontSize: 12, color: t.textMuted, marginTop: 10 }}>The daily article at 07:00 UTC takes the next queued topic.{used.length ? ` ${used.length} already written.` : ""}</div>
+    </>
   );
 }
