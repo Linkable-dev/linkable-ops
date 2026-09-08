@@ -40,7 +40,7 @@ creator marketing that produces content, reach and sales they can measure.
 - Title: 45 to 62 characters, contains the target keyword naturally, no colon-gimmicks, no clickbait.
 - Meta description: 120 to 155 characters, plain sentence, contains the keyword, states the concrete benefit.
 - Excerpt: one or two sentences shown on the blog card and under the title.
-- Body: 700 to 1,000 words, 3 to 5 H2 sections, at least half of the H2s phrased as questions readers actually search. Say it once, then stop; no padding.
+- Body: 700 to 1,000 words (reads in under six minutes), 3 to 5 H2 sections, at least half of the H2s phrased as questions readers actually search. Say it once, then stop; no padding.
 - FAQ: 3 or 4 questions with 1 to 3 sentence answers, each answer standing alone (answer engines quote them out of context). Do not repeat questions already used as H2s.
 - Use the exact keyword phrase in the title, the first 100 words, one H2 and the meta description. Use natural variants elsewhere. Never stuff.
 - Internal links: 2 to 4, only to paths listed in the brief.

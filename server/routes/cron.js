@@ -84,7 +84,7 @@ export function cronRoutes() {
       const publish = !(req.query.draft === "1" || req.query.draft === "true");
       const post = await generatePost({ publish, createdBy: "cron" });
       const rebuild = publish ? await triggerSiteRebuild(`daily article ${post.slug}`).catch((e) => ({ triggered: false, note: e.message })) : null;
-      res.json({ ok: true, slug: post.slug, title: post.title, status: post.status, rebuild });
+      res.json({ ok: true, slug: post.slug, title: post.title, status: post.status, cost_usd: post.generation?.cost_usd, valid: post.generation?.valid, rebuild });
     } catch (err) {
       console.error("/cron/blog-daily error:", err);
       res.status(500).json({ error: err.message });

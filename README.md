@@ -25,7 +25,9 @@ article with Claude (`server/lib/blog-writer.js`: voice rules in `server/data/bl
 rules before it is saved.
 
 - Daily article: Vercel cron hits `GET /api/cron/blog-daily` at 07:00 UTC, writes one article from the backlog and
-  publishes it (`?draft=1` to save as draft instead).
+  publishes it (`?draft=1` to save as draft instead). Model `BLOG_MODEL` (default `claude-sonnet-5`), budget
+  `BLOG_MAX_COST_USD` (default 0.10) per article including retries; if the budget runs out before a draft passes
+  validation, the best draft is saved unpublished for review. Articles are capped at a six-minute read.
 - The website is rendered from the database by the landing-page repo
   (`Linkable-dev/linkable-landing-page`, workflow `blog-sync.yml`, every two hours). "Publish to site" and every
   publish trigger an immediate rebuild when `GITHUB_TOKEN` (a token with `repo` scope on that repo) is set on this

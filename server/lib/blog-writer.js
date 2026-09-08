@@ -10,7 +10,22 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { blogDb as supabase } from "./blog-supabase.js";
 import { findHeroPhoto } from "./blog-images.js";
 
-const MODEL = "claude-opus-5";
+// Sonnet 5 keeps a full article (with retries) inside the per-article budget;
+// Opus 5 costs roughly 2.5x more per attempt.
+const MODEL = process.env.BLOG_MODEL || "claude-sonnet-5";
+const MAX_COST_USD = Number(process.env.BLOG_MAX_COST_USD) || 0.10;
+const MAX_READ_MINUTES = 6;
+// USD per million tokens (input, output, cache write, cache read)
+const PRICES = {
+  "claude-sonnet-5": { in: 2, out: 10, cw: 2.5, cr: 0.2 },
+  "claude-opus-5": { in: 5, out: 25, cw: 6.25, cr: 0.5 },
+  "claude-haiku-4-5": { in: 1, out: 5, cw: 1.25, cr: 0.1 },
+};
+export function usageCost(usage, model = MODEL) {
+  const p = PRICES[model] || PRICES["claude-sonnet-5"];
+  const u = usage || {};
+  return ((u.input_tokens || 0) * p.in + (u.output_tokens || 0) * p.out + (u.cache_creation_input_tokens || 0) * p.cw + (u.cache_read_input_tokens || 0) * p.cr) / 1e6;
+}
 // The blog uses its own Anthropic key so its spend is tracked separately from
 // the outreach features (falls back to the shared key if not set).
 const apiKey = () => process.env.BLOG_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
@@ -51,6 +66,7 @@ export function validateArticle(a) {
   const body = blocks.flatMap((b) => [b.text || "", ...(b.items || [])]).join(" ");
   const words = wordCount(blocks);
   if (words < 600 || words > 1150) problems.push(`body has ${words} words, needs 700 to 1000`);
+  if (Math.round(words / 200) > MAX_READ_MINUTES) problems.push(`read time ${Math.round(words / 200)} min, maximum is ${MAX_READ_MINUTES}`);
   if (a.title.length < 40 || a.title.length > 65) problems.push(`title is ${a.title.length} characters, needs 45 to 62`);
   if (a.metaDescription.length < 110 || a.metaDescription.length > 158) problems.push(`meta description is ${a.metaDescription.length} characters, needs 120 to 155`);
   if (/[—–]/.test(text)) problems.push("contains an em dash or en dash");
@@ -143,33 +159,44 @@ Follow every rule in the style guide and only state facts from the facts file.`;
 
   let feedback = "";
   const log = [];
+  let spent = 0;
+  let best = null; // { article, problems }
   for (let attempt = 1; attempt <= 3; attempt++) {
     onProgress(`attempt ${attempt}`);
     const res = await client.messages.parse({
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: 8000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: zodOutputFormat(ArticleSchema) },
+      output_config: { effort: "medium", format: zodOutputFormat(ArticleSchema) },
       system: [{ type: "text", text: style + "\n\n" + facts, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: brief + feedback }],
     });
+    const cost = usageCost(res.usage);
+    spent += cost;
     if (res.stop_reason === "refusal") throw new Error("model refused: " + (res.stop_details?.explanation || ""));
     const a = res.parsed_output;
-    if (!a) { feedback = "\n\nThe previous output was not valid JSON for the schema. Return the article again."; log.push({ attempt, problems: ["invalid JSON"] }); continue; }
+    if (!a) { feedback = "\n\nThe previous output was not valid JSON for the schema. Return the article again."; log.push({ attempt, cost, problems: ["invalid JSON"] }); continue; }
     const problems = validateArticle(a);
-    log.push({ attempt, words: wordCount(a.blocks), problems });
+    log.push({ attempt, cost: Number(cost.toFixed(4)), words: wordCount(a.blocks), problems });
+    if (!best || problems.length < best.problems.length) best = { article: a, problems };
     if (!problems.length) {
       const heroImageId = candidates.some((c) => c.id === a.heroImageId) ? a.heroImageId : candidates[0].id;
-      return { article: { ...a, heroImageId }, attempts: log, model: MODEL };
+      return { article: { ...a, heroImageId }, attempts: log, model: MODEL, cost: Number(spent.toFixed(4)), valid: true };
     }
+    // Stop retrying when another attempt would blow the budget; hand back the
+    // best draft so a human can fix it instead of publishing something invalid.
+    if (spent + cost > MAX_COST_USD) { log.push({ note: `budget ${MAX_COST_USD} USD reached after ${attempt} attempt(s)` }); break; }
     feedback = `\n\nYour previous draft was rejected for these reasons, fix all of them and return the complete article again:\n- ${problems.join("\n- ")}`;
   }
-  throw new Error("article failed validation after 3 attempts: " + JSON.stringify(log.at(-1)?.problems));
+  if (!best) throw new Error("article failed after 3 attempts");
+  const heroImageId = candidates.some((c) => c.id === best.article.heroImageId) ? best.article.heroImageId : candidates[0].id;
+  return { article: { ...best.article, heroImageId }, attempts: log, model: MODEL, cost: Number(spent.toFixed(4)), valid: false, problems: best.problems };
 }
 
 // Full pipeline: pick a topic (or use the given one), write, store as a row.
 export async function generatePost({ keyword, angle, category, topicId, publish = false, createdBy = null } = {}) {
   let topic = null;
+  publish = Boolean(publish);
   if (topicId) {
     const { data } = await supabase.from("blog_topics").select("*").eq("id", topicId).single();
     topic = data;
@@ -186,7 +213,8 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
     }
   }
   const date = new Date().toISOString().slice(0, 10);
-  const { article, attempts, model } = await writeArticle({ keyword: topic.keyword, angle: topic.angle, category: topic.category, date });
+  const { article, attempts, model, cost, valid, problems } = await writeArticle({ keyword: topic.keyword, angle: topic.angle, category: topic.category, date });
+  if (!valid) publish = false; // needs a human look first
   const posts = await listExistingPosts();
   const slug = await uniqueSlug(article.slug || article.title, posts);
   const words = wordCount(article.blocks);
@@ -197,7 +225,7 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
     category: article.category, keyword: topic.keyword, status: publish ? "published" : "draft", source: "ai",
     hero_image_id: article.heroImageId, hero_image_alt: heroImage?.alt || article.heroAlt, hero_image: heroImage, blocks: article.blocks, faqs: article.faqs,
     word_count: words, read_minutes: Math.max(3, Math.round(words / 200)), published_at: publish ? date : null,
-    generation: { model, attempts, topic: topic.keyword }, created_by: createdBy,
+    generation: { model, attempts, cost_usd: cost, valid, problems: problems || [], topic: topic.keyword }, created_by: createdBy,
   };
   const { data: post, error } = await supabase.from("blog_posts").insert(row).select().single();
   if (error) throw new Error(error.message);
