@@ -10,7 +10,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { Skeleton } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonInput } from "../components/ui/Skeleton";
 
 export default function AiTestLabPage() {
   const { theme } = useTheme();
@@ -241,7 +241,10 @@ export default function AiTestLabPage() {
         <Card>
           <div style={labelStyle}>Campaign</div>
           {loadingCampaigns ? (
-            <div><Skeleton width="60%" height={16} /></div>
+            <div>
+              <SkeletonInput height={38} />
+              <div style={{ marginTop: 8 }}><Skeleton width={64} height={28} radius={999} /></div>
+            </div>
           ) : campaigns.length === 0 ? (
             <div>
               <p style={{ fontSize: 13, color: theme.textMid, margin: "0 0 12px" }}>

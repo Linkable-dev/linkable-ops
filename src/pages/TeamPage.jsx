@@ -6,7 +6,7 @@ import { friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
-import { Skeleton } from "../components/ui/Skeleton";
+import { SkeletonTable } from "../components/ui/Skeleton";
 import {
   useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter,
 } from "../components/table/tableTools";
@@ -151,18 +151,14 @@ export default function TeamPage() {
 
       <Card style={{ padding: 0, marginBottom: 0 }}>
         {loading ? (
-          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <Skeleton width={32} height={32} radius={999} />
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <Skeleton width={`${40 + (i * 11) % 40}%`} height={12} />
-                  <Skeleton width={`${30 + (i * 7) % 30}%`} height={10} />
-                </div>
-                <Skeleton width={60} height={18} radius={10} />
-              </div>
-            ))}
-          </div>
+          <SkeletonTable
+            rows={5}
+            cellPadding="12px 16px"
+            columns={TEAM_COLUMNS.map((col) => ({
+              key: col.key, label: col.label, width: widths[col.key],
+              kind: col.key === "status" ? "pill" : col.key === "actions" ? "actions" : "text",
+            }))}
+          />
         ) : (
           <div style={{ overflowX: "auto" }}>
           <table style={{

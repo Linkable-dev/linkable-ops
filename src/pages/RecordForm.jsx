@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyName } from "../lib/api";
 import { Btn } from "../components/ui/Button";
+import { SkeletonFieldList } from "../components/ui/Skeleton";
 
 export default function RecordForm({ table, id, onSaved, onCancel }) {
   const { theme, mode } = useTheme();
@@ -82,11 +83,8 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
     finally { setSaving(false); }
   };
 
-  if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 0" }}>
-      <div style={{ width: 20, height: 20, border: `2.5px solid ${theme.border}`, borderTopColor: theme.text, borderRadius: "50%", animation: "spin 0.6s linear infinite" }} />
-    </div>
-  );
+  // Same stacked label + input layout as the real fields below.
+  if (loading) return <SkeletonFieldList count={Math.max(3, Math.min(8, schema.filter((col) => !shouldHideInForm(col, isNew)).length || 6))} />;
 
   const visibleCols = schema.filter((col) => !shouldHideInForm(col, isNew));
 

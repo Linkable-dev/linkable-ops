@@ -8,7 +8,7 @@ import { Modal } from "../../components/ui/Modal";
 import { Input } from "../../components/ui/Input";
 import { Label } from "../../components/ui/Label";
 import { Tag } from "../../components/ui/Tag";
-import { Skeleton } from "../../components/ui/Skeleton";
+import { SkeletonTable } from "../../components/ui/Skeleton";
 
 // Where articles are served. Switch to https://www.linkable.link once the
 // domain points at the Vercel project.
@@ -93,7 +93,19 @@ export default function BlogPage() {
 
       <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
         {loading ? (
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} height={16} width={`${60 + (i * 13) % 35}%`} />)}</div>
+          <SkeletonTable
+            rows={8}
+            headerBackground="transparent"
+            columns={[
+              { key: "article", label: "Article", kind: "two-line", width: "34%" },
+              { key: "status", label: "Status", kind: "pill" },
+              { key: "source", label: "Source", kind: "text" },
+              { key: "length", label: "Length", kind: "text" },
+              { key: "published", label: "Published", kind: "text" },
+              { key: "updated", label: "Updated", kind: "text" },
+              { key: "actions", label: "", kind: "actions" },
+            ]}
+          />
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>

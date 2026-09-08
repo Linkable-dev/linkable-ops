@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
-import { SkeletonTableRows, Skeleton } from "../components/ui/Skeleton";
+import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/ui/Skeleton";
 import { useColumnWidths, ResizeHandle, ColumnFilter } from "../components/table/tableTools";
 
 const STATUS_COLORS = {
@@ -222,7 +222,7 @@ export default function CampaignsOpsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <SkeletonTableRows rows={8} cols={11} theme={theme} />}
+              {loading && <SkeletonTableRows rows={8} cols={["expand", "text", "text", "num", "num", "num", "num", "num", "num", "num", "pill"]} theme={theme} />}
               {!loading && filtered.length === 0 && (
                 <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No campaigns match.</td></tr>
               )}
@@ -372,19 +372,24 @@ function BottleneckBadge({ theme, mode, label, tone }) {
 
 function CreatorTable({ theme, mode, creators, loading }) {
   if (loading) return (
-    <div style={{ padding: "14px 16px" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <Skeleton width={180} height={12} />
-            <Skeleton width={70} height={18} radius={12} />
-            <Skeleton width={50} height={12} />
-            <Skeleton width={50} height={12} />
-            <Skeleton width={40} height={12} />
-            <Skeleton width={40} height={12} />
-          </div>
-        ))}
-      </div>
+    // Stage funnel pills, then the same six-column creator table.
+    <div style={{ padding: "12px 16px 16px" }}>
+      <SkeletonPills count={5} height={24} widths={[96, 88, 104, 110, 92]} />
+      <SkeletonTable
+        rows={4}
+        fontSize={12}
+        headerBackground="transparent"
+        cellPadding="8px 10px"
+        style={{ marginTop: 10 }}
+        columns={[
+          { key: "creator", label: "Creator", kind: "text" },
+          { key: "source", label: "Source", kind: "pill" },
+          { key: "status", label: "Status", kind: "pill" },
+          { key: "sample", label: "Sample status", kind: "text" },
+          { key: "clicks", label: "Clicks", kind: "num" },
+          { key: "sales", label: "Sales", kind: "num" },
+        ]}
+      />
     </div>
   );
   if (!creators) return null;
@@ -607,13 +612,3 @@ function Kpi({ theme, label, value, highlight }) {
   );
 }
 
-function Spinner({ theme, label }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ width: 24, height: 24, border: `2.5px solid ${theme.border}`, borderTopColor: theme.text, borderRadius: "50%", animation: "spin 0.6s linear infinite", margin: "0 auto" }} />
-        <p style={{ color: theme.textMuted, marginTop: 12, fontSize: 13 }}>{label}</p>
-      </div>
-    </div>
-  );
-}

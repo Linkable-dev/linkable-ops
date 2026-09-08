@@ -173,7 +173,7 @@ export default function AiCampaignsPage() {
               </tr>
             </thead>
             <tbody>
-              <SkeletonTableRows rows={6} cols={7} theme={theme} />
+              <SkeletonTableRows rows={6} cols={COLUMNS.map((col) => ({ key: col.key, kind: col.key === "status" || col.key === "auto_reply" ? "pill" : col.key === "daily_cap" ? "num" : col.key === "name" ? "two-line" : "text" }))} theme={theme} />
             </tbody>
           </table>
         </Card>

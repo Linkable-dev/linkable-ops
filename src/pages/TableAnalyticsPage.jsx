@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyName, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
-import { Skeleton, SkeletonCard } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonChartCard } from "../components/ui/Skeleton";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -33,19 +33,19 @@ export default function TableAnalyticsPage() {
 
   if (loading) return (
     <div>
-      <Skeleton width={220} height={20} />
-      <div style={{ height: 16 }} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
-        {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+      {/* Back link, "N records" badge, growth chart, then distributions + numeric stats side by side. */}
+      <Skeleton width={150} height={13} style={{ display: "block", marginBottom: 20 }} />
+      <div style={{
+        background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10,
+        padding: "16px 20px", marginBottom: 20, display: "inline-flex", alignItems: "baseline", gap: 8,
+      }}>
+        <Skeleton width={72} height={22} />
+        <Skeleton width={48} height={13} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 20, height: 260 }}>
-            <Skeleton width="30%" height={12} />
-            <div style={{ height: 12 }} />
-            <Skeleton width="100%" height={200} radius={8} />
-          </div>
-        ))}
+      <SkeletonChartCard height={200} style={{ marginBottom: 20 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+        <SkeletonChartCard height={120} legend />
+        <SkeletonChartCard height={200} />
       </div>
     </div>
   );

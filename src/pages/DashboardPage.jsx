@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyName, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
-import { Skeleton, SkeletonCard } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonStatGrid, SkeletonChartCard, SkeletonBars } from "../components/ui/Skeleton";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -32,17 +32,44 @@ export default function DashboardPage() {
 
   if (loading) return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 20 }}>
-        {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 20, height: 260 }}>
-            <Skeleton width="30%" height={12} />
-            <div style={{ height: 12 }} />
-            <Skeleton width="100%" height={200} radius={8} />
+      {/* Mirrors the loaded layout: 6 KPIs, 6 mini stats, Money card, two side cards, 4 trends, 6 distributions. */}
+      <SkeletonStatGrid count={6} minWidth={170} variant="kpi" style={{ marginBottom: 20 }} />
+      <SkeletonStatGrid count={6} minWidth={170} variant="mini" style={{ marginBottom: 20 }} />
+      <Card style={{ padding: 0, marginBottom: 20 }}>
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${theme.border}` }}><Skeleton width={56} height={14} /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} style={{ padding: "12px 16px", borderLeft: i ? `1px solid ${theme.border}` : "none" }}>
+              <Skeleton width="55%" height={16} />
+              <div style={{ height: 5 }} />
+              <Skeleton width="40%" height={11} />
+            </div>
+          ))}
+        </div>
+      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+        <Card style={{ padding: 0, marginBottom: 0 }}>
+          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${theme.border}` }}><Skeleton width={130} height={13} /></div>
+          <div style={{ padding: "14px 20px" }}><SkeletonBars rows={3} labelWidth={170} valueWidth={64} barHeight={8} gap={14} /></div>
+        </Card>
+        <Card style={{ padding: 0, marginBottom: 0 }}>
+          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${theme.border}` }}><Skeleton width={48} height={13} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr" }}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} style={{ padding: "12px 16px", borderLeft: i ? `1px solid ${theme.border}` : "none" }}>
+                <Skeleton width="50%" height={16} />
+                <div style={{ height: 5 }} />
+                <Skeleton width="60%" height={11} />
+              </div>
+            ))}
           </div>
-        ))}
+        </Card>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+        {Array.from({ length: 4 }).map((_, i) => <SkeletonChartCard key={i} height={200} />)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14 }}>
+        {Array.from({ length: 6 }).map((_, i) => <SkeletonChartCard key={i} height={120} legend />)}
       </div>
     </div>
   );

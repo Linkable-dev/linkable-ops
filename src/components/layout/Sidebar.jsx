@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { api, friendlyName } from "../../lib/api";
+import { SkeletonNavItems } from "../ui/Skeleton";
 import logoDark from "../../assets/logo-dark.svg";
 import logoWhite from "../../assets/logo-white.svg";
 import iconDark from "../../assets/icon-dark.svg";
@@ -41,9 +42,10 @@ export default function Sidebar() {
   const icon = mode === "dark" ? iconWhite : iconDark;
   const W = sidebarOpen ? 240 : 64;
 
+  // Database section is collapsed unless the user opened it before.
   const [cmsOpen, setCmsOpen] = useState(() => {
     const saved = localStorage.getItem("sidebar:cmsOpen");
-    return saved === null ? true : saved === "1";
+    return saved === null ? false : saved === "1";
   });
   useEffect(() => {
     localStorage.setItem("sidebar:cmsOpen", cmsOpen ? "1" : "0");
@@ -269,17 +271,7 @@ export default function Sidebar() {
             {navItem("/dashboard", "Dashboard", path === "/dashboard", dashboardIcon)}
             {subHeader("Tables")}
             {loading ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 10px" }}>
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} style={{
-                    height: 10, borderRadius: 4,
-                    width: `${55 + (i * 17) % 35}%`,
-                    background: `linear-gradient(90deg, ${mode === "dark" ? "#1f1f1f" : "#EAEAEA"} 0%, ${mode === "dark" ? "#2a2a2a" : "#F5F5F5"} 50%, ${mode === "dark" ? "#1f1f1f" : "#EAEAEA"} 100%)`,
-                    backgroundSize: "200% 100%",
-                    animation: "skeletonShimmer 1.2s ease-in-out infinite",
-                  }} />
-                ))}
-              </div>
+              <SkeletonNavItems count={8} indent showLabel={sidebarOpen} />
             ) : tables.length === 0 ? (
               <div style={{ fontSize: 12, color: theme.textMuted, padding: "6px 12px" }}>No tables found</div>
             ) : (

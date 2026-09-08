@@ -15,7 +15,7 @@ import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { SkeletonRow } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonRow, SkeletonListRows, SkeletonKeyValue, SkeletonPills } from "../components/ui/Skeleton";
 
 const MODE_OPTIONS = [
   { value: "all", label: "All" },
@@ -216,9 +216,8 @@ function InboxList({ theme, rows, loading, selectedId, onSelect, status }) {
   if (loading) {
     return (
       <Card style={{ padding: 0 }}>
-        <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-          {Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)}
-        </div>
+        {/* InboxRow anatomy: mode tag + sender + time, subject, snippet. */}
+        <SkeletonListRows rows={6} padding="12px 14px" lines={[["52%", 11], ["82%", 13], ["68%", 11]]} lastDivider />
       </Card>
     );
   }
@@ -317,7 +316,16 @@ function DetailPane({ theme, selected, detail, loading, busyAction, onClose, onM
   if (loading || !detail) {
     return (
       <Card>
-        <SkeletonRow widths={["40%", "90%", "75%", "60%"]} gap={12} />
+        {/* Header (subject + pills), meta grid, message body, action row. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <Skeleton width="55%" height={16} />
+          <SkeletonPills count={2} height={20} widths={[64, 80]} />
+        </div>
+        <SkeletonKeyValue rows={3} labelWidth={56} />
+        <div style={{ height: 16 }} />
+        <SkeletonRow widths={["100%", "94%", "90%", "97%", "72%"]} height={13} gap={8} />
+        <div style={{ height: 18 }} />
+        <SkeletonPills count={3} height={32} widths={[110, 96, 88]} />
       </Card>
     );
   }

@@ -21,7 +21,7 @@ import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { Skeleton } from "../components/ui/Skeleton";
+import { SkeletonListRows } from "../components/ui/Skeleton";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 
@@ -121,7 +121,7 @@ export default function TrialsPage() {
           </div>
         </Card>
       ) : loading ? (
-        <ResultsSkeleton theme={theme} />
+        <ResultsSkeleton />
       ) : rows.length === 0 ? (
         <Card>
           <div style={{ color: theme.textMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>
@@ -247,24 +247,17 @@ function initialsFor(row) {
   return name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "?";
 }
 
-function ResultsSkeleton({ theme }) {
+function ResultsSkeleton() {
+  // Same anatomy as BrandResultRow: 40px logo, name + email, trial state column, Grant trial button.
   return (
     <Card style={{ padding: 0, overflow: "hidden" }}>
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} style={{
-          display: "flex", alignItems: "center", gap: 14,
-          padding: "14px 16px",
-          borderBottom: i === 4 ? "none" : `1px solid ${theme.border}`,
-        }}>
-          <Skeleton width={40} height={40} radius={8} />
-          <div style={{ flex: 1 }}>
-            <Skeleton width="40%" height={12} />
-            <div style={{ height: 6 }} />
-            <Skeleton width="65%" height={10} />
-          </div>
-          <Skeleton width={80} height={28} radius={6} />
-        </div>
-      ))}
+      <SkeletonListRows
+        rows={5}
+        avatar={{ size: 40, radius: 8 }}
+        lines={[["45%", 14], ["65%", 12]]}
+        meta={{ width: 200, lines: [[110, 12], [72, 11]] }}
+        action={{ width: 92, height: 32 }}
+      />
     </Card>
   );
 }

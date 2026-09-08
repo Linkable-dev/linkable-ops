@@ -5,7 +5,7 @@ import { api, friendlyDate, friendlyNumber } from "../lib/api";
 import { TabBar } from "../components/ui/TabBar";
 import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
-import { Skeleton } from "../components/ui/Skeleton";
+import { SkeletonGridRows } from "../components/ui/Skeleton";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
@@ -21,6 +21,13 @@ const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
 // whitelists (BRAND_SORTS/BRAND_FILTERS etc. in server/routes/admin-users.js).
 // `width` is the default px width; the user can drag-resize (persisted in
 // localStorage per table). `fill: true` lets a column absorb leftover space.
+// How each column looks while loading, so the placeholder rows share the real grid.
+const SKELETON_KIND = {
+  avatar: "avatar", store_name: "two-line", creator_name: "two-line", email: "text", owner_name: "text",
+  instagram_username: "text", instagram_followers_count: "num", user_created: "text", last_sign_in: "text",
+  user_deleted: "text", purge: "pill", subscription: "pill", actions: "actions",
+};
+
 const BRAND_COLUMNS = [
   { key: "avatar",          label: "",             width: 44,  resizable: false },
   { key: "store_name",      label: "Store",        width: 160, fill: true, sortable: true, defaultDir: "asc",
@@ -352,11 +359,11 @@ export default function UsersPage() {
         )}
 
         {loading ? (
-          <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-            {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} style={{ height: 36 }} />
-            ))}
-          </div>
+          <SkeletonGridRows
+            template={template}
+            columns={columns.map((col) => ({ key: col.key, kind: SKELETON_KIND[col.key] || "text" }))}
+            rows={8}
+          />
         ) : error ? (
           <div style={{ padding: 24, textAlign: "center", color: "#EF4444", fontSize: 13 }}>
             {error}

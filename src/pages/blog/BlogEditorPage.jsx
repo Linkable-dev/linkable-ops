@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api } from "../../lib/api";
 import { Card } from "../../components/ui/Card";
+import { Skeleton, SkeletonForm } from "../../components/ui/Skeleton";
 import { Btn } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Label, Row, Col } from "../../components/ui/Label";
@@ -95,7 +96,57 @@ export default function BlogEditorPage() {
   const sel = { width: "100%", boxSizing: "border-box", background: t.bg, border: `1.5px solid ${t.border}`, borderRadius: 8, color: t.text, fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none" };
   const hint = (ok, text) => <span style={{ fontSize: 11, color: ok ? t.textMuted : "#B45309", marginLeft: 8, fontWeight: 400 }}>{text}</span>;
 
-  if (loading) return <div style={{ color: t.textMuted, fontSize: 13 }}>Loading…</div>;
+  if (loading) return (
+    <div style={{ maxWidth: 1100 }}>
+      {/* Header row, then the same four cards the editor renders: meta fields, hero photo, body, FAQ. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Skeleton width={84} height={13} />
+          <Skeleton width={56} height={18} radius={999} />
+          <Skeleton width={60} height={12} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Skeleton width={112} height={32} radius={999} />
+          <Skeleton width={62} height={32} radius={999} />
+          <Skeleton width={124} height={32} radius={999} />
+        </div>
+      </div>
+      <Card>
+        <SkeletonForm rows={[
+          [{ labelWidth: 120 }],
+          [{ labelWidth: 30 }, { labelWidth: 100 }],
+          [{ labelWidth: 200, height: 70 }],
+          [{ labelWidth: 220, height: 70 }],
+          [{ labelWidth: 60, height: 41 }, { labelWidth: 46 }, { labelWidth: 44, height: 41 }, { labelWidth: 84 }],
+        ]} />
+      </Card>
+      <Card>
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start", marginBottom: 14 }}>
+          <div style={{ width: 220, flexShrink: 0 }}>
+            <Skeleton width={120} height={11} />
+            <div style={{ height: 8 }} />
+            <Skeleton width="100%" height={147} radius={10} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Skeleton width={170} height={11} />
+            <div style={{ height: 8 }} />
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <Skeleton width="100%" height={41} radius={8} style={{ flex: 1 }} />
+              <Skeleton width={120} height={41} radius={999} />
+            </div>
+            <Skeleton width={190} height={11} />
+            <div style={{ height: 8 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
+              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} width="100%" height={74} radius={8} />)}
+            </div>
+          </div>
+        </div>
+        <SkeletonForm rows={[[{ labelWidth: 90 }]]} />
+      </Card>
+      <Card><SkeletonForm rows={[[{ labelWidth: 150, height: 360 }]]} /></Card>
+      <Card><SkeletonForm rows={[[{ labelWidth: 40 }], [{ labelWidth: 50, height: 70 }]]} /></Card>
+    </div>
+  );
 
   return (
     <div style={{ maxWidth: 1100 }}>

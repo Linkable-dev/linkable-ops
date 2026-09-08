@@ -8,7 +8,7 @@ import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { Skeleton, SkeletonRow, SkeletonCard, SkeletonTableRows } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonRow, SkeletonStat, SkeletonStatGrid, SkeletonTableRows, SkeletonPills, SkeletonKeyValue } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
 import { Pagination } from "../components/ui/Pagination";
 import { useColumnWidths, ResizeHandle, SortLabel, nextSort } from "../components/table/tableTools";
@@ -79,17 +79,23 @@ export default function AiCampaignDetailPage() {
   useEffect(() => { reload(); }, [reload]);
 
   if (loading && !data) {
+    // Back link, title with status pills, subtitle, tab bar, then the overview stat cards and card.
     return (
       <div>
-        <div style={{ marginBottom: 16 }}>
+        <Skeleton width={110} height={12} style={{ display: "block", marginBottom: 8 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0 4px" }}>
           <Skeleton width={260} height={22} />
-          <div style={{ height: 6 }} />
-          <Skeleton width={420} height={13} />
+          <Skeleton width={64} height={20} radius={999} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16 }}>
-          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} height={70} />)}
-        </div>
-        <Card><SkeletonRow widths={["30%", "70%", "55%", "65%", "40%"]} /></Card>
+        <Skeleton width={420} height={13} style={{ display: "block", marginBottom: 16 }} />
+        <SkeletonPills count={4} height={32} widths={[90, 72, 96, 104]} />
+        <div style={{ height: 16 }} />
+        <SkeletonStatGrid count={4} minWidth={140} variant="send" style={{ marginBottom: 16 }} />
+        <Card>
+          <Skeleton width={140} height={13} />
+          <div style={{ height: 12 }} />
+          <SkeletonKeyValue rows={4} labelWidth={90} />
+        </Card>
       </div>
     );
   }
@@ -584,7 +590,7 @@ function SendsTab({ campaign, theme }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
           {!stats ? (
-            Array.from({ length: 6 }).map((_, i) => <SendStatCardSkeleton key={i} />)
+            Array.from({ length: 6 }).map((_, i) => <SkeletonStat key={i} variant="send" seed={i} />)
           ) : (
             <>
               <SendStatCard label="Sent" value={stats.sent ?? 0} sub={`${stats.total ?? 0} queued`} theme={theme} tint={SEND_STATUS_TINTS.sent} />
@@ -673,7 +679,7 @@ function SendsTab({ campaign, theme }) {
               />
             </thead>
             <tbody>
-              <SkeletonTableRows rows={6} cols={7} theme={theme} />
+              <SkeletonTableRows rows={6} cols={SEND_COLS.map((col) => ({ key: col.key, kind: col.key === "status" ? "pill" : col.key === "actions" ? "actions" : col.key === "brand_group" || col.key === "touch_number" ? "num" : "text" }))} theme={theme} />
             </tbody>
           </table>
         </Card>
@@ -820,8 +826,19 @@ function EmailPreviewModal({ sendId, campaign, theme, onClose }) {
         )}
 
         {!send && !error && (
-          <div style={{ padding: 16 }}>
-            <SkeletonRow widths={["30%", "50%", "70%", "60%", "80%"]} />
+          <div style={{ padding: 18 }}>
+            {/* Status row, From / Reply-to / To, subject, body, timeline: the same blocks as a loaded send. */}
+            <SkeletonPills count={3} height={20} widths={[70, 88, 64]} />
+            <div style={{ height: 14 }} />
+            <SkeletonKeyValue rows={3} labelWidth={52} />
+            <div style={{ height: 16 }} />
+            <Skeleton width="70%" height={16} />
+            <div style={{ height: 12 }} />
+            <SkeletonRow widths={["100%", "96%", "88%", "92%", "60%"]} height={13} gap={8} />
+            <div style={{ height: 18 }} />
+            <Skeleton width={60} height={11} />
+            <div style={{ height: 8 }} />
+            <SkeletonKeyValue rows={3} labelWidth={110} />
           </div>
         )}
 
@@ -949,17 +966,6 @@ function SendStatCard({ label, value, sub, theme, tint = {} }) {
 }
 
 // Mirrors SendStatCard's layout exactly so loading → loaded doesn't reflow.
-function SendStatCardSkeleton() {
-  return (
-    <Card style={{ padding: "12px 14px", marginBottom: 0 }}>
-      <Skeleton width="60%" height={11} />
-      <div style={{ height: 2 }} />
-      <Skeleton width="40%" height={22} />
-      <div style={{ height: 2 }} />
-      <Skeleton width="30%" height={11} />
-    </Card>
-  );
-}
 
 const sendTh = { padding: "8px 12px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 };
 const sendTd = { padding: "8px 12px", verticalAlign: "top" };

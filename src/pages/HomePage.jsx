@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { useTheme } from "../contexts/ThemeContext";
 import { useDbTarget } from "../contexts/DbTargetContext";
+import { Skeleton, SkeletonStat, SkeletonBars } from "../components/ui/Skeleton";
 
 // ── formatters ──────────────────────────────────────────────────────────────
 const money = (n, { cents } = {}) =>
@@ -18,6 +19,59 @@ const AMBER = "#F59E0B";
 const BLUE = "#3B82F6";
 const RED = "#EF4444";
 const ROSE = "#E11D48";
+
+// ── small building blocks (module level so they are stable between renders) ──
+function Section({ title, hint, children }) {
+  const { theme } = useTheme();
+  return (
+    <div style={{ marginBottom: 34 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
+        <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: theme.textMid, margin: 0 }}>
+          {title}
+        </h2>
+        {hint && <span style={{ fontSize: 12, color: theme.textMuted }}>{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Card({ children, span = 1, pad = 18 }) {
+  const { theme } = useTheme();
+  return (
+    <div
+      style={{
+        gridColumn: `span ${span}`,
+        background: theme.surface,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 12,
+        padding: pad,
+        minWidth: 0,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Stat({ label, value, sub, accent, big, span = 1 }) {
+  const { theme } = useTheme();
+  return (
+    <Card span={span}>
+      <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: accent || theme.text, lineHeight: 1.1, letterSpacing: -0.5 }}>
+        {value}
+      </div>
+      {sub && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>{sub}</div>}
+    </Card>
+  );
+}
+
+const grid = (cols) => ({
+  display: "grid",
+  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+  gap: 14,
+});
 
 export default function HomePage() {
   const { theme } = useTheme();
@@ -40,68 +94,41 @@ export default function HomePage() {
     };
   }, [target]);
 
-  // ── small building blocks ──────────────────────────────────────────────────
-  const Section = ({ title, hint, children }) => (
-    <div style={{ marginBottom: 34 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
-        <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: theme.textMid, margin: 0 }}>
-          {title}
-        </h2>
-        {hint && <span style={{ fontSize: 12, color: theme.textMuted }}>{hint}</span>}
-      </div>
-      {children}
-    </div>
-  );
-
-  const Card = ({ children, span = 1, pad = 18 }) => (
-    <div
-      style={{
-        gridColumn: `span ${span}`,
-        background: theme.surface,
-        border: `1px solid ${theme.border}`,
-        borderRadius: 12,
-        padding: pad,
-        minWidth: 0,
-      }}
-    >
-      {children}
-    </div>
-  );
-
-  const Stat = ({ label, value, sub, accent, big, span = 1 }) => (
-    <Card span={span}>
-      <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: big ? 32 : 24, fontWeight: 700, color: accent || theme.text, lineHeight: 1.1, letterSpacing: -0.5 }}>
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>{sub}</div>}
-    </Card>
-  );
-
-  const grid = (cols) => ({
-    display: "grid",
-    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-    gap: 14,
-  });
-
   if (loading) {
     return (
       <div style={{ maxWidth: 1120 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 24 }}>Home</div>
-        <div style={grid(4)}>
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                height: 96,
-                borderRadius: 12,
-                background: `linear-gradient(90deg, ${theme.surfaceAlt} 0%, ${theme.surface} 50%, ${theme.surfaceAlt} 100%)`,
-                backgroundSize: "200% 100%",
-                animation: "skeletonShimmer 1.2s ease-in-out infinite",
-              }}
-            />
-          ))}
-        </div>
+        {/* Same sections, grids and card shapes as the loaded page. */}
+        <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
+          <div style={grid(4)}>
+            {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} variant="stat" big={i < 2} seed={i} />)}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Card pad={18}>
+              <Skeleton width={80} height={12} />
+              <div style={{ height: 14 }} />
+              <SkeletonBars rows={2} labelWidth={64} valueWidth={150} barHeight={10} gap={12} />
+            </Card>
+          </div>
+        </Section>
+        <Section title="Brand activation funnel" hint="where brands drop off on the way to their first sale">
+          <Card pad={20}>
+            <SkeletonBars rows={4} labelWidth={150} valueWidth={110} barHeight={12} gap={14} />
+          </Card>
+        </Section>
+        <Section title="Marketplace" hint="the two-sided activity brands and creators generate">
+          <div style={grid(4)}>
+            {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} variant="stat" seed={i + 4} sub={i !== 1} />)}
+          </div>
+        </Section>
+        <Section title="Subscription & trial health" hint="how the active brand base breaks down today">
+          <div style={grid(5)}>
+            {[0, 1, 2, 3, 4].map((i) => <SkeletonStat key={i} variant="stat" seed={i + 8} sub={i !== 0} />)}
+          </div>
+          <div style={{ ...grid(5), marginTop: 14 }}>
+            <SkeletonStat variant="stat" seed={13} />
+          </div>
+        </Section>
       </div>
     );
   }
