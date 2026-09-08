@@ -106,7 +106,7 @@ export default function AlertsPage() {
   );
 
   return (
-    <div style={{ maxWidth: 1100 }}>
+    <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: 0 }}>Alerts</h1>

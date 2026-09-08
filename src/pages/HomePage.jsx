@@ -139,7 +139,7 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <div style={{ maxWidth: 1280 }}>
+      <div>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 24 }}>Home</div>
         {/* Same sections, grids and card shapes as the loaded page. */}
         <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
@@ -173,7 +173,7 @@ export default function HomePage() {
 
   if (error) {
     return (
-      <div style={{ maxWidth: 1280 }}>
+      <div>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 12 }}>Home</div>
         <div style={{ padding: 16, borderRadius: 10, border: `1px solid ${RED}`, color: RED, fontSize: 13 }}>
           Failed to load metrics: {error}
@@ -196,7 +196,7 @@ export default function HomePage() {
   const momentumDelta = brands.newThisMonth - brands.newLastMonth;
 
   return (
-    <div style={{ maxWidth: 1280 }}>
+    <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px 12px", marginBottom: 24 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text }}>Home</div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

@@ -21,7 +21,10 @@ export default function App() {
       <div style={{ flex: 1, marginLeft: sidebarW, display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", transition: "margin-left 0.2s ease" }}>
         <Header />
         <main style={{ flex: 1, width: "100%", padding: "24px 32px 64px", overflowY: "auto" }}>
-          <Outlet />
+          {/* Pages fill the width and sit centred; the cap only kicks in on very wide monitors. */}
+          <div style={{ width: "100%", maxWidth: 1680, margin: "0 auto" }}>
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

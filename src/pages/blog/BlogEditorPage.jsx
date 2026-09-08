@@ -97,7 +97,7 @@ export default function BlogEditorPage() {
   const hint = (ok, text) => <span style={{ fontSize: 11, color: ok ? t.textMuted : "#B45309", marginLeft: 8, fontWeight: 400 }}>{text}</span>;
 
   if (loading) return (
-    <div style={{ maxWidth: 1100 }}>
+    <div>
       {/* Header row, then the same four cards the editor renders: meta fields, hero photo, body, FAQ. */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -149,7 +149,7 @@ export default function BlogEditorPage() {
   );
 
   return (
-    <div style={{ maxWidth: 1100 }}>
+    <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: t.textMuted }}>
           <button onClick={() => navigate("/blog")} style={{ background: "none", border: "none", color: t.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 13, padding: 0 }}>← All articles</button>

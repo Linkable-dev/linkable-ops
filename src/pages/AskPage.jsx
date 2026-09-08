@@ -57,7 +57,7 @@ export default function AskPage() {
   );
 
   return (
-    <div style={{ maxWidth: 1100 }}>
+    <div>
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: 0 }}>Ask the data</h1>
         <p style={{ fontSize: 13, color: theme.textMuted, margin: "4px 0 0" }}>
