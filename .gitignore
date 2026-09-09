@@ -38,3 +38,6 @@ supabase/.temp/
 *.njsproj
 *.sln
 *.sw?
+
+# Written by whichever Deno runs locally; the Supabase bundler ships its own.
+supabase/functions/deno.lock

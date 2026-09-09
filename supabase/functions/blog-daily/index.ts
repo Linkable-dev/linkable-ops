@@ -9,8 +9,10 @@
 // uses, so the prompt, the validator and the repair pass exist in one copy only.
 // Everything runtime-specific is injected through initBlogCore.
 //
-// Auth: send `Authorization: Bearer <BLOG_CRON_SECRET>`. The scheduled pg_cron
-// job and the ops "Generate with AI" button both use that secret.
+// Auth: send the shared secret in `x-blog-secret`. It has its own header because
+// Supabase's gateway validates Authorization as a JWT before the function runs,
+// so the function is deployed with --no-verify-jwt and checks the secret itself.
+// The Vercel cron and the ops "Generate with AI" button both send it.
 //
 // Body (all optional):
 //   { "publish": true, "keyword": "...", "angle": "...", "category": "...", "topicId": "..." }
@@ -61,8 +63,9 @@ initBlogCore({
 
 Deno.serve(async (req: Request) => {
   const secret = env.BLOG_CRON_SECRET;
-  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  if (!secret || bearer !== secret) return json({ error: "unauthorized" }, 401);
+  const sent = req.headers.get("x-blog-secret")
+    ?? (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!secret || sent !== secret) return json({ error: "unauthorized" }, 401);
 
   let body: Record<string, unknown> = {};
   try { body = await req.json(); } catch { /* an empty body means "take the next queued topic" */ }

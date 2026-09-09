@@ -41,6 +41,10 @@ npx supabase secrets set --project-ref keyvdltgobrctfwnxebf \
   GITHUB_TOKEN=ghp_...        # optional, re-renders the site immediately
 ```
 
+Deployed with `--no-verify-jwt` (the `blog:deploy` script does this). Supabase's
+gateway otherwise rejects the request before the function runs, because it reads
+`Authorization` as a JWT. The function does its own check on `x-blog-secret`.
+
 ## Switching generation over
 
 Set these two in Vercel on the ops app, using the same secret:
@@ -63,7 +67,7 @@ trigger stays where it already is.
 
 ```bash
 curl -X POST https://keyvdltgobrctfwnxebf.supabase.co/functions/v1/blog-daily \
-  -H "Authorization: Bearer $BLOG_CRON_SECRET" \
+  -H "x-blog-secret: $BLOG_CRON_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"publish":false,"keyword":"optional, otherwise the next queued topic"}'
 ```
@@ -83,4 +87,4 @@ docker run --rm -p 8137:8000 --env-file .env.local -v "$PWD":/app -w /app \
 ```
 
 A run on 2026-09-09 produced a valid article on the first attempt in 35 seconds
-for $0.037.
+for $0.037. The deployed function did the same in 37 seconds for $0.039.

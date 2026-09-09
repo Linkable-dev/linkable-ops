@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "blog:build-data": "node scripts/build-edge-blog-data.mjs",
-    "blog:deploy": "npm run blog:build-data && supabase functions deploy blog-daily --project-ref keyvdltgobrctfwnxebf"
+    "blog:deploy": "npm run blog:build-data && supabase functions deploy blog-daily --project-ref keyvdltgobrctfwnxebf --no-verify-jwt"
   },
   "dependencies": {
     "@google-cloud/cloud-sql-connector": "^1.9.2",

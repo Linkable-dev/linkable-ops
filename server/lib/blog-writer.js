@@ -40,7 +40,8 @@ export async function generateViaEdge(body = {}, { timeoutMs = 50_000 } = {}) {
   try {
     const res = await fetch(process.env.BLOG_EDGE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.BLOG_CRON_SECRET}` },
+      // Its own header: Supabase's gateway would try to read Authorization as a JWT.
+      headers: { "Content-Type": "application/json", "x-blog-secret": process.env.BLOG_CRON_SECRET },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
