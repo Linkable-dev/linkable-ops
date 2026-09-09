@@ -20,12 +20,20 @@ jobs:
   cron:
     runs-on: ubuntu-latest
     steps:
+      # The secret travels as a bearer token, not in the query string, so it
+      # cannot end up in an access log, a proxy or a referrer.
       - name: Drain due AI replies
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           curl -sf --max-time 55 \
-            "https://linkable-ops.vercel.app/api/cron/run-due?secret=${{ secrets.CRON_SECRET }}"
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "https://linkable-ops.vercel.app/api/cron/run-due"
       - name: Follow-ups (weekday morning schedule only)
         if: github.event.schedule == '30 9 * * 1-5'
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           curl -sf --max-time 55 \
-            "https://linkable-ops.vercel.app/api/cron/follow-ups?secret=${{ secrets.CRON_SECRET }}"
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "https://linkable-ops.vercel.app/api/cron/follow-ups"
