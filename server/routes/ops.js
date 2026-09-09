@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
-import { parseColumnFilters, filterConditions, textFilter } from "../lib/tableQuery.js";
+import { parseColumnFilters, filterConditions, textFilter, numberFilter } from "../lib/tableQuery.js";
 
 // Link status enum (from main proto):
 //   0=unset
@@ -29,12 +29,28 @@ const QUICK_FILTERS = {
 // `deleted` uses '-infinity' as sentinel for "not deleted" in this DB.
 const ND = `(deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
 
-// Per-column filters (filter[col]=val). Only plain columns from products/brands:
-// the aggregate columns (applied, shipped, sales, …) would need HAVING against
-// the CTE output, which this query shape doesn't support — deliberately omitted.
+// Per-column filters (filter[col]=val), in two groups because they apply at
+// two different depths.
+//
+// CAMPAIGN_FILTERS are plain products/brands columns, so they narrow the `base`
+// CTE (and the cheap count query alongside it).
 const CAMPAIGN_FILTERS = {
   campaign_name: textFilter("p.title"),
   brand_name:    textFilter("b.store_name"),
+};
+
+// ENRICHED_FILTERS are the funnel aggregates. They only exist once `enriched`
+// has been computed, so they filter in the outer WHERE — the same place the
+// quick-filter chips already do.
+const ENRICHED_FILTERS = {
+  creators_invited:  numberFilter("creators_invited"),
+  creators_applied:  numberFilter("creators_applied"),
+  creators_accepted: numberFilter("creators_accepted"),
+  samples_accepted:  numberFilter("samples_accepted"),
+  products_shipped:  numberFilter("products_shipped"),
+  clicks:            numberFilter("clicks"),
+  sales:             numberFilter("sales"),
+  bottleneck:        textFilter("bottleneck_label"),
 };
 
 export function opsRoutes() {
@@ -96,7 +112,6 @@ export function opsRoutes() {
       );
       const baseTotal = countRows[0]?.total || 0;
       const quick = QUICK_FILTERS[req.query.quick] ? req.query.quick : null;
-      const quickWhere = quick ? ` WHERE ${QUICK_FILTERS[quick]}` : "";
 
       // Compute aggregates for ALL matched products (active set is small —
       // ~tens, not thousands), then sort + paginate. Sort key may reference
@@ -104,6 +119,13 @@ export function opsRoutes() {
       const mainParams = [searchPattern, LINK_ACCEPTED, limit, offset, LINK_INVITED, LINK_APPLIED];
       const baseFilterSql = filterConditions(columnFilters, CAMPAIGN_FILTERS, mainParams)
         .map((c) => ` AND ${c}`).join("");
+
+      // Quick-filter chip + any aggregate column filters share the outer WHERE.
+      // Params must be pushed in the order the placeholders are numbered, so
+      // this pass follows the base pass above.
+      const enrichedConds = filterConditions(columnFilters, ENRICHED_FILTERS, mainParams);
+      const outerConds = [...(quick ? [QUICK_FILTERS[quick]] : []), ...enrichedConds];
+      const outerWhere = outerConds.length ? ` WHERE ${outerConds.join(" AND ")}` : "";
 
       const { rows } = await cloudSqlQuery(`
         WITH base AS (
@@ -237,14 +259,15 @@ export function opsRoutes() {
           LEFT JOIN sample_agg sm  ON sm.product_id = p.id
           LEFT JOIN sales_agg sa   ON sa.product_id = p.id
         )
-        SELECT *, COUNT(*) OVER()::int AS full_count FROM enriched${quickWhere}
+        SELECT *, COUNT(*) OVER()::int AS full_count FROM enriched${outerWhere}
         ORDER BY ${sortColumn} ${sortDir} NULLS LAST, created DESC NULLS LAST
         LIMIT $3 OFFSET $4
       `, mainParams);
 
-      // With a quick filter the total is the filtered count (window function over the
-      // filtered set); without one the cheap base count is exact and survives an empty page.
-      const total = quick ? (rows[0]?.full_count ?? 0) : baseTotal;
+      // Whenever the outer WHERE is in play the total must come from the window
+      // function over the filtered set; without it the cheap base count is exact
+      // and survives an empty page.
+      const total = outerConds.length ? (rows[0]?.full_count ?? 0) : baseTotal;
       res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir, quick });
     } catch (e) {
       console.error("[ops/campaigns]", e);

@@ -3,7 +3,7 @@ import { cloudSqlQuery, currentDbTarget, getCloudSqlPool } from "../lib/cloudsql
 import { signedUrls } from "../lib/gcs.js";
 import {
   parseColumnFilters, orderBySql, filterConditions,
-  textFilter, minNumberFilter, enumFilter,
+  textFilter, minNumberFilter, enumFilter, dateFilter,
 } from "../lib/tableQuery.js";
 
 // Mirrors the main app's role enum (see linkable-new/backend/models/enums.py
@@ -432,6 +432,8 @@ const brandFilters = (hasAppSubs) => ({
   store_name:      textFilter("b.store_name", "b.store_website"),
   email:           textFilter("u.email"),
   owner_name:      textFilter(`(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, ''))`),
+  user_created:    dateFilter("u.created"),
+  last_sign_in:    dateFilter("sig.last_sign_in"),
   // Merged Subscription column. "trial" is any brand on a paid plan still inside
   // its free trial (standard or granted-via-Shopify); "granted" narrows to an
   // active Linkable grant; "offered" is a grant not yet started. These overlap
@@ -641,6 +643,8 @@ const CREATOR_FILTERS = {
   email:                     textFilter("u.email"),
   instagram_username:        textFilter("i.instagram_username"),
   instagram_followers_count: minNumberFilter(CREATOR_FOLLOWERS_SQL),
+  last_sign_in:              dateFilter("sig.last_sign_in"),
+  user_created:              dateFilter("u.created"),
 };
 
 async function listCreators(query) {

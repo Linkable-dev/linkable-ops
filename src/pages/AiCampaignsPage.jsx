@@ -49,14 +49,20 @@ const AUDIENCE_TINTS = {
 // Column definitions: key = server sort column (allow-listed in
 // outbound-campaigns.js). Targets is client-computed so it stays unsortable.
 // Widths approximate the previous auto layout.
+// `filter` is the type the header popover renders. Audience and Status have no
+// column filter on purpose — the tabs above the table already select on them.
 const COLUMNS = [
-  { key: "name",          label: "Name",       sortable: true,  defaultDir: "asc",  width: 320 },
+  { key: "name",          label: "Name",       sortable: true,  defaultDir: "asc",  width: 320,
+    filter: { type: "text", placeholder: "Campaign name…" } },
   { key: "audience_type", label: "Audience",   sortable: true,  defaultDir: "asc",  width: 110 },
   { key: "status",        label: "Status",     sortable: true,  defaultDir: "asc",  width: 100 },
-  { key: "daily_cap",     label: "Daily cap",  sortable: true,  defaultDir: "desc", width: 90 },
-  { key: "auto_reply",    label: "Auto-reply", sortable: true,  defaultDir: "desc", width: 100 },
+  { key: "daily_cap",     label: "Daily cap",  sortable: true,  defaultDir: "desc", width: 90,
+    filter: { type: "number" } },
+  { key: "auto_reply",    label: "Auto-reply", sortable: true,  defaultDir: "desc", width: 100,
+    filter: { type: "boolean" } },
   { key: "targets",       label: "Targets",    sortable: false,                     width: 220 },
-  { key: "created_at",    label: "Created",    sortable: true,  defaultDir: "desc", width: 130 },
+  { key: "created_at",    label: "Created",    sortable: true,  defaultDir: "desc", width: 130,
+    filter: { type: "date" } },
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
 const DEFAULT_SORT = { sortBy: "created_at", sortDir: "desc" };
@@ -222,22 +228,19 @@ export default function AiCampaignsPage() {
                         theme={theme}
                       />
                     ) : col.label}
-                    <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
-                  </Th>
-                ))}
-              </tr>
-              <tr style={{ borderBottom: `1px solid ${theme.border}` }}>
-                {COLUMNS.map((col) => (
-                  <td key={col.key} style={{ padding: "4px 8px" }}>
-                    {col.key === "name" && (
+                    {col.filter && (
                       <ColumnFilter
-                        value={filters.name || ""}
-                        placeholder="Filter by name…"
-                        onCommit={(v) => commitFilter("name", v)}
                         theme={theme}
+                        label={col.label}
+                        type={col.filter.type}
+                        options={col.filter.options}
+                        placeholder={col.filter.placeholder}
+                        value={filters[col.key] || ""}
+                        onCommit={(v) => commitFilter(col.key, v)}
                       />
                     )}
-                  </td>
+                    <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                  </Th>
                 ))}
               </tr>
             </thead>

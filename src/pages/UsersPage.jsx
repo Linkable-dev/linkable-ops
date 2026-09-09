@@ -18,7 +18,9 @@ import {
 
 const TABS = [["brands", "Brands"], ["creators", "Creators"], ["deleted", "Deleted"]];
 
-const DEFAULT_SORT = { sortBy: "user_created", sortDir: "desc" };
+// Most recently active first: the operator almost always wants the people who
+// are actually using the product right now, not whoever signed up last.
+const DEFAULT_SORT = { sortBy: "last_sign_in", sortDir: "desc" };
 
 // Sorting and filtering are SERVER-side: `key` must exist in the endpoint's
 // whitelists (BRAND_SORTS/BRAND_FILTERS etc. in server/routes/admin-users.js).
@@ -39,8 +41,10 @@ const BRAND_COLUMNS = [
     filter: { type: "text", placeholder: "Email…" } },
   { key: "owner_name",      label: "Owner",        width: 120, sortable: true, defaultDir: "asc",
     filter: { type: "text", placeholder: "Name…" } },
-  { key: "user_created",    label: "Joined",       width: 85,  sortable: true, defaultDir: "desc" },
-  { key: "last_sign_in",    label: "Last sign in", width: 95,  sortable: true, defaultDir: "desc" },
+  { key: "user_created",    label: "Joined",       width: 100, sortable: true, defaultDir: "desc",
+    filter: { type: "date" } },
+  { key: "last_sign_in",    label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
+    filter: { type: "date" } },
   { key: "subscription",    label: "Subscription", width: 185, sortable: true, defaultDir: "desc",
     filter: { type: "select", options: [
       { value: "paying",   label: "Paying" },
@@ -73,8 +77,9 @@ const CREATOR_COLUMNS = [
   { key: "instagram_username",        label: "IG Handle",    width: 140, sortable: true, defaultDir: "asc",
     filter: { type: "text", placeholder: "@handle…" } },
   { key: "instagram_followers_count", label: "Followers",    width: 100, sortable: true, defaultDir: "desc",
-    filter: { type: "number", placeholder: "≥ …" } },
-  { key: "last_sign_in",              label: "Last sign in", width: 110, sortable: true, defaultDir: "desc" },
+    filter: { type: "number" } },
+  { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
+    filter: { type: "date" } },
   { key: "actions",                   label: "",             width: 95 },
 ];
 
@@ -327,30 +332,12 @@ export default function UsersPage() {
               ) : (
                 <span>{col.label}</span>
               )}
-              {col.resizable !== false && (
-                <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Per-column filter row (server-side). Hidden on the deleted tab,
-            whose endpoint has no per-column filters. */}
-        {showFilterRow && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: template,
-          gap: 8,
-          padding: "6px 16px",
-          borderBottom: `1px solid ${theme.border}`,
-          background: theme.surfaceAlt,
-          alignItems: "center",
-        }}>
-          {columns.map((col) => (
-            <div key={col.key} style={{ minWidth: 0 }}>
-              {col.filter && (
+              {/* Filters live in the header cell. Hidden on the deleted tab,
+                  whose endpoint has no per-column filters. */}
+              {showFilterRow && col.filter && (
                 <ColumnFilter
                   theme={theme}
+                  label={col.label}
                   type={col.filter.type}
                   options={col.filter.options}
                   placeholder={col.filter.placeholder}
@@ -358,10 +345,12 @@ export default function UsersPage() {
                   onCommit={(v) => handleFilter(col.key, v)}
                 />
               )}
+              {col.resizable !== false && (
+                <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+              )}
             </div>
           ))}
         </div>
-        )}
 
         {loading ? (
           <SkeletonGridRows
