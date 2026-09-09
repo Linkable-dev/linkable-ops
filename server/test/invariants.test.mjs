@@ -29,6 +29,7 @@ import { HEALTH_WEIGHTS, scoreBrand } from "../lib/brand-health.js";
 import { verdictFor, THRESHOLDS } from "../lib/deliverability.js";
 import { isEmailable, EMAILABLE_KINDS } from "../lib/nudge-writer.js";
 import { selectTargets, LIMITS as NUDGE_LIMITS } from "../lib/auto-nudge.js";
+import { opsBaseUrl } from "../lib/morning-brief.js";
 
 let server, base;
 
@@ -751,5 +752,36 @@ describe("automatic nudging", { timeout: 120_000 }, () => {
     for (const r of rules) {
       assert.equal(r.auto, false, `${r.kind} is chasing brands automatically`);
     }
+  });
+});
+
+describe("morning brief links", () => {
+  const KEYS = ["OPS_URL", "VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_URL"];
+  const withEnv = (env, fn) => {
+    const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+    for (const k of KEYS) delete process.env[k];
+    Object.assign(process.env, env);
+    try { return fn(); } finally {
+      for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    }
+  };
+
+  test("no configured host means no link, never a guessed one", () => {
+    // A brief that sends the team to a hostname nobody configured is worse
+    // than one with no link in it.
+    assert.equal(withEnv({}, opsBaseUrl), null);
+  });
+
+  test("an explicit OPS_URL wins and is normalised", () => {
+    assert.equal(withEnv({ OPS_URL: "ops.example.com" }, opsBaseUrl), "https://ops.example.com");
+    assert.equal(withEnv({ OPS_URL: "https://ops.example.com/" }, opsBaseUrl), "https://ops.example.com");
+    assert.equal(withEnv({ OPS_URL: "ops.example.com", VERCEL_URL: "x.vercel.app" }, opsBaseUrl), "https://ops.example.com");
+  });
+
+  test("it falls back through the hosts Vercel injects", () => {
+    assert.equal(withEnv({ VERCEL_PROJECT_PRODUCTION_URL: "a.vercel.app" }, opsBaseUrl), "https://a.vercel.app");
+    assert.equal(withEnv({ VERCEL_URL: "b.vercel.app" }, opsBaseUrl), "https://b.vercel.app");
+    assert.equal(withEnv({ VERCEL_PROJECT_PRODUCTION_URL: "a.vercel.app", VERCEL_URL: "b.vercel.app" }, opsBaseUrl),
+      "https://a.vercel.app", "the stable production domain beats the per-deployment one");
   });
 });

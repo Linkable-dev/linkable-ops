@@ -160,8 +160,12 @@ a sample nobody sent, paying brands whose health score fell overnight, what
 arrived in the last 24 hours, and any sending inbox in trouble. A digest of
 totals with no names in it is the kind nobody reads twice.
 
-Links point at `OPS_URL`, falling back to Vercel's injected production domain.
-With neither set the brief prints no links rather than guessing a host.
+Links resolve in order: `OPS_URL` (set this if the console gets a custom
+domain), then `VERCEL_PROJECT_PRODUCTION_URL`, then `VERCEL_URL` — the last two
+are injected by Vercel, so the links work on a production deployment with no
+configuration at all. With none of the three set the brief prints no links
+rather than guessing a host. The console currently lives at
+https://linkable-ops.vercel.app.
 `GET /api/cron/morning-brief?dry=1` renders it without sending.
 
 ## Chasing brands automatically

@@ -14,12 +14,20 @@ import { sendNudgeEmail } from "./nudge-mailer.js";
 
 const plural = (n, w) => `${n} ${w}${Number(n) === 1 ? "" : "s"}`;
 
-// Where the console lives, if anything actually knows.
+// Where the console lives, if anything actually knows. In preference order:
+// an explicit OPS_URL (set this if there is a custom domain), the production
+// domain Vercel injects, then the deployment's own URL — which is uglier but
+// is a link that works. Still returns null when none of the three is set,
+// because a brief pointing at a host nobody configured is worse than one with
+// no link in it.
 export function opsBaseUrl() {
   const explicit = (process.env.OPS_URL || "").trim().replace(/\/+$/, "");
   if (explicit) return /^https?:\/\//.test(explicit) ? explicit : `https://${explicit}`;
-  const vercel = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").trim();
-  return vercel ? `https://${vercel}` : null;
+  for (const key of ["VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_URL"]) {
+    const host = (process.env[key] || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (host) return `https://${host}`;
+  }
+  return null;
 }
 
 // Who gets it. Every ops admin unless BRIEF_TO names addresses explicitly.
