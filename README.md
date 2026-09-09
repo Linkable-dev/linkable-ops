@@ -38,3 +38,24 @@ rules before it is saved.
 - Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `BLOG_ANTHROPIC_API_KEY` (dedicated key
   for article generation; falls back to `ANTHROPIC_API_KEY`), `CRON_SECRET`, `PEXELS_API_KEY`, optional `GITHUB_TOKEN`
   (fine-grained token with Contents: read/write on the landing repo, used for `repository_dispatch`) and `LANDING_REPO`.
+
+## Brand health, churn radar and trial ranking
+
+`server/lib/brand-health.js` scores every active brand out of 100 — do they log
+in, is there a live campaign, did creators join it, are accepted samples going
+out, is any of it selling — and turns that into the two lists on **Brand
+health** (`/health`):
+
+- **Churn radar** — the paying base, worst first, with a falling score ranked
+  above a merely low one.
+- **Trial ranking** — trials most likely to convert first, so limited hours go
+  to the right ten rather than to all of them equally.
+
+`GET /api/insights/health` computes it live. `POST /api/insights/health/snapshot`
+records the day's scores into `ops_brand_health`, which the daily
+`auto-discover` cron also does: a direction needs yesterday's number, and the
+level alone says much less than the change.
+
+A missing signal never counts against a brand — nothing outstanding to ship
+scores as fulfilled, not as failed — and a frozen payment is always the first
+risk an operator is shown, because it locks the app for the customer.

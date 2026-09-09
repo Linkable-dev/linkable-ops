@@ -9,6 +9,7 @@ import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { blogDb } from "../lib/blog-supabase.js";
+import { brandHealth, loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
 
 // Soft-delete sentinel used across the main app's tables.
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -771,6 +772,29 @@ export function insightsRoutes() {
       await cloudSqlQuery(`DELETE FROM ops_alert_dismissals WHERE key = ANY($1)`, [keys]);
       res.json({ ok: true, count: keys.length });
     } catch (e) { console.error("[insights/alerts/restore]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /health — score every brand, plus the churn radar and trial ranking.
+  router.get("/health", async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 200);
+      res.json(await brandHealth({ limit }));
+    } catch (e) { console.error("[insights/health]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /health/snapshot — record today's scores so tomorrow has a trend to
+  // compare against. Runs from the daily cron; the level is far less useful
+  // than the direction.
+  router.post("/health/snapshot", async (_req, res) => {
+    try {
+      const facts = await loadBrandFacts();
+      const scored = facts.map((b) => ({
+        user_id: b.user_id,
+        score: scoreBrand(b).score,
+        paying: /^shopify_[0-9]+/.test(b.account_id || "") && !b.sub_test,
+      }));
+      res.json(await snapshotHealth(scored));
+    } catch (e) { console.error("[insights/health/snapshot]", e); res.status(500).json({ error: e.message }); }
   });
 
   router.get("/brand/:userId", async (req, res) => {
