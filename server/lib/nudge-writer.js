@@ -10,6 +10,13 @@
 import { claudeMessage } from "./anthropic.js";
 
 const NUDGE_MODEL = "claude-sonnet-5";
+
+// Alert kinds it is appropriate to write to a customer about unprompted.
+// Deliberately an allow-list: a brand purge ("you deleted your account, the
+// data goes on schedule") or a stale-blog alert must never reach a customer
+// because somebody clicked "nudge all" on a brand that happened to have one.
+export const EMAILABLE_KINDS = new Set(["shipping", "applications", "sales", "billing"]);
+export const isEmailable = (alert) => EMAILABLE_KINDS.has(alert?.kind);
 // Sonnet list price, $/million tokens. Mirrors ASK_PRICES in insights.js.
 const PRICE = { in: 2, out: 10 };
 
@@ -39,7 +46,9 @@ Voice
 - 60 to 120 words in the body. Shorter is better than complete.
 - Open with the specific situation, not a pleasantry. Never "I hope this finds
   you well", "I wanted to reach out", "Just checking in", or "quick question".
-- Exactly one ask, and make the next step obvious and small.
+- One ask when there is one thing stuck. When several are listed, cover them
+  all in a single short email — group them naturally rather than writing a
+  list of unrelated paragraphs, and still close with one clear next step.
 - Plain sentences. No marketing language, no exclamation marks, no emoji, no
   markdown, no bullet symbols, no headings.
 - British English.
@@ -66,7 +75,12 @@ const days = (iso) => {
 
 // A compact, plain-language fact sheet. Every line is something the operator
 // could have read off the console themselves.
-function factSheet({ alert, brand, sender }) {
+//
+// `alerts` may hold several things the same brand has left hanging. They go in
+// one email: a brand with five open alerts receiving five separate emails in
+// the same minute is worse than not writing at all.
+function factSheet({ alerts, brand, sender }) {
+  const [alert] = alerts;
   const lines = [];
   const p = brand?.profile || {};
   const name = alert.brand?.store_name || p.store_name;
@@ -89,23 +103,24 @@ function factSheet({ alert, brand, sender }) {
   }
   if (alert.campaign?.title) lines.push(`Campaign this is about: "${alert.campaign.title}"`);
 
-  // The alert itself, verbatim from buildAlerts().
+  // The alerts themselves, verbatim from buildAlerts().
   lines.push("");
-  lines.push(`What is stuck: ${alert.title}`);
-  lines.push(`Detail: ${alert.detail}`);
-  if (alert.action) lines.push(`What we want them to do: ${alert.action}`);
-  const waiting = days(alert.since);
-  if (waiting !== null) {
-    lines.push(waiting >= 0
-      ? `This has been waiting ${waiting} day${waiting === 1 ? "" : "s"}.`
-      : `This falls due in ${-waiting} day${waiting === -1 ? "" : "s"}.`);
-  }
-
-  // One line of campaign context, when the alert names a campaign we can find.
-  const c = (brand?.campaigns || []).find((x) => x.id === alert.campaign?.id);
-  if (c) {
+  lines.push(alerts.length === 1
+    ? "What is stuck:"
+    : `What is stuck (${alerts.length} things, all for this same brand — write ONE email covering them):`);
+  for (const a of alerts) {
     lines.push("");
-    lines.push(`On that campaign so far: ${c.accepted || 0} creator(s) accepted, ${c.shipped || 0} sample(s) shipped, ${c.sales || 0} sale(s).`);
+    lines.push(`- ${a.title}`);
+    lines.push(`  Detail: ${a.detail}`);
+    if (a.action) lines.push(`  What we want them to do: ${a.action}`);
+    const waiting = days(a.since);
+    if (waiting !== null && waiting >= 0) {
+      lines.push(`  Waiting ${waiting} day${waiting === 1 ? "" : "s"}.`);
+    }
+    const c = (brand?.campaigns || []).find((x) => x.id === a.campaign?.id);
+    if (c) {
+      lines.push(`  On "${c.title}" so far: ${c.accepted || 0} creator(s) accepted, ${c.shipped || 0} sample(s) shipped, ${c.sales || 0} sale(s).`);
+    }
   }
 
   lines.push("");
@@ -114,8 +129,10 @@ function factSheet({ alert, brand, sender }) {
 }
 
 // → { subject, body, model, costUsd }
-export async function draftNudge({ alert, brand, sender }) {
-  const facts = factSheet({ alert, brand, sender });
+export async function draftNudge({ alerts, brand, sender }) {
+  const list = [].concat(alerts).filter(Boolean);
+  if (!list.length) throw new Error("nothing to write about");
+  const facts = factSheet({ alerts: list, brand, sender });
 
   const res = await claudeMessage({
     model: NUDGE_MODEL,

@@ -212,7 +212,7 @@ export default function AlertsPage() {
       ))}
 
       {nudgeAlert && (
-        <NudgeModal alert={nudgeAlert} onClose={() => setNudgeAlert(null)} onSent={onNudged} />
+        <NudgeModal alerts={nudgeAlert} onClose={() => setNudgeAlert(null)} onSent={onNudged} />
       )}
 
       {!error && !loading && view === "list" && visible.length > 0 && (
@@ -258,6 +258,12 @@ function BrandGroup({ group: g, theme, isBusy, onAct, onNudge, onOpen }) {
           {g.brand?.email && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.brand.email}</div>}
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {g.brand?.email && openAlerts.length > 0 && (
+            <Btn size="sm" variant="outline" onClick={() => onNudge(openAlerts)}
+              title={`Write one email covering all ${openAlerts.length} open alerts for this brand`}>
+              Nudge all {openAlerts.length}
+            </Btn>
+          )}
           {g.brand?.email && <Btn size="sm" variant="secondary" onClick={() => navigator.clipboard?.writeText(g.brand.email)} title="Copy the brand email">Copy email</Btn>}
           <Btn size="sm" variant="outline" onClick={onOpen}>Brand 360</Btn>
           {openAlerts.length > 0 && (

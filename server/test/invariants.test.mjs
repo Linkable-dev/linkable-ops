@@ -27,6 +27,7 @@ import {
 } from "../lib/campaign-matchmaking.js";
 import { HEALTH_WEIGHTS, scoreBrand } from "../lib/brand-health.js";
 import { verdictFor, THRESHOLDS } from "../lib/deliverability.js";
+import { isEmailable, EMAILABLE_KINDS } from "../lib/nudge-writer.js";
 
 let server, base;
 
@@ -632,5 +633,28 @@ describe("sender deliverability", { timeout: 120_000 }, () => {
       assert.ok(b.complaint_rate >= 0 && b.complaint_rate <= 1);
       if (!b.judged) assert.equal(b.should_pause, false, `${b.email} would pause without enough volume`);
     }
+  });
+});
+
+describe("nudge safety", () => {
+  test("only operational alert kinds are ever emailed to a brand", () => {
+    // The dangerous case is an operator clicking "nudge all" on a brand that
+    // happens to have a purge alert, and the brand being written to about the
+    // deletion of their own account.
+    for (const kind of ["shipping", "applications", "sales", "billing"]) {
+      assert.equal(isEmailable({ kind }), true, `${kind} should be emailable`);
+    }
+    for (const kind of ["deletion", "trials", "blog", "deliverability", undefined, null, ""]) {
+      assert.equal(isEmailable({ kind }), false, `${kind} must never be emailed`);
+    }
+    assert.equal(isEmailable(null), false);
+    assert.equal(isEmailable({}), false);
+  });
+
+  test("the allow-list is an allow-list, not a deny-list", () => {
+    // A new alert kind must be opted in deliberately, never inherit the right
+    // to email customers by default.
+    assert.equal(isEmailable({ kind: "some-future-kind" }), false);
+    assert.ok(EMAILABLE_KINDS.size <= 6, "the set of things we email about should stay small");
   });
 });

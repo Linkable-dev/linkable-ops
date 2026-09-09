@@ -6,7 +6,7 @@
 // press blind. The server re-derives the recipient from the alert regardless
 // of what this component holds.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
 import { Modal } from "../ui/Modal";
@@ -14,7 +14,12 @@ import { Btn } from "../ui/Button";
 import { Skeleton } from "../ui/Skeleton";
 import { SEVERITY } from "../../lib/alerts";
 
-export default function NudgeModal({ alert, onClose, onSent }) {
+export default function NudgeModal({ alerts, onClose, onSent }) {
+  const list = [].concat(alerts);
+  const alert = list[0];
+  // A stable primitive, so the fetch effect depends on the identity of the
+  // alert set rather than on a fresh array every render.
+  const keyString = list.map((a) => a.key).join("|");
   const { theme } = useTheme();
   const [draft, setDraft] = useState(null);
   const [subject, setSubject] = useState("");
@@ -23,19 +28,19 @@ export default function NudgeModal({ alert, onClose, onSent }) {
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
 
-  const load = () => {
+  const load = useCallback(() => {
     setError(""); setDraft(null);
-    api.draftNudge(alert.key)
+    api.draftNudge(keyString.split("|"))
       .then((d) => { setDraft(d); setSubject(d.subject); setBody(d.body); })
       .catch((e) => setError(e.message));
-  };
+  }, [keyString]);
 
-  useEffect(load, [alert.key]);
+  useEffect(load, [load]);
 
   const send = async () => {
     setSending(true); setError("");
     try {
-      const res = await api.sendNudge({ key: alert.key, subject, body, alsoDone });
+      const res = await api.sendNudge({ keys: keyString.split("|"), subject, body, alsoDone });
       onSent(res.to);
     } catch (e) { setError(e.message); }
     finally { setSending(false); }
@@ -51,13 +56,22 @@ export default function NudgeModal({ alert, onClose, onSent }) {
   const ready = draft && subject.trim() && body.trim();
 
   return (
-    <Modal open onClose={sending ? () => {} : onClose} title="Send a nudge" width={620}>
+    <Modal open onClose={sending ? () => {} : onClose} title={list.length > 1 ? `Send one nudge covering ${list.length} alerts` : "Send a nudge"} width={620}>
       {/* What this is about, so the draft can be judged against the situation. */}
       <div style={{ display: "flex", gap: 10, padding: "10px 12px", borderRadius: 10, background: theme.surfaceAlt, marginBottom: 16 }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: sev.color, flexShrink: 0, marginTop: 5 }} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{alert.title}</div>
-          <div style={{ fontSize: 12, color: theme.textMid, marginTop: 2, lineHeight: 1.45 }}>{alert.detail}</div>
+          {list.map((a, i) => (
+            <div key={a.key} style={{ marginTop: i ? 8 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{a.title}</div>
+              <div style={{ fontSize: 12, color: theme.textMid, marginTop: 2, lineHeight: 1.45 }}>{a.detail}</div>
+            </div>
+          ))}
+          {list.length > 1 && (
+            <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 8 }}>
+              All {list.length} go in one email — {list.length} separate emails in the same minute would be worse than not writing.
+            </div>
+          )}
         </div>
       </div>
 
@@ -119,7 +133,7 @@ export default function NudgeModal({ alert, onClose, onSent }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: theme.textMid, cursor: "pointer" }}>
               <input type="checkbox" checked={alsoDone} onChange={(e) => setAlsoDone(e.target.checked)} />
-              mark the alert done
+              mark {list.length > 1 ? `all ${list.length} alerts` : "the alert"} done
             </label>
             <span style={{ fontSize: 11, color: theme.textMuted }}>
               {draft.costUsd != null && `drafted for $${draft.costUsd.toFixed(3)}`}

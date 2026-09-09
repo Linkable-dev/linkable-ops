@@ -81,9 +81,10 @@ export const api = {
   restoreAlerts: (keys) => request("/insights/alerts/restore", { method: "POST", body: JSON.stringify({ keys }) }),
   // Writes the nudge email for one alert. Sends nothing — sendNudge does that
   // once the operator has read it.
-  draftNudge: (key) => request("/insights/alerts/draft", { method: "POST", body: JSON.stringify({ key }) }),
-  sendNudge: ({ key, subject, body, alsoDone }) =>
-    request("/insights/alerts/send", { method: "POST", body: JSON.stringify({ key, subject, body, alsoDone }) }),
+  // One or many keys; several must belong to the same brand and become one email.
+  draftNudge: (keys) => request("/insights/alerts/draft", { method: "POST", body: JSON.stringify({ keys: [].concat(keys) }) }),
+  sendNudge: ({ keys, subject, body, alsoDone }) =>
+    request("/insights/alerts/send", { method: "POST", body: JSON.stringify({ keys: [].concat(keys), subject, body, alsoDone }) }),
   getSavedMetrics: () => request("/insights/metrics"),
   saveMetric: (body) => request("/insights/metrics", { method: "POST", body: JSON.stringify(body) }),
   deleteMetric: (id) => request(`/insights/metrics/${id}`, { method: "DELETE" }),
