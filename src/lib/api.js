@@ -97,6 +97,8 @@ export const api = {
   getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters, quick } = {}) =>
     request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters, quick })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
+  // The creator base ranked against one campaign (read-only shortlist).
+  getCreatorMatches: (id, { limit = 25 } = {}) => request(`/ops/campaigns/${id}/creator-matches?limit=${limit}`),
 
   // AI conversation manager
   getAiCampaigns: () => request("/conversations/campaigns"),

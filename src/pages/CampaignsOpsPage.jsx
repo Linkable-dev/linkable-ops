@@ -6,6 +6,7 @@ import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/ui/Skeleton";
 import { useColumnWidths, ResizeHandle, ColumnFilter } from "../components/table/tableTools";
+import CreatorMatchesModal from "../components/campaigns/CreatorMatchesModal";
 
 const STATUS_COLORS = {
   Rejected:          { bg: "#FEE2E2", fg: "#991B1B", bgDark: "#3F1313", fgDark: "#FCA5A5" },
@@ -70,6 +71,7 @@ export default function CampaignsOpsPage() {
   const [sortBy, setSortBy] = useState("created");
   const [sortDir, setSortDir] = useState("desc");
   const [filters, setFilters] = useState({}); // per-column server-side filters
+  const [matchesFor, setMatchesFor] = useState(null); // campaign whose creator shortlist is open
 
   const { widths, startResize, resetWidth } = useColumnWidths("ops-campaigns", DEFAULT_WIDTHS);
   // Fixed columns keep their width; the two `fill` columns share whatever is
@@ -198,6 +200,10 @@ export default function CampaignsOpsPage() {
         ))}
       </div>
 
+      {matchesFor && (
+        <CreatorMatchesModal campaign={matchesFor} onClose={() => setMatchesFor(null)} />
+      )}
+
       {/* Campaigns table */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -258,7 +264,18 @@ export default function CampaignsOpsPage() {
                       <Td theme={theme} num>{friendlyNumber(c.clicks)}</Td>
                       <Td theme={theme} num style={{ fontWeight: c.sales > 0 ? 600 : 400, color: c.sales > 0 ? theme.text : theme.textMuted }}>{friendlyNumber(c.sales)}</Td>
                       <Td theme={theme}>
-                        {bottleneck ? <BottleneckBadge theme={theme} mode={mode} label={bottleneck.label} tone={bottleneck.tone} /> : <span style={{ color: theme.textMuted }}>—</span>}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          {bottleneck ? <BottleneckBadge theme={theme} mode={mode} label={bottleneck.label} tone={bottleneck.tone} /> : <span style={{ color: theme.textMuted }}>—</span>}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setMatchesFor(c); }}
+                            title="Rank the creator base against this campaign"
+                            style={{
+                              height: 22, padding: "0 8px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                              fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+                              border: `1px solid ${theme.border}`, background: theme.surface, color: theme.textMid,
+                            }}
+                          >Find creators</button>
+                        </div>
                       </Td>
                     </tr>
                     {isOpen && (
