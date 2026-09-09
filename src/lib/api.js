@@ -76,7 +76,9 @@ export const api = {
   getOverview: () => request("/analytics/overview"),
   getHome: () => request("/analytics/home"),
   // Insights: alerts, Brand 360, Home time series, Ask the data, global search
-  getAlerts: () => request("/insights/alerts"),
+  getAlerts: ({ all } = {}) => request(`/insights/alerts${all ? "?all=1" : ""}`),
+  dismissAlerts: (keys, mode = "done", days) => request("/insights/alerts/dismiss", { method: "POST", body: JSON.stringify({ keys, mode, days }) }),
+  restoreAlerts: (keys) => request("/insights/alerts/restore", { method: "POST", body: JSON.stringify({ keys }) }),
   getBrand360: (userId) => request(`/insights/brand/${userId}`),
   getHomeSeries: (range = "90d") => request(`/insights/series?range=${encodeURIComponent(range)}`),
   askData: (question) => request("/insights/ask", { method: "POST", body: JSON.stringify({ question }) }),

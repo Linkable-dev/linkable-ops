@@ -4,7 +4,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { useDbTarget } from "../../contexts/DbTargetContext";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
-import { isSnoozed } from "../../lib/alerts";
+import { ALERTS_CHANGED } from "../../lib/alerts";
 
 function getPageInfo(pathname) {
   if (pathname === "/") return { title: "Home", subtitle: "Live business metrics" };
@@ -49,12 +49,13 @@ export default function Header() {
     let alive = true;
     const refresh = () => api.getAlerts().then((d) => {
       if (!alive) return;
-      const live = (d.alerts || []).filter((a) => !isSnoozed(a.key));
+      const live = d.alerts || [];
       setAlertCount({ total: live.length, danger: live.filter((a) => a.severity === "danger").length });
     }).catch(() => {});
     refresh();
     const t = setInterval(refresh, 5 * 60_000);
-    return () => { alive = false; clearInterval(t); };
+    window.addEventListener(ALERTS_CHANGED, refresh);
+    return () => { alive = false; clearInterval(t); window.removeEventListener(ALERTS_CHANGED, refresh); };
   }, [target, onAlertsPage]);
   const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
 
@@ -126,19 +127,6 @@ export default function Header() {
           <span>Search</span>
           <kbd style={{ fontSize: 10, border: `1px solid ${theme.border}`, borderRadius: 5, padding: "1px 5px", color: theme.textMuted, fontFamily: "inherit" }}>{isMac ? "⌘" : "Ctrl"} K</kbd>
         </button>
-        <Link to="/alerts" title={alertCount ? `${alertCount.total} alert${alertCount.total === 1 ? "" : "s"}${alertCount.danger ? ` · ${alertCount.danger} urgent` : ""}` : "Alerts"} style={{
-          position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-          width: 32, height: 32, borderRadius: 999, border: `1px solid ${theme.border}`, color: theme.textMid, textDecoration: "none",
-        }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
-          {alertCount?.total > 0 && (
-            <span style={{
-              position: "absolute", top: -5, right: -6, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
-              background: alertCount.danger ? "#DC2626" : "#D97706", color: "#fff", fontSize: 10, fontWeight: 700,
-              display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${theme.surface}`,
-            }}>{alertCount.total > 99 ? "99+" : alertCount.total}</span>
-          )}
-        </Link>
         <div ref={dbMenuRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDbMenuOpen((v) => !v)}
@@ -210,6 +198,19 @@ export default function Header() {
             </svg>
           )
         )}
+        <Link to="/alerts" title={alertCount ? `${alertCount.total} alert${alertCount.total === 1 ? "" : "s"}${alertCount.danger ? ` · ${alertCount.danger} urgent` : ""}` : "Alerts"} style={{
+          position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+          width: 32, height: 32, borderRadius: 999, border: `1px solid ${theme.border}`, color: theme.textMid, textDecoration: "none",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+          {alertCount?.total > 0 && (
+            <span style={{
+              position: "absolute", top: -5, right: -6, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
+              background: alertCount.danger ? "#DC2626" : "#D97706", color: "#fff", fontSize: 10, fontWeight: 700,
+              display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${theme.surface}`,
+            }}>{alertCount.total > 99 ? "99+" : alertCount.total}</span>
+          )}
+        </Link>
       </div>
     </header>
   );

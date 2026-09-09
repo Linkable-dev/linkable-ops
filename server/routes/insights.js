@@ -101,58 +101,70 @@ export async function buildAlerts({ shipDays = 5, applyDays = 7, trialDays = 3, 
   const campaign = (r) => ({ id: r.product_id, title: r.title });
   const plural = (n, w) => `${n} ${w}${Number(n) === 1 ? "" : "s"}`;
 
+  const fp = (r) => `${r.n ?? ""}|${r.since ? new Date(r.since).toISOString().slice(0, 10) : ""}`;
+  const name = (r) => r.store_name || r.email || "The brand";
+
   for (const r of accepted.rows) alerts.push({
-    key: `ship:${r.product_id}`, kind: "shipping", severity: "danger",
-    title: `Accepted sample${int(r.n) === 1 ? "" : "s"} not shipped`,
-    detail: `${plural(r.n, "sample")} accepted on "${r.title}" and still not shipped after ${shipDays} days.`,
+    key: `ship:${r.product_id}`, fingerprint: fp(r), kind: "shipping", severity: "danger",
+    title: `Ship ${plural(r.n, "accepted sample")}`,
+    detail: `${name(r)} accepted ${plural(r.n, "sample request")} on "${r.title}" but never marked ${int(r.n) === 1 ? "it" : "them"} shipped. The creator is waiting for the product.`,
+    action: "Nudge the brand to ship (or to mark it shipped if it already went out).",
     since: r.since, brand: brand(r), campaign: campaign(r), href: "/ops/campaigns",
   });
   for (const r of pending.rows) alerts.push({
-    key: `sample-pending:${r.product_id}`, kind: "shipping", severity: "warn",
-    title: "Sample request unanswered",
-    detail: `${plural(r.n, "creator")} asked for a sample on "${r.title}" more than ${shipDays} days ago.`,
+    key: `sample-pending:${r.product_id}`, fingerprint: fp(r), kind: "shipping", severity: "warn",
+    title: `Answer ${plural(r.n, "sample request")}`,
+    detail: `${plural(r.n, "creator")} asked ${name(r)} for a sample on "${r.title}" and got no answer for over ${shipDays} days.`,
+    action: "Ask the brand to accept or decline the requests; unanswered creators drop out.",
     since: r.since, brand: brand(r), campaign: campaign(r), href: "/ops/campaigns",
   });
   for (const r of noSample.rows) alerts.push({
-    key: `no-sample:${r.product_id}`, kind: "shipping", severity: "info",
-    title: "Accepted creators without a sample",
-    detail: `${plural(r.n, "accepted creator")} on "${r.title}" (a shipping campaign) with no sample request after ${applyDays} days.`,
+    key: `no-sample:${r.product_id}`, fingerprint: fp(r), kind: "shipping", severity: "info",
+    title: `Check ${plural(r.n, "accepted creator")} got product`,
+    detail: `"${r.title}" ships samples, but ${plural(r.n, "creator")} accepted ${applyDays}+ days ago and no sample request exists.`,
+    action: "Confirm the creators received product another way, or remind them to request the sample.",
     since: r.since, brand: brand(r), campaign: campaign(r), href: "/ops/campaigns",
   });
   for (const r of applications.rows) alerts.push({
-    key: `apply:${r.product_id}`, kind: "applications", severity: int(r.n) >= 5 ? "danger" : "warn",
-    title: "Creator applications waiting",
-    detail: `${plural(r.n, "application")} on "${r.title}" unanswered for more than ${applyDays} days.`,
+    key: `apply:${r.product_id}`, fingerprint: fp(r), kind: "applications", severity: int(r.n) >= 5 ? "danger" : "warn",
+    title: `Review ${plural(r.n, "creator application")}`,
+    detail: `${plural(r.n, "creator")} applied to "${r.title}" and ${name(r)} has not accepted or rejected them for over ${applyDays} days.`,
+    action: "Ask the brand to go through the applications; a quick yes/no keeps creators engaged.",
     since: r.since, brand: brand(r), campaign: campaign(r), href: "/ops/campaigns",
   });
   for (const r of trials.rows) {
     const launched = int(r.active_campaigns) > 0;
     const granted = !!r.trial_plan_name;
     alerts.push({
-      key: `trial:${r.user_id}`, kind: "trials", severity: launched ? "info" : "warn",
+      key: `trial:${r.user_id}`, fingerprint: `${new Date(r.trial_expiration_date).toISOString().slice(0, 10)}|${launched ? "launched" : "idle"}`,
+      kind: "trials", severity: launched ? "info" : "warn",
       title: `${granted ? "Granted trial" : "Trial"} ends ${daysUntil(r.trial_expiration_date)}`,
       detail: launched
-        ? `${plural(r.active_campaigns, "active campaign")} running; billing starts when the trial ends.`
-        : "No campaign launched yet: this brand is likely to churn when the trial ends.",
+        ? `${name(r)} has ${plural(r.active_campaigns, "active campaign")}; billing starts when the trial ends.`
+        : `${name(r)} has not launched a campaign yet, so they will probably churn when the trial ends.`,
+      action: launched ? "Make sure they know the first charge is coming and that it is worth it." : "Get them to launch a campaign before the trial ends.",
       since: r.trial_expiration_date, brand: brand(r), href: "/trials",
     });
   }
   for (const r of grace.rows) alerts.push({
-    key: `grace:${r.user_id}`, kind: "trials", severity: "warn",
-    title: `Cancelled, access ends ${daysUntil(r.trial_expiration_date)}`,
-    detail: "Subscription cancelled during the trial. Last chance to win the brand back before access closes.",
+    key: `grace:${r.user_id}`, fingerprint: new Date(r.trial_expiration_date).toISOString().slice(0, 10), kind: "trials", severity: "warn",
+    title: `Win back before access ends ${daysUntil(r.trial_expiration_date)}`,
+    detail: `${name(r)} cancelled the subscription during the trial and still has access until then.`,
+    action: "Reach out now: ask what went wrong and offer help or an extended trial.",
     since: r.trial_expiration_date, brand: brand(r), href: "/users",
   });
   for (const r of purge.rows) alerts.push({
-    key: `purge:${r.user_id}`, kind: "deletion", severity: "info",
+    key: `purge:${r.user_id}`, fingerprint: new Date(r.deletion_scheduled_for).toISOString().slice(0, 10), kind: "deletion", severity: "info",
     title: `Brand purge ${daysUntil(r.deletion_scheduled_for)}`,
-    detail: r.deletion_reason ? `Reason given: ${r.deletion_reason}` : "Hard delete scheduled; restore from Impersonation → Deleted if this is a mistake.",
+    detail: `${name(r)} deleted the account${r.deletion_reason ? ` ("${r.deletion_reason}")` : ""}; the data is hard-deleted on schedule.`,
+    action: "Nothing unless this is a mistake: restore it from Impersonation → Deleted.",
     since: r.deletion_scheduled_for, brand: brand(r), href: "/users",
   });
   for (const r of staleSales.rows) alerts.push({
-    key: `no-sales:${r.product_id}`, kind: "sales", severity: "info",
-    title: "Shipped, no sales yet",
-    detail: `${plural(r.n, "sample")} shipped on "${r.title}" over ${staleSaleDays} days ago and no order has been attributed.`,
+    key: `no-sales:${r.product_id}`, fingerprint: fp(r), kind: "sales", severity: "info",
+    title: "No sales after shipping",
+    detail: `${plural(r.n, "sample")} shipped on "${r.title}" over ${staleSaleDays} days ago and no order has been attributed yet.`,
+    action: "Check the creators posted and that their links work; ask the brand how the content is doing.",
     since: r.since, brand: brand(r), campaign: campaign(r), href: "/ops/campaigns",
   });
 
@@ -164,9 +176,10 @@ export async function buildAlerts({ shipDays = 5, applyDays = 7, trialDays = 3, 
       WHERE ${BRAND_ACTIVE} AND s.status = 'FROZEN' AND COALESCE(s.test, false) = false
       ORDER BY u.id, s.updated DESC`);
     for (const r of rows) alerts.push({
-      key: `frozen:${r.user_id}`, kind: "billing", severity: "danger",
-      title: "Payment failed (subscription frozen)",
-      detail: `Shopify froze the $${num(r.price_amount)} subscription; the brand keeps losing access until the charge succeeds.`,
+      key: `frozen:${r.user_id}`, fingerprint: new Date(r.updated).toISOString().slice(0, 10), kind: "billing", severity: "danger",
+      title: "Fix a failed payment",
+      detail: `Shopify froze ${name(r)}'s $${num(r.price_amount)} subscription because the charge failed; the app stays locked until it succeeds.`,
+      action: "Ask the brand to update the payment method in Shopify.",
       since: r.updated, brand: brand(r), href: "/users",
     });
   }
@@ -174,6 +187,38 @@ export async function buildAlerts({ shipDays = 5, applyDays = 7, trialDays = 3, 
   const rank = { danger: 0, warn: 1, info: 2 };
   alerts.sort((a, b) => rank[a.severity] - rank[b.severity] || new Date(a.since || 0) - new Date(b.since || 0));
   return alerts;
+}
+
+// Dismissals live in the ops database next to ops_admins, so every admin sees
+// the same list. "Done" hides an alert until its fingerprint changes (a new
+// application, a later date); "Snooze" hides it until a date.
+const dismissTableReady = {};
+async function ensureDismissTable(target) {
+  if (!dismissTableReady[target]) {
+    dismissTableReady[target] = cloudSqlQuery(`
+      CREATE TABLE IF NOT EXISTS ops_alert_dismissals (
+        key text PRIMARY KEY,
+        fingerprint text,
+        until timestamptz,
+        by_email text,
+        note text,
+        created timestamptz NOT NULL DEFAULT NOW()
+      )`).catch((e) => { delete dismissTableReady[target]; throw e; });
+  }
+  return dismissTableReady[target];
+}
+
+export async function loadDismissals(target = "prod") {
+  await ensureDismissTable(target);
+  const { rows } = await cloudSqlQuery(`SELECT key, fingerprint, until, by_email, created FROM ops_alert_dismissals`);
+  return new Map(rows.map((r) => [r.key, r]));
+}
+
+// Returns the alert with a `dismissed` reason when a dismissal still applies.
+function applyDismissal(alert, d) {
+  if (!d) return alert;
+  if (d.until) return new Date(d.until) > new Date() ? { ...alert, dismissed: { mode: "snoozed", until: d.until, by: d.by_email } } : alert;
+  return d.fingerprint === alert.fingerprint ? { ...alert, dismissed: { mode: "done", at: d.created, by: d.by_email } } : alert;
 }
 
 function daysUntil(iso) {
@@ -561,15 +606,60 @@ async function globalSearch(q) {
 export function insightsRoutes() {
   const router = Router();
 
+  // GET /alerts            → open alerts (dismissed ones filtered out)
+  // GET /alerts?all=1      → every alert, dismissed ones carry `dismissed`
   router.get("/alerts", async (req, res) => {
     try {
-      const alerts = await buildAlerts({
-        shipDays: int(req.query.shipDays) || undefined,
-        applyDays: int(req.query.applyDays) || undefined,
-        trialDays: int(req.query.trialDays) || undefined,
+      const [alerts, dismissals] = await Promise.all([
+        buildAlerts({
+          shipDays: int(req.query.shipDays) || undefined,
+          applyDays: int(req.query.applyDays) || undefined,
+          trialDays: int(req.query.trialDays) || undefined,
+        }),
+        loadDismissals(req.dbTarget).catch((e) => { console.warn("[insights/alerts] dismissals unavailable:", e.message); return new Map(); }),
+      ]);
+      const withState = alerts.map((a) => applyDismissal(a, dismissals.get(a.key)));
+      const open = withState.filter((a) => !a.dismissed);
+      res.json({
+        alerts: req.query.all === "1" ? withState : open,
+        openCount: open.length,
+        dismissedCount: withState.length - open.length,
+        generatedAt: new Date().toISOString(),
       });
-      res.json({ alerts, generatedAt: new Date().toISOString() });
     } catch (e) { console.error("[insights/alerts]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /alerts/dismiss { keys: [{ key, fingerprint }], mode: "done" | "snooze", days?: 7 }
+  router.post("/alerts/dismiss", async (req, res) => {
+    try {
+      const items = Array.isArray(req.body?.keys) ? req.body.keys.slice(0, 200) : [];
+      const mode = req.body?.mode === "snooze" ? "snooze" : "done";
+      const days = Math.min(Math.max(int(req.body?.days) || 7, 1), 90);
+      if (!items.length) return res.status(400).json({ error: "keys required" });
+      await ensureDismissTable(req.dbTarget);
+      const by = req.admin?.email || null;
+      for (const it of items) {
+        const key = String(it?.key || it || "").slice(0, 200);
+        if (!key) continue;
+        await cloudSqlQuery(`
+          INSERT INTO ops_alert_dismissals (key, fingerprint, until, by_email, created)
+          VALUES ($1, $2, $3, $4, NOW())
+          ON CONFLICT (key) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, until = EXCLUDED.until, by_email = EXCLUDED.by_email, created = NOW()`,
+          [key, mode === "done" ? String(it?.fingerprint || "") : null, mode === "snooze" ? new Date(Date.now() + days * 86_400_000).toISOString() : null, by]);
+      }
+      res.json({ ok: true, count: items.length, mode });
+    } catch (e) { console.error("[insights/alerts/dismiss]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /alerts/restore { keys: [key] }
+  router.post("/alerts/restore", async (req, res) => {
+    try {
+      const keys = (Array.isArray(req.body?.keys) ? req.body.keys : []).map((k) => String(k?.key || k)).filter(Boolean).slice(0, 200);
+      if (!keys.length) return res.status(400).json({ error: "keys required" });
+      await ensureDismissTable(req.dbTarget);
+      await cloudSqlQuery(`DELETE FROM ops_alert_dismissals WHERE key = ANY($1)`, [keys]);
+      res.json({ ok: true, count: keys.length });
+    } catch (e) { console.error("[insights/alerts/restore]", e); res.status(500).json({ error: e.message }); }
   });
 
   router.get("/brand/:userId", async (req, res) => {

@@ -6,7 +6,7 @@ import { Skeleton, SkeletonStat, SkeletonBars, SkeletonListRows } from "../compo
 import { Sparkline } from "../components/ui/Sparkline";
 import { deltaLabel } from "../lib/delta";
 import { AlertRow } from "../components/alerts/AlertRow";
-import { isSnoozed } from "../lib/alerts";
+import { ALERTS_CHANGED } from "../lib/alerts";
 import { Link } from "react-router-dom";
 
 const RANGES = [["30d", "30 days"], ["90d", "90 days"], ["12m", "12 months"], ["all", "All time"]];
@@ -114,10 +114,12 @@ export default function HomePage() {
   }, [range, target, seriesKey]);
   useEffect(() => {
     let alive = true;
-    api.getAlerts()
-      .then((d) => alive && setAlertsCache((c) => ({ ...c, [target]: (d.alerts || []).filter((a) => !isSnoozed(a.key)) })))
+    const refresh = () => api.getAlerts()
+      .then((d) => alive && setAlertsCache((c) => ({ ...c, [target]: d.alerts || [] })))
       .catch(() => alive && setAlertsCache((c) => ({ ...c, [target]: [] })));
-    return () => { alive = false; };
+    refresh();
+    window.addEventListener(ALERTS_CHANGED, refresh);
+    return () => { alive = false; window.removeEventListener(ALERTS_CHANGED, refresh); };
   }, [target]);
   const pickRange = (r) => { setRange(r); try { localStorage.setItem("lk-home-range", r); } catch { /* ignore */ } };
   const spark = (key) => series?.buckets?.map((b) => b[key]);
