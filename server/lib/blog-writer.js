@@ -16,9 +16,11 @@ import { findHeroPhoto } from "./blog-images.js";
 const MODEL = process.env.BLOG_MODEL || "claude-sonnet-5";
 const MAX_COST_USD = Number(process.env.BLOG_MAX_COST_USD) || 0.10;
 const MAX_READ_MINUTES = 6;
-// Vercel functions are capped at 60 s (vercel.json maxDuration): retries only
-// happen while another attempt is expected to finish inside the deadline.
-const DEADLINE_MS = Number(process.env.BLOG_DEADLINE_MS) || 50_000;
+// The function ceiling is 300 s (vercel.json maxDuration). The loop makes at
+// most three attempts at roughly 45 s each, plus a repair pass, so 150 s is all
+// it can use; the rest is margin for the hero photo, the insert and the rebuild
+// trigger. Retries only start while another attempt is expected to fit.
+const DEADLINE_MS = Number(process.env.BLOG_DEADLINE_MS) || 150_000;
 // USD per million tokens (input, output, cache write, cache read)
 const PRICES = {
   "claude-sonnet-5": { in: 2, out: 10, cw: 2.5, cr: 0.2 },
@@ -312,8 +314,8 @@ async function pickNextTopic() {
 // fine but its title collides with an existing one.
 // Most rejected drafts fail on mechanical rules: a banned word, one H2 too many,
 // a title a few characters long. Regenerating the whole article costs another 38
-// seconds, which never fits the function's 60 second ceiling, so the retry loop
-// could never actually run. This asks only for the parts that need changing:
+// seconds, so it is still the fallback when a rewrite no longer fits the budget.
+// This asks only for the parts that need changing:
 // a few hundred output tokens, a few seconds, and it keeps the article that was
 // otherwise fine. Returns { article, cost } with the edits applied.
 const RepairSchema = z.object({
