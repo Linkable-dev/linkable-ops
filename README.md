@@ -38,3 +38,27 @@ rules before it is saved.
 - Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `BLOG_ANTHROPIC_API_KEY` (dedicated key
   for article generation; falls back to `ANTHROPIC_API_KEY`), `CRON_SECRET`, `PEXELS_API_KEY`, optional `GITHUB_TOKEN`
   (fine-grained token with Contents: read/write on the landing repo, used for `repository_dispatch`) and `LANDING_REPO`.
+
+## Filling an empty campaign
+
+`server/lib/campaign-matchmaking.js` ranks the creator base against one
+campaign. "No applications" is one of the three quick filters on Campaign
+Operations — a known way for a campaign to die, and the only one the console
+could find but not act on.
+
+`GET /api/ops/campaigns/:id/creator-matches` scores every creator not already
+attached to that campaign out of 100: niche fit (35, brands and creators pick
+from the same vocabulary), track record (25, accepted before / has sold),
+audience (20, reach discounted at the dead-follower end and weighted by
+engagement), whether a sample can physically reach them (10) and how recently
+they signed in (10). Every ranking carries the reasons behind it. The **Find
+creators** button in the Bottleneck column opens the shortlist.
+
+It is read-only and invites nobody: sending invitations writes to `links` and
+notifies creators, so that stays a deliberate, separate step.
+
+Two things the data makes non-obvious, both pinned by tests:
+`brands.location` is not a country but the pipe-separated list of ISO-2 codes
+the brand ships to (sometimes thousands of characters, `*` for everywhere),
+while creators store a full country name — comparing them directly awards
+nothing on the 12 of 13 active campaigns that ship a sample.

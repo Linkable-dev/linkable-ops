@@ -21,6 +21,9 @@ import { outboundRoutes } from "../routes/outbound.js";
 import { adminUsersRoutes } from "../routes/admin-users.js";
 import { closeCloudSql } from "../lib/cloudsql.js";
 import { wordCount, readMinutes, validateArticle, LIMITS } from "../lib/blog-writer.js";
+import {
+  WEIGHTS, audienceScore, scoreCreator, parseShippingCountries, countryToIso,
+} from "../lib/campaign-matchmaking.js";
 
 let server, base;
 
@@ -368,5 +371,71 @@ describe("blog article rules", () => {
     const body = Array.from({ length: 70 }, () => ({ type: "p", text: "word ".repeat(10) }));
     const withDash = validateArticle({ title: "x".repeat(50), excerpt: "e", metaDescription: "m".repeat(130), blocks: [...body, { type: "p", text: "an em dash — here" }], faqs: [] });
     assert.ok(withDash.some((p) => p.includes("dash")), "an em dash passed the style check");
+  });
+});
+
+describe("campaign matchmaking", { timeout: 120_000 }, () => {
+  test("the weights sum to 100, so a score reads as a percentage", () => {
+    assert.equal(Object.values(WEIGHTS).reduce((a, b) => a + b, 0), 100);
+  });
+
+  test("a score can never leave 0-100 whatever the inputs", () => {
+    const ctx = { shipping: true, brandNiche: "HEALTH_WELLNESS", shipsTo: new Set(["GB"]) };
+    const inputs = [
+      { niche: "HEALTH_WELLNESS", followers: "50000", engagement_rate: "6", country: "United Kingdom", accepted_campaigns: 9, sales: 9, last_sign_in: new Date().toISOString() },
+      { niche: null, followers: null, engagement_rate: null, country: null, accepted_campaigns: 0, sales: 0, last_sign_in: null },
+      { niche: "PETS", followers: "-5", engagement_rate: "-3", country: "Nowhere", accepted_campaigns: -1, sales: -1, last_sign_in: "not a date" },
+      { niche: "HEALTH_WELLNESS", followers: "999999999", engagement_rate: "100", country: "GB", accepted_campaigns: 1, sales: 1, last_sign_in: new Date().toISOString() },
+    ];
+    for (const c of inputs) {
+      const { score } = scoreCreator(c, ctx);
+      assert.ok(score >= 0 && score <= 100, `score ${score} out of range for ${JSON.stringify(c)}`);
+    }
+  });
+
+  test("audience score stays inside its own weight", () => {
+    for (const [f, er] of [[0, 0], [500, 1], [50_000, 6], [5_000_000, 9], ["12,000", "3.5"], [null, null]]) {
+      const v = audienceScore(f, er);
+      assert.ok(v >= 0 && v <= WEIGHTS.audience, `audienceScore(${f}, ${er}) = ${v}`);
+    }
+  });
+
+  test("a brand's shipping list is read as country codes, not as a country", () => {
+    // brands.location is a pipe-separated ISO-2 list, occasionally thousands of
+    // characters long. Treating it as a single country awarded nothing on the
+    // 12 of 13 active campaigns that ship a sample.
+    const parsed = parseShippingCountries("GB | AT | BE | BG | HR");
+    assert.ok(parsed instanceof Set);
+    assert.ok(parsed.has("GB") && parsed.has("HR"));
+    assert.equal(parseShippingCountries("CA | US | * | AU"), "everywhere");
+    assert.equal(parseShippingCountries(""), null, "blank is unknown, not 'ships nowhere'");
+    assert.equal(parseShippingCountries(null), null);
+  });
+
+  test("creator country names resolve to the codes the shipping list uses", () => {
+    assert.equal(countryToIso("United Kingdom"), "GB");
+    assert.equal(countryToIso("United States"), "US");
+    assert.equal(countryToIso("US"), "US", "some rows already hold a code");
+    assert.equal(countryToIso("Atlantis"), null, "unknown is null, never a wrong code");
+    assert.equal(countryToIso(""), null);
+  });
+
+  test("the shortlist never suggests somebody already on the campaign", async () => {
+    const list = await get("/ops/campaigns?limit=1");
+    const campaign = list.rows[0];
+    if (!campaign) return;
+    const [matches, existing] = await Promise.all([
+      get(`/ops/campaigns/${campaign.id}/creator-matches?limit=25`),
+      get(`/ops/campaigns/${campaign.id}/creators`),
+    ]);
+    const already = new Set((existing.rows || existing || []).map((r) => r.creator_user_id || r.influencer_user_id));
+    for (const m of matches.matches) {
+      assert.ok(!already.has(m.user_id), `${m.name} is already on the campaign`);
+      assert.ok(m.score >= 0 && m.score <= 100);
+      assert.ok(Array.isArray(m.reasons) && m.reasons.length > 0, "every ranking needs a reason");
+    }
+    // Ranked, best first.
+    const scores = matches.matches.map((m) => m.score);
+    assert.deepEqual(scores, [...scores].sort((a, b) => b - a), "matches are not in rank order");
   });
 });

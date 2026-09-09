@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
 import { parseColumnFilters, filterConditions, textFilter } from "../lib/tableQuery.js";
+import { creatorMatches } from "../lib/campaign-matchmaking.js";
 
 // Link status enum (from main proto):
 //   0=unset
@@ -248,6 +249,22 @@ export function opsRoutes() {
       res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir, quick });
     } catch (e) {
       console.error("[ops/campaigns]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/ops/campaigns/:id/creator-matches?limit=
+  // The creator base ranked against this campaign, with the reason for each
+  // ranking. Read-only: it produces a shortlist, it does not invite anybody.
+  router.get("/campaigns/:id/creator-matches", async (req, res) => {
+    try {
+      if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+      const data = await creatorMatches(req.params.id, { limit });
+      if (!data) return res.status(404).json({ error: "Campaign not found" });
+      res.json(data);
+    } catch (e) {
+      console.error("[ops/creator-matches]", e);
       res.status(500).json({ error: e.message });
     }
   });
