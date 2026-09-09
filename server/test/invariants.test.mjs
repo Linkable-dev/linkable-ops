@@ -457,6 +457,9 @@ describe("outbound revenue attribution", { timeout: 120_000 }, () => {
       const signups = a[key].reduce((n, r) => n + r.signups, 0);
       assert.equal(signups, a.totals.signups, `${key} covers ${signups} of ${a.totals.signups} signups`);
     }
+  });
+});
+
 describe("campaign matchmaking", { timeout: 120_000 }, () => {
   test("the weights sum to 100, so a score reads as a percentage", () => {
     assert.equal(Object.values(WEIGHTS).reduce((a, b) => a + b, 0), 100);
@@ -520,6 +523,9 @@ describe("campaign matchmaking", { timeout: 120_000 }, () => {
     // Ranked, best first.
     const scores = matches.matches.map((m) => m.score);
     assert.deepEqual(scores, [...scores].sort((a, b) => b - a), "matches are not in rank order");
+  });
+});
+
 describe("brand health", { timeout: 120_000 }, () => {
   test("the weights sum to 100", () => {
     assert.equal(Object.values(HEALTH_WEIGHTS).reduce((a, b) => a + b, 0), 100);
@@ -561,6 +567,9 @@ describe("brand health", { timeout: 120_000 }, () => {
     for (const b of h.all) assert.ok(b.score >= 0 && b.score <= 100);
     assert.equal(h.totals.bands.healthy + h.totals.bands.watch + h.totals.bands["at risk"], h.totals.brands,
       "every brand must fall in exactly one band");
+  });
+});
+
 describe("sender deliverability", { timeout: 120_000 }, () => {
   test("a handful of sends is never enough to pause an inbox", () => {
     // 1 bounce out of 3 is 33% and means nothing. Pausing on that would take
