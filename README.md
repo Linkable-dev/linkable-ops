@@ -65,3 +65,22 @@ situation changes.
   and `NUDGE_REPLY_TO`. Both must be on a Resend-verified domain; the default
   is the address the team already triages replies in. Drafting uses
   `ANTHROPIC_API_KEY` at roughly half a cent per draft.
+## Outbound revenue attribution
+
+`server/lib/outbound-attribution.js` joins the outbound machine to the revenue
+it produced. Prospects and sends live in Supabase, customers and subscriptions
+in Cloud SQL, and there is no key between them, so the join is made on the two
+things both sides record: the shop's domain and the contact's email address. A
+signup counts only when it came *after* the first email to that brand;
+everything else is reported separately as "already customers".
+
+- `GET /api/outbound/attribution` — the funnel (sends → contacted → signed up →
+  paying → MRR) plus splits by segment, sender and template. Shown at the top of
+  the Outbound page.
+- `POST /api/outbound/attribution/refresh` — recompute now. Also runs on the
+  daily outbound cron tick, where a failure is logged rather than raised so it
+  can never block a send.
+- Results are cached in `ops_outbound_conversions` (Cloud SQL, created on first
+  use beside the app's other ops-owned tables).
+- `normalizeDomain()` is the join. Its behaviour is pinned by unit tests, since
+  a drift there would report zero conversions with nothing else failing.

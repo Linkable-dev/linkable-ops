@@ -13,6 +13,7 @@ import { TabBar } from "../components/ui/TabBar";
 import { Pagination } from "../components/ui/Pagination";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
 import { useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter } from "../components/table/tableTools";
+import AttributionPanel from "../components/outbound/AttributionPanel";
 
 const STATUS_TINTS = {
   active:   { bg: "#D1FAE5", fg: "#065F46" },
@@ -159,6 +160,8 @@ export default function AiCampaignsPage() {
           onCreated={() => { setCreating(false); reload(); loadCounts(); }}
         />
       )}
+
+      <AttributionPanel />
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 4 }}>
         <TabBar
