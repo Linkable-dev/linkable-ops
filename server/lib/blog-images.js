@@ -1,16 +1,20 @@
-/* global process */
-// Stock photos for article heroes, via the Pexels API (PEXELS_API_KEY).
+// Stock photos for article heroes, via the Pexels API.
+//
+// Runtime agnostic like blog-core.js: the key can be passed in, which is how the
+// Supabase Edge Function supplies it, and otherwise falls back to the Node
+// environment so existing callers did not have to change.
 // Returns hero objects the landing-page renderer understands:
 //   { provider, id, alt, width, height, src, srcset:[{url,w}], credit:{name,url}, page, query }
 // The landing repo downloads the files so the site never hotlinks.
 const API = "https://api.pexels.com/v1/search";
 
-export function pexelsEnabled() { return Boolean(process.env.PEXELS_API_KEY); }
+const envKey = () => globalThis.process?.env?.PEXELS_API_KEY;
+export function pexelsEnabled(apiKey = envKey()) { return Boolean(apiKey); }
 
-export async function searchPhotos(query, { perPage = 12, page = 1 } = {}) {
-  if (!pexelsEnabled()) { const e = new Error("PEXELS_API_KEY not set; add it to enable photo search"); e.status = 503; throw e; }
+export async function searchPhotos(query, { perPage = 12, page = 1, apiKey = envKey() } = {}) {
+  if (!pexelsEnabled(apiKey)) { const e = new Error("PEXELS_API_KEY not set; add it to enable photo search"); e.status = 503; throw e; }
   const url = `${API}?query=${encodeURIComponent(query)}&orientation=landscape&size=large&per_page=${perPage}&page=${page}`;
-  const res = await fetch(url, { headers: { Authorization: process.env.PEXELS_API_KEY } });
+  const res = await fetch(url, { headers: { Authorization: apiKey } });
   if (!res.ok) { const e = new Error(`Pexels ${res.status}: ${await res.text()}`); e.status = 502; throw e; }
   const data = await res.json();
   return (data.photos || []).map((p) => toHero(p, query));
@@ -29,11 +33,11 @@ function toHero(p, query) {
 }
 
 // Best landscape photo for an article that is not already used by another post.
-export async function findHeroPhoto(query, { exclude = [] } = {}) {
-  if (!pexelsEnabled()) return null;
+export async function findHeroPhoto(query, { exclude = [], apiKey = envKey() } = {}) {
+  if (!pexelsEnabled(apiKey)) return null;
   const skip = new Set(exclude.map(String));
   for (const q of [query, query.split(/\s+/).slice(0, 2).join(" "), "ecommerce creator content"]) {
-    const photos = await searchPhotos(q, { perPage: 15 });
+    const photos = await searchPhotos(q, { perPage: 15, apiKey });
     const pick = photos.find((p) => !skip.has(String(p.id)) && p.aspect >= 0.5 && p.aspect <= 0.8) || photos.find((p) => !skip.has(String(p.id)));
     if (pick) { delete pick.thumb; delete pick.aspect; return pick; }
   }

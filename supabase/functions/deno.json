@@ -1,0 +1,9 @@
+{
+  "_comment": "Lets Deno resolve the bare imports in server/lib/blog-core.js, which is shared with the Node server. Versions are pinned to match server/package.json.",
+  "imports": {
+    "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@0.124.0",
+    "@anthropic-ai/sdk/": "npm:/@anthropic-ai/sdk@0.124.0/",
+    "zod": "npm:zod@4.5.4",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.101.0"
+  }
+}

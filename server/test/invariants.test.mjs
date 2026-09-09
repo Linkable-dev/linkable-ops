@@ -12,6 +12,7 @@
 import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
+import fs from "node:fs";
 
 import { analyticsRoutes } from "../routes/analytics.js";
 import { opsRoutes } from "../routes/ops.js";
@@ -322,6 +323,19 @@ describe("admin lists", { timeout: 120_000 }, () => {
         `${r.email} carries the -infinity sentinel, which is not a real deletion`);
       if (r.days_until_purge !== null) assert.ok(r.days_until_purge >= 0, "negative days until purge");
     }
+  });
+});
+
+// The Supabase Edge Function cannot read loose files, so the prompt data is
+// bundled into a JSON module. This fails if someone edits style.md or facts.md
+// without re-running scripts/build-edge-blog-data.mjs, which would leave the
+// daily article generating from a stale prompt.
+describe("edge function prompt data", () => {
+  test("the committed bundle matches server/data/blog", async () => {
+    const { buildPromptData, serialise, OUT } = await import("../../scripts/build-edge-blog-data.mjs");
+    const onDisk = fs.readFileSync(OUT, "utf8");
+    assert.equal(onDisk, serialise(buildPromptData()),
+      "supabase/functions/_shared/prompt-data.json is stale; run `npm run blog:build-data`");
   });
 });
 

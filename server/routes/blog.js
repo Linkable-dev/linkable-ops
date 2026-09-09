@@ -2,7 +2,7 @@
 // (blog_posts / blog_topics, migration 018). Mounted with requireOpsAdmin.
 import express from "express";
 import { blogDb as supabase } from "../lib/blog-supabase.js";
-import { generatePost, proposeTopics, triggerSiteRebuild, validateArticle, wordCount, readMinutes, slugify, IMAGE_POOL } from "../lib/blog-writer.js";
+import { generatePost, edgeEnabled, generateViaEdge, proposeTopics, triggerSiteRebuild, validateArticle, wordCount, readMinutes, slugify, IMAGE_POOL } from "../lib/blog-writer.js";
 import { searchPhotos } from "../lib/blog-images.js";
 
 const EDITABLE = ["slug", "title", "description", "excerpt", "category", "keyword", "status", "author_name", "hero_image_id", "hero_image_alt", "hero_image", "blocks", "faqs", "published_at"];
@@ -93,6 +93,10 @@ export function blogRoutes() {
   // body: { topicId?, keyword?, angle?, category?, publish? }
   router.post("/generate", async (req, res) => {
     try {
+      if (edgeEnabled()) {
+        const r = await generateViaEdge({ ...req.body, createdBy: req.admin?.email || null });
+        return res.status(r.running ? 202 : 201).json(r);
+      }
       const post = await generatePost({ ...req.body, createdBy: req.admin?.email || null });
       let rebuild = null;
       if (post.status === "published") rebuild = await triggerSiteRebuild(`published ${post.slug}`).catch((e) => ({ triggered: false, note: e.message }));
