@@ -41,3 +41,5 @@ supabase/.temp/
 
 # Written by whichever Deno runs locally; the Supabase bundler ships its own.
 supabase/functions/deno.lock
+
+.vercel

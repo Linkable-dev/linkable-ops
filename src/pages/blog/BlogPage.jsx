@@ -167,12 +167,22 @@ export default function BlogPage() {
         </div>
       </Modal>
 
-      <NewArticleModal open={newOpen} onClose={() => setNewOpen(false)} onManual={() => { setNewOpen(false); navigate("/blog/new"); }} onDone={(post) => { setNewOpen(false); navigate(`/blog/${post.id}`); }} />
+      <NewArticleModal
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        onManual={() => { setNewOpen(false); navigate("/blog/new"); }}
+        onDone={(post) => { setNewOpen(false); navigate(`/blog/${post.id}`); }}
+        onStarted={() => {
+          setNewOpen(false);
+          setNotice("Writing the article on Supabase. It will appear here in a minute or so.");
+          setTimeout(load, 45_000);
+        }}
+      />
     </div>
   );
 }
 
-function NewArticleModal({ open, onClose, onManual, onDone }) {
+function NewArticleModal({ open, onClose, onManual, onDone, onStarted }) {
   const { theme: t } = useTheme();
   const [step, setStep] = useState("choose"); // choose | ai | topics
   const [topics, setTopics] = useState([]);
@@ -192,8 +202,11 @@ function NewArticleModal({ open, onClose, onManual, onDone }) {
     try {
       const body = topicId ? { topicId, publish } : { keyword: keyword.trim(), angle: angle.trim(), publish };
       if (!body.topicId && !body.keyword) throw new Error("Pick a topic or type a keyword");
-      const { post } = await api.generateBlogPost(body);
-      onDone(post);
+      const res = await api.generateBlogPost(body);
+      // Generation runs on Supabase, which outlives this request, so the usual
+      // answer is "started". The article appears in the list a minute later.
+      if (res.running || !res.post) onStarted();
+      else onDone(res.post);
     } catch (e) { setError(e.message); }
     finally { setRunning(false); }
   };

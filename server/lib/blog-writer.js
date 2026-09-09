@@ -34,7 +34,7 @@ initBlogCore({
 // again, which is what the tests and local development do.
 export const edgeEnabled = () => Boolean(process.env.BLOG_EDGE_URL && process.env.BLOG_CRON_SECRET);
 
-export async function generateViaEdge(body = {}, { timeoutMs = 50_000 } = {}) {
+export async function generateViaEdge(body = {}, { timeoutMs = 12_000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -49,8 +49,10 @@ export async function generateViaEdge(body = {}, { timeoutMs = 50_000 } = {}) {
     if (!res.ok) throw new Error(data.error || `blog edge function returned ${res.status}`);
     return data;
   } catch (e) {
-    // Losing patience here does not lose the article: Supabase carries on and
-    // the row appears when it is done.
+    // Losing patience here does not lose the article: Supabase carries on after
+    // the caller disconnects and the row appears when it is done. Waiting is
+    // only worth a few seconds, because this process runs under a 60 second
+    // ceiling and an article takes about forty.
     if (e.name === "AbortError") return { ok: true, running: true, note: "still generating on Supabase, the article will appear shortly" };
     throw e;
   } finally {
