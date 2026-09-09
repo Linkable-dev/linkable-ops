@@ -28,6 +28,7 @@ import {
 import { HEALTH_WEIGHTS, scoreBrand } from "../lib/brand-health.js";
 import { verdictFor, THRESHOLDS } from "../lib/deliverability.js";
 import { isEmailable, EMAILABLE_KINDS } from "../lib/nudge-writer.js";
+import { selectTargets, LIMITS as NUDGE_LIMITS } from "../lib/auto-nudge.js";
 
 let server, base;
 
@@ -685,5 +686,70 @@ describe("hidden brands are not the live marketplace", { timeout: 180_000 }, () 
     const home = await get("/analytics/home");
     assert.ok(home.funnel.signedUp <= (visible || []).length + hiddenIds.size,
       "the funnel counts more brands than exist");
+  });
+});
+
+describe("automatic nudging", { timeout: 120_000 }, () => {
+  const old = new Date(Date.now() - 10 * 86_400_000).toISOString();
+  const brand = { user_id: "b1", email: "a@b.com", store_name: "Acme" };
+  const alert = (over = {}) => ({ key: "k1", kind: "shipping", fingerprint: "f", since: old, brand, ...over });
+  const ON = [{ kind: "shipping", auto: true, min_age_hours: 24 }];
+
+  test("nothing is chased until a kind is switched on", () => {
+    const off = [{ kind: "shipping", auto: false, min_age_hours: 24 }];
+    assert.deepEqual(selectTargets({ alerts: [alert()], rules: off }), []);
+    assert.deepEqual(selectTargets({ alerts: [alert()], rules: [] }), []);
+  });
+
+  test("a kind that is on is chased", () => {
+    const t = selectTargets({ alerts: [alert()], rules: ON });
+    assert.equal(t.length, 1);
+    assert.equal(t[0].brand.email, "a@b.com");
+  });
+
+  test("an operator marking it done or snoozing it stops the robot", () => {
+    const done = new Map([["k1", { fingerprint: "f", until: null }]]);
+    assert.deepEqual(selectTargets({ alerts: [alert()], rules: ON, dismissals: done }), []);
+    const snoozed = new Map([["k1", { until: new Date(Date.now() + 86_400_000).toISOString() }]]);
+    assert.deepEqual(selectTargets({ alerts: [alert()], rules: ON, dismissals: snoozed }), []);
+  });
+
+  test("a human gets first refusal — nothing fresh is chased", () => {
+    const fresh = alert({ since: new Date().toISOString() });
+    assert.deepEqual(selectTargets({ alerts: [fresh], rules: ON }), []);
+  });
+
+  test("a brand recently written to is left alone", () => {
+    const t = selectTargets({ alerts: [alert()], rules: ON, alreadyNudged: new Set(["b1"]) });
+    assert.deepEqual(t, []);
+  });
+
+  test("a kind that must never be emailed is refused even if a rule says otherwise", () => {
+    // Defence in depth: the rules table cannot store these, but if one ever
+    // arrived the selector still drops it.
+    const rules = [{ kind: "deletion", auto: true, min_age_hours: 1 }];
+    const purge = alert({ kind: "deletion", key: "k2" });
+    assert.deepEqual(selectTargets({ alerts: [purge], rules }), []);
+  });
+
+  test("one brand gets one entry however many alerts it has", () => {
+    const many = [alert({ key: "a" }), alert({ key: "b" }), alert({ key: "c" })];
+    const t = selectTargets({ alerts: many, rules: ON });
+    assert.equal(t.length, 1, "three alerts for one brand must be one email");
+    assert.equal(t[0].alerts.length, 3);
+  });
+
+  test("a run is capped however many brands qualify", () => {
+    const lots = Array.from({ length: NUDGE_LIMITS.brandsPerRun + 15 }, (_, i) =>
+      alert({ key: `k${i}`, brand: { user_id: `b${i}`, email: `b${i}@x.com` } }));
+    assert.equal(selectTargets({ alerts: lots, rules: ON }).length, NUDGE_LIMITS.brandsPerRun);
+  });
+
+  test("nothing is switched on in production right now", async () => {
+    const { rules } = await get("/insights/nudge-rules");
+    assert.ok(Array.isArray(rules) && rules.length > 0);
+    for (const r of rules) {
+      assert.equal(r.auto, false, `${r.kind} is chasing brands automatically`);
+    }
   });
 });

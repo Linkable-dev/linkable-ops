@@ -11,6 +11,7 @@ import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { blogDb } from "../lib/blog-supabase.js";
 import { commissionEarnedSql } from "../lib/mainAppSql.js";
 import { draftNudge, isEmailable } from "../lib/nudge-writer.js";
+import { loadRules, setRule, LIMITS as NUDGE_LIMITS } from "../lib/auto-nudge.js";
 import { sendNudgeEmail, nudgeFrom, nudgeReplyTo } from "../lib/nudge-mailer.js";
 import { brandHealth, loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
 import { inboxHealth } from "../lib/deliverability.js";
@@ -1042,6 +1043,25 @@ export function insightsRoutes() {
       }));
       res.json(await snapshotHealth(scored));
     } catch (e) { console.error("[insights/health/snapshot]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /nudge-rules — which alert kinds chase on their own. All off by default.
+  router.get("/nudge-rules", async (_req, res) => {
+    try { res.json({ limits: NUDGE_LIMITS, rules: await loadRules() }); }
+    catch (e) { console.error("[insights/nudge-rules]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /nudge-rules { kind, auto, minAgeHours }
+  router.post("/nudge-rules", async (req, res) => {
+    try {
+      const rules = await setRule({
+        kind: String(req.body?.kind || ""),
+        auto: req.body?.auto === true,
+        minAgeHours: req.body?.minAgeHours,
+        by: req.admin?.email || null,
+      });
+      res.json({ limits: NUDGE_LIMITS, rules });
+    } catch (e) { console.error("[insights/nudge-rules]", e); res.status(400).json({ error: e.message }); }
   });
 
   router.get("/brand/:userId", async (req, res) => {

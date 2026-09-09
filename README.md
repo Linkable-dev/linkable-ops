@@ -147,3 +147,37 @@ back on is deliberate and manual.
 `GET /api/outbound/inbox-health` reports every inbox with its verdict, and both
 an at-risk and an auto-paused inbox raise an alert under **Sending** — a log
 nobody reads is not a safeguard.
+
+## The morning brief
+
+`server/lib/morning-brief.js` is the one push in an otherwise pull-only
+console: everything else waits for somebody to remember to open it. Emailed to
+every `ops_admins` address (or `BRIEF_TO` if set) at 06:30 UTC on weekdays.
+
+The rule it follows is that every line names something — a brand, a campaign,
+a number that moved. Danger alerts with the brand attached, creators waiting on
+a sample nobody sent, paying brands whose health score fell overnight, what
+arrived in the last 24 hours, and any sending inbox in trouble. A digest of
+totals with no names in it is the kind nobody reads twice.
+
+Links point at `OPS_URL`, falling back to Vercel's injected production domain.
+With neither set the brief prints no links rather than guessing a host.
+`GET /api/cron/morning-brief?dry=1` renders it without sending.
+
+## Chasing brands automatically
+
+`server/lib/auto-nudge.js` lets the safe alert kinds chase a brand with no
+operator in the loop. **Everything is off until somebody turns it on**, per
+kind, from *Automatic* on the Alerts page — a fresh database sends nothing.
+
+Only `shipping`, `applications` and `sales` can ever be automated; anything
+touching money, a trial or an account is not offered, and the emailable
+allow-list refuses it a second time inside the selector. Ceilings that apply
+whatever the rules say: at most 10 brands a run, a brand hears from it at most
+once every 7 days however many alerts it accumulates, and an alert is only
+chased once it has been open long enough for a human to have got there first.
+Marking an alert done or snoozing it stops the robot on that alert.
+
+An automatic nudge is indistinguishable from a hand-sent one afterwards except
+by `by_email` on `ops_brand_nudges` — both go through the same
+`sendBrandNudge()`, land in the same log, and close the same alerts.

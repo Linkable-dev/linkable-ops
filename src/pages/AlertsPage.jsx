@@ -10,6 +10,7 @@ import { Skeleton, SkeletonStatGrid, SkeletonListRows } from "../components/ui/S
 import { BrandLink } from "../components/brand/BrandLink";
 import { SEVERITY, notifyAlertsChanged } from "../lib/alerts";
 import NudgeModal from "../components/alerts/NudgeModal";
+import AutoNudgeSettings from "../components/alerts/AutoNudgeSettings";
 
 const KINDS = [["all", "Everything"], ["shipping", "Samples"], ["applications", "Applications"], ["trials", "Trials"], ["billing", "Billing"], ["sales", "Sales"], ["deliverability", "Sending"], ["deletion", "Deletion"]];
 const SEV_ORDER = { danger: 0, warn: 1, info: 2 };
@@ -38,6 +39,7 @@ export default function AlertsPage() {
   const [actionError, setActionError] = useState(null);
   const [nudgeAlert, setNudgeAlert] = useState(null); // alert whose nudge dialog is open
   const [nudgeSent, setNudgeSent] = useState(null);   // { to } after a send
+  const [showAuto, setShowAuto] = useState(false);    // automatic-chase settings
   const scope = showDismissed ? "all" : "open";
   const cacheKey = `${target}:${scope}`;
   const entry = results[cacheKey];
@@ -141,6 +143,7 @@ export default function AlertsPage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {data && <span style={{ fontSize: 12, color: theme.textMuted }}>checked {friendlyDate(data.generatedAt)}</span>}
+          <Btn size="sm" variant={showAuto ? "solid" : "outline"} onClick={() => setShowAuto((v) => !v)} title="Choose which alert kinds chase brands on their own">Automatic</Btn>
           <Btn size="sm" variant="outline" onClick={() => fetchAlerts()} disabled={loading}>Refresh</Btn>
         </div>
       </div>
@@ -189,6 +192,8 @@ export default function AlertsPage() {
           <input type="checkbox" checked={showDismissed} onChange={(e) => setShowDismissed(e.target.checked)} /> show done &amp; snoozed
         </label>
       </div>
+
+      {showAuto && <AutoNudgeSettings onClose={() => setShowAuto(false)} />}
 
       {nudgeSent && (
         <Card style={{ borderColor: "#86EFAC", marginBottom: 12 }}>

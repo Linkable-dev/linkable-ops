@@ -83,6 +83,10 @@ export const api = {
   // once the operator has read it.
   // One or many keys; several must belong to the same brand and become one email.
   draftNudge: (keys) => request("/insights/alerts/draft", { method: "POST", body: JSON.stringify({ keys: [].concat(keys) }) }),
+  // Which alert kinds chase brands automatically (all off until switched on).
+  getNudgeRules: () => request("/insights/nudge-rules"),
+  setNudgeRule: (kind, auto, minAgeHours) =>
+    request("/insights/nudge-rules", { method: "POST", body: JSON.stringify({ kind, auto, minAgeHours }) }),
   sendNudge: ({ keys, subject, body, alsoDone }) =>
     request("/insights/alerts/send", { method: "POST", body: JSON.stringify({ keys: [].concat(keys), subject, body, alsoDone }) }),
   getSavedMetrics: () => request("/insights/metrics"),
