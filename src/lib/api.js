@@ -79,6 +79,11 @@ export const api = {
   getAlerts: ({ all } = {}) => request(`/insights/alerts${all ? "?all=1" : ""}`),
   dismissAlerts: (keys, mode = "done", days) => request("/insights/alerts/dismiss", { method: "POST", body: JSON.stringify({ keys, mode, days }) }),
   restoreAlerts: (keys) => request("/insights/alerts/restore", { method: "POST", body: JSON.stringify({ keys }) }),
+  // Writes the nudge email for one alert. Sends nothing — sendNudge does that
+  // once the operator has read it.
+  draftNudge: (key) => request("/insights/alerts/draft", { method: "POST", body: JSON.stringify({ key }) }),
+  sendNudge: ({ key, subject, body, alsoDone }) =>
+    request("/insights/alerts/send", { method: "POST", body: JSON.stringify({ key, subject, body, alsoDone }) }),
   getSavedMetrics: () => request("/insights/metrics"),
   saveMetric: (body) => request("/insights/metrics", { method: "POST", body: JSON.stringify(body) }),
   deleteMetric: (id) => request(`/insights/metrics/${id}`, { method: "DELETE" }),

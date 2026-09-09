@@ -38,3 +38,30 @@ rules before it is saved.
 - Environment variables: `BLOG_SUPABASE_URL`, `BLOG_SUPABASE_SERVICE_ROLE_KEY`, `BLOG_ANTHROPIC_API_KEY` (dedicated key
   for article generation; falls back to `ANTHROPIC_API_KEY`), `CRON_SECRET`, `PEXELS_API_KEY`, optional `GITHUB_TOKEN`
   (fine-grained token with Contents: read/write on the landing repo, used for `repository_dispatch`) and `LANDING_REPO`.
+
+## Alerts: sending the nudge
+
+The **Alerts** page can write and send the chase email for an alert instead of
+just handing the operator an address to copy. **Send nudge** on any alert row
+drafts the email server-side from the alert's own facts plus a slice of Brand
+360 (`server/lib/nudge-writer.js`), shows it for review, and sends it on
+approval through Resend (`server/lib/nudge-mailer.js`). Sending marks the alert
+done by default; it returns on its own if the brand still hasn't acted and the
+situation changes.
+
+- Nothing the browser sends reaches the prompt or the recipient: the alert is
+  re-derived from its key on both `POST /api/insights/alerts/draft` and
+  `/send`, so a forged alert body cannot send mail from a linkable.link
+  address. The operator's edits to the subject and body are trusted — a human
+  wrote them — but the recipient never is.
+- Sent nudges are recorded in `ops_brand_nudges` (created on first use, beside
+  `ops_alert_dismissals`) and shown on the alert, so the whole team can see a
+  brand has already been chased today.
+- The mailer is deliberately separate from `server/automation/send.js`: that
+  one is built for cold outreach and rewrites links into a "Book a demo" CTA,
+  stamps `List-Unsubscribe`, and suppresses Gmail threading — all wrong for a
+  service email to an existing customer.
+- Environment variables: `NUDGE_FROM` (default `Linkable <brand@linkable.link>`)
+  and `NUDGE_REPLY_TO`. Both must be on a Resend-verified domain; the default
+  is the address the team already triages replies in. Drafting uses
+  `ANTHROPIC_API_KEY` at roughly half a cent per draft.
