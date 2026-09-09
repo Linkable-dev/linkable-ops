@@ -2,7 +2,7 @@ import express from "express";
 import crypto from "crypto";
 import { cloudSqlQuery as cloudSqlQueryRaw } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
-import { parseColumnFilters } from "../lib/tableQuery.js";
+import { parseColumnFilters, filterConditions, textFilter, dateFilter } from "../lib/tableQuery.js";
 
 // `ops_admins` lives in the prod DB only — pin every query in this file to
 // prod so flipping the UI's dev toggle never locks an admin out or queries a
@@ -225,7 +225,14 @@ export function authRoutes() {
   // ORDER BY created is preserved and the response shape is unchanged.
   router.get("/admins", requireOpsAdminInline, async (req, res) => {
     const SORTABLE = { name: "name", email: "email", last_login: "last_login" };
-    const FILTERABLE = ["name", "email"];
+    // Shared builders, so the header filter popover's operator grammar
+    // ("starts:a", "before:30") works here exactly as it does on the other
+    // tables. See server/lib/tableQuery.js.
+    const FILTERS = {
+      name:       textFilter("name"),
+      email:      textFilter("email"),
+      last_login: dateFilter("last_login"),
+    };
 
     const sortCol = SORTABLE[req.query.sortBy] || null;
     const sortDir = req.query.sortDir === "desc" ? "DESC" : "ASC";
@@ -235,15 +242,8 @@ export function authRoutes() {
     // parseColumnFilters handles that (and the flat-key form).
     const filters = parseColumnFilters(req.query);
 
-    const conditions = [];
     const params = [];
-    for (const col of FILTERABLE) {
-      const val = filters[col];
-      if (typeof val === "string" && val.trim() !== "") {
-        params.push(`%${val.trim()}%`);
-        conditions.push(`${col} ILIKE $${params.length}`);
-      }
-    }
+    const conditions = filterConditions(filters, FILTERS, params);
 
     let sql = `SELECT id, email, name, role, created, last_login FROM ops_admins`;
     if (conditions.length) sql += ` WHERE ${conditions.join(" AND ")}`;

@@ -16,6 +16,9 @@ import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discov
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
 import { generatePost, triggerSiteRebuild, edgeEnabled, generateViaEdge } from "../lib/blog-writer.js";
+import { refreshConversions } from "../lib/outbound-attribution.js";
+import { loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
+import { enforceInboxHealth } from "../lib/deliverability.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -169,6 +172,17 @@ export function cronRoutes() {
         return res.json({ ...result, log: lines });
       }
 
+      // Deliverability brake FIRST, so a burning inbox is out of the pool
+      // before this tick picks senders — checking afterwards would still let
+      // it send today's batch.
+      let deliverability = null;
+      try {
+        deliverability = await enforceInboxHealth({ dryRun });
+        for (const p2 of deliverability.paused) log(`[deliverability] paused ${p2.email}: ${p2.reason}`);
+      } catch (e) {
+        log(`[deliverability] check skipped: ${e.message}`);
+      }
+
       // Auto mode (default for the cron tick): walk every active campaign,
       // ask its schedule whether it should fire right now, and run the ones
       // that say yes. Returns a per-campaign breakdown.
@@ -193,7 +207,21 @@ export function cronRoutes() {
         }
       }
       if (results.length === 0) log("[scheduler] no campaigns due to fire this tick");
-      res.json({ tick: now.toISOString(), fired: results.length, results, log: lines });
+
+      // Refresh the send → signup → revenue join on the same tick. It is a
+      // read of both databases and a small rewrite, and it never blocks the
+      // send: a failure here is logged, not raised.
+      let attribution = null;
+      if (!dryRun) {
+        try {
+          attribution = await refreshConversions("prod");
+          log(`[attribution] ${attribution.matched} matched, ${attribution.attributed} attributed to outbound`);
+        } catch (e) {
+          log(`[attribution] skipped: ${e.message}`);
+        }
+      }
+
+      res.json({ tick: now.toISOString(), fired: results.length, results, deliverability, attribution, log: lines });
     } catch (err) {
       console.error("/cron/run-daily-outbound error:", err);
       res.status(500).json({ error: err.message });
@@ -214,7 +242,26 @@ export function cronRoutes() {
       const batch = Math.min(Math.max(parseInt(req.query.batch) || 200, 10), 500);
       const dryRun = req.query.dry === "1" || req.query.dry === "true";
       const discovery = await autoTopUpDiscovery({ teamId, threshold, batch, dryRun });
-      res.json({ discovery });
+
+      // Record today's brand health scores while we are here. Tomorrow's radar
+      // needs yesterday's numbers to show a direction, and a falling score is
+      // the signal — the level alone says much less. Never blocks discovery.
+      let health = null;
+      if (!dryRun) {
+        try {
+          const facts = await loadBrandFacts();
+          health = await snapshotHealth(facts.map((b) => ({
+            user_id: b.user_id,
+            score: scoreBrand(b).score,
+            paying: /^shopify_[0-9]+/.test(b.account_id || "") && !b.sub_test,
+          })));
+        } catch (e) {
+          console.warn("[cron/auto-discover] health snapshot skipped:", e.message);
+          health = { error: e.message };
+        }
+      }
+
+      res.json({ discovery, health });
     } catch (err) {
       console.error("/cron/auto-discover error:", err);
       res.status(500).json({ error: err.message });

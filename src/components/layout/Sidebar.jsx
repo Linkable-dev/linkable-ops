@@ -185,6 +185,11 @@ export default function Sidebar() {
       <line x1="12" y1="17" x2="12" y2="17" />
     </svg>
   );
+  const healthIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h4l2.5-6 4 12L16 12h5" />
+    </svg>
+  );
   const trialsIcon = (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 12 20 22 4 22 4 12" />
@@ -247,6 +252,7 @@ export default function Sidebar() {
             marginTop: 4, marginBottom: 6,
           }}>
             {navItem("/alerts", "Alerts", path.startsWith("/alerts"), alertsIcon)}
+            {navItem("/health", "Brand health", path.startsWith("/health"), healthIcon)}
             {navItem("/ask", "Ask the data", path.startsWith("/ask"), askIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}

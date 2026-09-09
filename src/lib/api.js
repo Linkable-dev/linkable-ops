@@ -79,10 +79,17 @@ export const api = {
   getAlerts: ({ all } = {}) => request(`/insights/alerts${all ? "?all=1" : ""}`),
   dismissAlerts: (keys, mode = "done", days) => request("/insights/alerts/dismiss", { method: "POST", body: JSON.stringify({ keys, mode, days }) }),
   restoreAlerts: (keys) => request("/insights/alerts/restore", { method: "POST", body: JSON.stringify({ keys }) }),
+  // Writes the nudge email for one alert. Sends nothing — sendNudge does that
+  // once the operator has read it.
+  draftNudge: (key) => request("/insights/alerts/draft", { method: "POST", body: JSON.stringify({ key }) }),
+  sendNudge: ({ key, subject, body, alsoDone }) =>
+    request("/insights/alerts/send", { method: "POST", body: JSON.stringify({ key, subject, body, alsoDone }) }),
   getSavedMetrics: () => request("/insights/metrics"),
   saveMetric: (body) => request("/insights/metrics", { method: "POST", body: JSON.stringify(body) }),
   deleteMetric: (id) => request(`/insights/metrics/${id}`, { method: "DELETE" }),
   getBrand360: (userId) => request(`/insights/brand/${userId}`),
+  // Brand health: score per brand, plus the churn radar and trial ranking.
+  getBrandHealth: ({ limit = 50 } = {}) => request(`/insights/health?limit=${limit}`),
   getHomeSeries: (range = "90d") => request(`/insights/series?range=${encodeURIComponent(range)}`),
   askData: (question) => request("/insights/ask", { method: "POST", body: JSON.stringify({ question }) }),
   globalSearch: (q) => request(`/insights/search?q=${encodeURIComponent(q)}`),
@@ -92,6 +99,8 @@ export const api = {
   getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters, quick } = {}) =>
     request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters, quick })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
+  // The creator base ranked against one campaign (read-only shortlist).
+  getCreatorMatches: (id, { limit = 25 } = {}) => request(`/ops/campaigns/${id}/creator-matches?limit=${limit}`),
 
   // AI conversation manager
   getAiCampaigns: () => request("/conversations/campaigns"),
@@ -132,6 +141,9 @@ export const api = {
   getOutboundSend: (id) => request(`/outbound/sends/${id}`),
   getOutboundStats: ({ scope, campaignId, runDate } = {}) =>
     request(`/outbound/stats?${buildQs({ scope, campaign_id: campaignId, run_date: runDate })}`),
+  // Outbound revenue attribution: sends joined to the brands they produced.
+  getOutboundAttribution: () => request("/outbound/attribution"),
+  refreshOutboundAttribution: () => request("/outbound/attribution/refresh", { method: "POST", body: "{}" }),
   listOutboundRuns: ({ campaignId } = {}) =>
     request(`/outbound/runs?${buildQs({ campaign_id: campaignId })}`),
   stopOutbound: ({ emails, reason }) =>

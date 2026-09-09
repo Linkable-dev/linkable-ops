@@ -12,6 +12,7 @@
    primitives: hooks + tiny components belong together; no fast-refresh need */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const WIDTHS_STORE_PREFIX = "ops.tableWidths.";
 
@@ -150,78 +151,336 @@ export function nextSort({ sortBy, sortDir }, colKey, defaultDir) {
   return { sortBy: colKey, sortDir: defaultDir };
 }
 
-// Small per-column filter input for a table's filter row. Keeps its own draft
-// state and only calls onCommit (→ refetch) after the user pauses typing.
-// type: "text" | "number" (min-value) | "select" (needs options: [{value,label}]).
-export function ColumnFilter({ type = "text", value, options, placeholder, onCommit, theme, delay = 350 }) {
-  const [draft, setDraft] = useState(value ?? "");
-  const [prevValue, setPrevValue] = useState(value);
-  const [focused, setFocused] = useState(false);
-  const timer = useRef(null);
+/* ------------------------------------------------------------ column filter */
 
-  // External reset (e.g. tab switch clears filters) → sync the draft.
-  // "Adjust state during render" pattern instead of an effect.
-  if (value !== prevValue) {
-    setPrevValue(value);
-    setDraft(value ?? "");
+// A funnel icon that lives inside the header cell and opens a small popover
+// with the controls that suit the column's type. Replaces the old row of bare
+// inputs under the header: that row cost a whole band of vertical space on
+// every table, could only ever express "contains" and ">=", and left no room
+// to say which way a filter ran.
+//
+// The value stays a single string so the server contract is unchanged — see
+// the operator grammar in server/lib/tableQuery.js.
+//
+//   type: "text" | "number" | "date" | "select" | "boolean"
+//   select needs options: [{ value, label }]
+
+const TEXT_OPS = [
+  ["contains", "contains"],
+  ["is", "is exactly"],
+  ["starts", "starts with"],
+  ["ends", "ends with"],
+  ["empty", "is empty"],
+  ["notempty", "is not empty"],
+];
+
+const NUMBER_OPS = [
+  [">=", "at least"],
+  ["<=", "at most"],
+  ["=", "exactly"],
+  ["..", "between"],
+];
+
+const DATE_OPS = [
+  ["last", "in the last…"],
+  ["before", "not in the last…"],
+  [">=", "on or after"],
+  ["<=", "on or before"],
+  ["..", "between"],
+  ["empty", "is empty"],
+  ["notempty", "is not empty"],
+];
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+// Value string → the popover's working state.
+function parseValue(type, value) {
+  const v = String(value ?? "").trim();
+  if (type === "select" || type === "boolean") return { op: v, a: "", b: "" };
+  if (!v) return { op: type === "date" ? "last" : type === "number" ? ">=" : "contains", a: "", b: "" };
+  if (v === "empty" || v === "notempty") return { op: v, a: "", b: "" };
+
+  if (type === "text") {
+    const m = v.match(/^(contains|is|starts|ends):([\s\S]*)$/i);
+    return m ? { op: m[1].toLowerCase(), a: m[2], b: "" } : { op: "contains", a: v, b: "" };
   }
+  if (type === "number") {
+    const range = v.match(/^(-?[\d.]+)\s*\.\.\s*(-?[\d.]+)$/);
+    if (range) return { op: "..", a: range[1], b: range[2] };
+    const cmp = v.match(/^(>=|<=|=)?\s*(-?[\d.]+)$/);
+    return cmp ? { op: cmp[1] || ">=", a: cmp[2], b: "" } : { op: ">=", a: v, b: "" };
+  }
+  // date
+  const rel = v.match(/^(last|before):(\d+)$/i);
+  if (rel) return { op: rel[1].toLowerCase(), a: rel[2], b: "" };
+  const range = v.match(/^(\d{4}-\d{2}-\d{2})\s*\.\.\s*(\d{4}-\d{2}-\d{2})$/);
+  if (range) return { op: "..", a: range[1], b: range[2] };
+  const cmp = v.match(/^(>=|<=)?\s*(\d{4}-\d{2}-\d{2})$/);
+  if (cmp) return { op: cmp[1] || ">=", a: cmp[2], b: "" };
+  return { op: "last", a: "", b: "" };
+}
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+// The popover's working state → the value string the server parses.
+// Returns "" for an incomplete draft, which clears the filter.
+function buildValue(type, { op, a, b }) {
+  if (type === "select" || type === "boolean") return op || "";
+  if (op === "empty" || op === "notempty") return op;
+  const A = String(a ?? "").trim();
+  const B = String(b ?? "").trim();
 
-  // Quiet by default (melts into the header band), visible when it matters:
-  // accent border while focused or when a filter is actually applied.
-  const active = type === "select" ? !!value : !!draft;
+  if (type === "text") return A ? (op === "contains" ? A : `${op}:${A}`) : "";
+  if (type === "number") {
+    if (op === "..") return A && B ? `${A}..${B}` : "";
+    return A === "" ? "" : `${op}${A}`;
+  }
+  if (op === "last" || op === "before") return A ? `${op}:${A}` : "";
+  if (op === "..") return DAY.test(A) && DAY.test(B) ? `${A}..${B}` : "";
+  return DAY.test(A) ? `${op}${A}` : "";
+}
+
+// One-line description of an applied filter, for the icon's tooltip.
+export function describeFilter(type, value, options) {
+  const v = String(value ?? "").trim();
+  if (!v) return null;
+  if (type === "select") return (options || []).find((o) => o.value === v)?.label || v;
+  if (type === "boolean") return v === "yes" ? "Yes" : "No";
+  if (v === "empty") return "is empty";
+  if (v === "notempty") return "is not empty";
+  const { op, a, b } = parseValue(type, v);
+  const label = (list) => list.find(([k]) => k === op)?.[1] || op;
+  if (type === "date") {
+    if (op === "last") return `in the last ${a} days`;
+    if (op === "before") return `not in the last ${a} days`;
+    if (op === "..") return `${a} to ${b}`;
+    return `${label(DATE_OPS)} ${a}`;
+  }
+  if (type === "number") return op === ".." ? `between ${a} and ${b}` : `${label(NUMBER_OPS)} ${a}`;
+  return `${label(TEXT_OPS)} "${a}"`;
+}
+
+const funnelIcon = (filled) => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 4.5h18l-7 8.2V20l-4 1.5v-8.8z" />
+  </svg>
+);
+
+export function ColumnFilter({ type = "text", value, options, placeholder, onCommit, theme, label }) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
+  const [draft, setDraft] = useState(() => parseValue(type, value));
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+
+  const active = !!String(value ?? "").trim();
   const accent = theme.accent || theme.text;
-  const baseStyle = {
-    width: "100%", boxSizing: "border-box", height: 24,
-    background: "transparent",
-    color: active ? theme.text : theme.textMid,
-    border: `1px solid ${focused || active ? accent : theme.border}`,
-    borderRadius: 6,
-    fontFamily: "inherit", fontSize: 11, padding: "0 22px 0 7px",
-    outline: "none", transition: "border-color 0.12s, color 0.12s",
+
+  const place = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const W = 244;
+    setRect({
+      // Clamp so a right-hand column's popover stays on screen.
+      left: Math.max(8, Math.min(r.left, window.innerWidth - W - 8)),
+      top: r.bottom + 6,
+      width: W,
+    });
+  }, []);
+
+  const openPopover = () => {
+    setDraft(parseValue(type, value));
+    place();
+    setOpen(true);
   };
 
-  if (type === "select") {
-    return (
-      <select
-        value={value ?? ""}
-        onChange={(e) => onCommit(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          ...baseStyle, cursor: "pointer",
-          color: active ? theme.text : theme.textMuted,
-        }}
-      >
-        <option value="">All</option>
-        {(options || []).map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    );
-  }
+  // Reposition while open; close on Escape or a click outside.
+  useEffect(() => {
+    if (!open) return;
+    const onScrollOrResize = () => place();
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    const onDown = (e) => {
+      if (popRef.current?.contains(e.target) || btnRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onDown, true);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onDown, true);
+    };
+  }, [open, place]);
+
+  const commit = (next) => { onCommit(buildValue(type, next)); setOpen(false); };
+  const clear = () => { onCommit(""); setOpen(false); };
+
+  const ops = type === "text" ? TEXT_OPS : type === "number" ? NUMBER_OPS : type === "date" ? DATE_OPS : null;
+  const needsTwo = draft.op === "..";
+  const needsNone = draft.op === "empty" || draft.op === "notempty";
+
+  const fieldStyle = {
+    width: "100%", boxSizing: "border-box", height: 30,
+    background: theme.surface, color: theme.text,
+    border: `1px solid ${theme.border}`, borderRadius: 7,
+    fontFamily: "inherit", fontSize: 12, padding: "0 8px", outline: "none",
+  };
+
+  // A single click is the whole intent for a fixed-choice filter, so those
+  // commit straight away instead of asking for a second click on Apply.
+  const choiceList = (items, current) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 210, overflowY: "auto" }}>
+      {items.map((o) => {
+        const on = current === o.value;
+        return (
+          <button key={o.value || "all"} onClick={() => { onCommit(o.value); setOpen(false); }} style={{
+            display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+            padding: "6px 8px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+            border: "none", background: on ? theme.accentLight : "transparent", color: on ? theme.text : theme.textMid,
+            fontWeight: on ? 600 : 400,
+          }}
+            onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = theme.accentLight; }}
+            onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}
+          >
+            <span style={{
+              width: 13, height: 13, borderRadius: "50%", flexShrink: 0,
+              border: `1px solid ${on ? accent : theme.border}`,
+              boxShadow: on ? `inset 0 0 0 3px ${theme.surface}` : "none",
+              background: on ? accent : "transparent",
+            }} />
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
-    <input
-      value={draft}
-      inputMode={type === "number" ? "numeric" : undefined}
-      placeholder={placeholder || (type === "number" ? "≥ …" : "Filter…")}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      onChange={(e) => {
-        const v = e.target.value;
-        setDraft(v);
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => onCommit(v), delay);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          clearTimeout(timer.current);
-          onCommit(draft);
-        }
-      }}
-      style={baseStyle}
-    />
+    <>
+      <button
+        ref={btnRef}
+        onClick={(e) => { e.stopPropagation(); open ? setOpen(false) : openPopover(); }}
+        onMouseDown={(e) => e.stopPropagation()}
+        title={active ? `${label || "Filter"} ${describeFilter(type, value, options)}` : `Filter ${label || "column"}`}
+        aria-label={`Filter ${label || "column"}`}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 20, height: 20, marginLeft: 4, padding: 0, flexShrink: 0, verticalAlign: "middle",
+          border: "none", borderRadius: 5, cursor: "pointer",
+          background: active || open ? theme.accentLight : "transparent",
+          color: active ? accent : theme.textMuted,
+          opacity: active || open ? 1 : 0.75, transition: "color 0.12s, background 0.12s, opacity 0.12s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = 1; e.currentTarget.style.color = theme.text; }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.opacity = active || open ? 1 : 0.75;
+          e.currentTarget.style.color = active ? accent : theme.textMuted;
+        }}
+      >
+        {funnelIcon(active)}
+      </button>
+
+      {open && rect && createPortal(
+        <div
+          ref={popRef}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed", left: rect.left, top: rect.top, width: rect.width, zIndex: 1200,
+            background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10,
+            boxShadow: theme.shadowMd || "0 10px 30px rgba(0,0,0,0.18)",
+            padding: 10, display: "flex", flexDirection: "column", gap: 8,
+            fontFamily: "inherit", textTransform: "none", letterSpacing: 0,
+          }}
+        >
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase", color: theme.textMuted }}>
+            {label || "Filter"}
+          </div>
+
+          {type === "select" && choiceList(
+            [{ value: "", label: "All" }, ...(options || [])],
+            String(value ?? ""),
+          )}
+
+          {type === "boolean" && choiceList(
+            [{ value: "", label: "All" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+            String(value ?? ""),
+          )}
+
+          {ops && (
+            <>
+              <select
+                value={draft.op}
+                onChange={(e) => setDraft((d) => ({ ...d, op: e.target.value }))}
+                style={{ ...fieldStyle, cursor: "pointer" }}
+              >
+                {ops.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+
+              {!needsNone && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    autoFocus
+                    value={draft.a}
+                    type={type === "date" && draft.op !== "last" && draft.op !== "before" ? "date" : "text"}
+                    inputMode={type === "number" || draft.op === "last" || draft.op === "before" ? "numeric" : undefined}
+                    placeholder={
+                      type === "number" ? "0"
+                        : draft.op === "last" || draft.op === "before" ? "days"
+                        : placeholder || "Value…"
+                    }
+                    onChange={(e) => setDraft((d) => ({ ...d, a: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") commit(draft); }}
+                    style={fieldStyle}
+                  />
+                  {needsTwo && (
+                    <>
+                      <span style={{ fontSize: 11, color: theme.textMuted, flexShrink: 0 }}>and</span>
+                      <input
+                        value={draft.b}
+                        type={type === "date" ? "date" : "text"}
+                        inputMode={type === "number" ? "numeric" : undefined}
+                        placeholder={type === "number" ? "100" : ""}
+                        onChange={(e) => setDraft((d) => ({ ...d, b: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") commit(draft); }}
+                        style={fieldStyle}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+
+              {(draft.op === "last" || draft.op === "before") && (
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[7, 30, 90].map((d) => (
+                    <button key={d} onClick={() => commit({ ...draft, a: String(d) })} style={{
+                      flex: 1, height: 24, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11,
+                      border: `1px solid ${theme.border}`, background: theme.surfaceAlt, color: theme.textMid,
+                    }}>{d}d</button>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", paddingTop: 2 }}>
+                {active && (
+                  <button onClick={clear} style={{
+                    height: 28, padding: "0 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                    fontSize: 12, border: `1px solid ${theme.border}`, background: "transparent", color: theme.textMid,
+                  }}>Clear</button>
+                )}
+                <button onClick={() => commit(draft)} style={{
+                  height: 28, padding: "0 14px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: 12, fontWeight: 600, border: "none", background: accent,
+                  color: theme.mode === "dark" ? "#0A0A0A" : "#fff",
+                }}>Apply</button>
+              </div>
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

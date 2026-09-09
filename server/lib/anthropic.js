@@ -16,7 +16,14 @@ export async function claudeMessage({
   system,
   messages,
   tools,
+  // e.g. { type: "tool", name: "draft_nudge" } to force structured output
+  // instead of hoping the model picks the tool on its own.
+  toolChoice,
   maxTokens = 1024,
+  // Pass null to omit. The 5-series models reject `temperature` outright
+  // ("`temperature` is deprecated for this model", HTTP 400), so a caller on
+  // one of those must opt out; the 0.7 default is kept for existing callers
+  // on older models.
   temperature = 0.7,
   apiKey = process.env.ANTHROPIC_API_KEY,
 }) {
@@ -25,11 +32,12 @@ export async function claudeMessage({
   const body = {
     model,
     max_tokens: maxTokens,
-    temperature,
     messages,
   };
+  if (temperature != null) body.temperature = temperature;
   if (system) body.system = system;
   if (tools && tools.length) body.tools = tools;
+  if (toolChoice) body.tool_choice = toolChoice;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",

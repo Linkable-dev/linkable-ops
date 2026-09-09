@@ -7,6 +7,7 @@ import { Btn } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import RecordForm from "./RecordForm";
 import { Skeleton } from "../components/ui/Skeleton";
+import { ColumnFilter } from "../components/table/tableTools";
 
 // Columns to hide from table view (sensitive, internal, or not useful)
 const HIDDEN_COLUMNS = new Set([
@@ -23,6 +24,29 @@ const HIDDEN_COLUMNS = new Set([
 
 // Column name patterns to hide
 const HIDDEN_PATTERNS = [/token$/i, /secret$/i, /hash$/i, /_otp$/i];
+
+const NUMERIC_TYPES = new Set(["integer", "bigint", "smallint", "numeric", "real", "double precision"]);
+
+// Which filter control a column gets, from its real Postgres type. An FK with
+// loaded options becomes a pick-list whatever its underlying type.
+function filterTypeFor(col, fkOptions) {
+  if (col.fk && fkOptions?.options?.length) return "select";
+  const t = col.data_type || "";
+  if (t === "boolean") return "boolean";
+  if (t.includes("timestamp") || t === "date") return "date";
+  if (NUMERIC_TYPES.has(t)) return "number";
+  return "text";
+}
+
+// FK pick-list values must match one row exactly, so they carry the operator
+// the server needs for that column's type rather than a bare id.
+function fkPickList(col, fkOptions) {
+  const exact = NUMERIC_TYPES.has(col.data_type || "") ? (id) => `=${id}` : (id) => `is:${id}`;
+  return (fkOptions.options || []).map((opt) => ({
+    value: exact(opt.id),
+    label: opt.label || `#${opt.id}`,
+  }));
+}
 
 // Column widths persisted per table in localStorage — same key convention as
 // src/components/table/tableTools.jsx ("ops.tableWidths.<tableId>"), with a
@@ -91,7 +115,6 @@ export default function TablePage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [filters, setFilters] = useState({});
-  const [showFilters, setShowFilters] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -158,7 +181,7 @@ export default function TablePage() {
   }, [searchInput]);
   useEffect(() => {
     setSearch(""); setSearchInput(""); setSortBy(""); setSortDir("asc"); setPage(1);
-    setFilters({}); setShowFilters(false); setFkLabels({});
+    setFilters({}); setFkLabels({});
     // Switching tables loads THAT table's stored widths (empty if none saved)
     setColWidths(loadStoredWidths(table));
   }, [table]);
@@ -292,18 +315,19 @@ export default function TablePage() {
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => setShowFilters(!showFilters)} style={{
-            display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px",
-            borderRadius: 8, border: `1.5px solid ${showFilters ? theme.text : theme.border}`,
-            background: showFilters ? theme.accentLight : "transparent",
-            color: showFilters ? theme.text : theme.textMid, fontSize: 12, fontWeight: 600,
-            cursor: "pointer", fontFamily: "inherit",
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
-            </svg>
-            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-          </button>
+          {activeFilterCount > 0 && (
+            <button onClick={() => { setFilters({}); setPage(1); }} title="Remove every column filter" style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px",
+              borderRadius: 8, border: `1.5px solid ${theme.text}`,
+              background: theme.accentLight, color: theme.text, fontSize: 12, fontWeight: 600,
+              cursor: "pointer", fontFamily: "inherit",
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+              </svg>
+              Clear {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"}
+            </button>
+          )}
           <Link to={`/tables/${table}/analytics`} style={{ textDecoration: "none" }}>
             <Btn variant="outline" size="sm">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -345,30 +369,6 @@ export default function TablePage() {
         )}
       </div>
 
-      {/* Smart Filters */}
-      {showFilters && (
-        <div style={{
-          display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16, padding: 16,
-          background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10,
-        }}>
-          {visibleCols.map((col) => (
-            <FilterControl
-              key={col.column_name} col={col} theme={theme} mode={mode}
-              filters={filters} onFilter={handleFilter}
-              fkOptions={fkFilterOptions[col.column_name]}
-            />
-          ))}
-          {activeFilterCount > 0 && (
-            <div style={{ display: "flex", alignItems: "flex-end" }}>
-              <button onClick={() => setFilters({})} style={{
-                padding: "6px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 500,
-                background: theme.accentLight, color: theme.textMid, cursor: "pointer", fontFamily: "inherit",
-              }}>Clear all</button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Table */}
       <div style={{
         background: theme.surface, border: `1px solid ${theme.border}`,
@@ -400,6 +400,18 @@ export default function TablePage() {
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                       {friendlyName(col.fk ? col.column_name.replace(/_id$/, "") : col.column_name)}
                       {sortIcon(col.column_name)}
+                      <ColumnFilter
+                        theme={theme}
+                        label={friendlyName(col.fk ? col.column_name.replace(/_id$/, "") : col.column_name)}
+                        type={filterTypeFor(col, fkFilterOptions[col.column_name])}
+                        options={
+                          col.fk && fkFilterOptions[col.column_name]?.options?.length
+                            ? fkPickList(col, fkFilterOptions[col.column_name])
+                            : undefined
+                        }
+                        value={filters[col.column_name] || ""}
+                        onCommit={(v) => handleFilter(col.column_name, v)}
+                      />
                     </span>
                     {/* Resize handle */}
                     <div
@@ -596,101 +608,6 @@ export default function TablePage() {
       <Modal open={modalOpen} onClose={closeModal} title={editId ? `Edit Record` : `New Record`} width={580}>
         <RecordForm table={table} id={editId} onSaved={onSaved} onCancel={closeModal} />
       </Modal>
-    </div>
-  );
-}
-
-// ---- Type-aware filter controls ----
-function FilterControl({ col, theme, filters, onFilter, fkOptions }) {
-  const name = col.column_name;
-  const type = col.data_type;
-  const label = friendlyName(col.fk ? name.replace(/_id$/, "") : name);
-
-  const inputStyle = {
-    width: "100%", boxSizing: "border-box", padding: "6px 10px", borderRadius: 6,
-    border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text,
-    fontFamily: "inherit", fontSize: 12, outline: "none",
-    transition: "background 0.2s, border-color 0.2s",
-  };
-
-  // Boolean → toggle buttons
-  if (type === "boolean") {
-    const val = filters[name];
-    return (
-      <div style={{ minWidth: 130 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 4 }}>{label}</div>
-        <div style={{ display: "flex", gap: 0, background: theme.surfaceAlt, borderRadius: 6, padding: 2 }}>
-          {[["", "All"], ["true", "Yes"], ["false", "No"]].map(([v, l]) => (
-            <button key={v} onClick={() => onFilter(name, v)} style={{
-              flex: 1, padding: "4px 8px", borderRadius: 5, border: "none", fontSize: 11, fontWeight: (val || "") === v ? 600 : 400,
-              background: (val || "") === v ? theme.surface : "transparent",
-              color: (val || "") === v ? theme.text : theme.textMuted,
-              cursor: "pointer", fontFamily: "inherit", boxShadow: (val || "") === v ? theme.shadow : "none",
-            }}>{l}</button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // FK → dropdown
-  if (col.fk && fkOptions?.options) {
-    return (
-      <div style={{ minWidth: 160, flex: "1 1 160px", maxWidth: 240 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 4 }}>{label}</div>
-        <select
-          value={filters[name] || ""}
-          onChange={(e) => onFilter(name, e.target.value)}
-          style={{ ...inputStyle, paddingRight: 28 }}
-        >
-          <option value="">All</option>
-          {fkOptions.options.map((opt) => (
-            <option key={opt.id} value={opt.id}>{opt.label || `#${opt.id}`}</option>
-          ))}
-        </select>
-      </div>
-    );
-  }
-
-  // Date → from / to
-  if (type.includes("timestamp") || type === "date") {
-    return (
-      <div style={{ minWidth: 200, flex: "1 1 200px", maxWidth: 300 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 4 }}>{label}</div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input
-            type="date"
-            value={filters[`${name}_from`] || ""}
-            onChange={(e) => onFilter(`${name}_from`, e.target.value)}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          <span style={{ fontSize: 10, color: theme.textMuted }}>to</span>
-          <input
-            type="date"
-            value={filters[`${name}_to`] || ""}
-            onChange={(e) => onFilter(`${name}_to`, e.target.value)}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // Number → exact match
-  if (["integer", "bigint", "smallint", "numeric", "real", "double precision"].includes(type)) {
-    return (
-      <div style={{ minWidth: 120, flex: "1 1 120px", maxWidth: 180 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 4 }}>{label}</div>
-        <input type="number" value={filters[name] || ""} onChange={(e) => onFilter(name, e.target.value)} placeholder="Exact..." style={inputStyle} />
-      </div>
-    );
-  }
-
-  // Text → search
-  return (
-    <div style={{ minWidth: 160, flex: "1 1 160px", maxWidth: 240 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 4 }}>{label}</div>
-      <input type="text" value={filters[name] || ""} onChange={(e) => onFilter(name, e.target.value)} placeholder="Contains..." style={inputStyle} />
     </div>
   );
 }

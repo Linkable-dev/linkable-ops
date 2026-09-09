@@ -6,7 +6,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { DbTargetProvider } from "./contexts/DbTargetContext";
 import AuthGate from "./components/layout/AuthGate";
 import App from "./App";
-import { BrandLoader } from "./components/ui/BrandLoader";
+import { FullPageLoader } from "./components/ui/BrandLoader";
 import "./index.css";
 
 // Every page is code split: the login screen no longer pays for the charting
@@ -28,6 +28,7 @@ const AiCampaignsPage = lazy(() => import("./pages/AiCampaignsPage"));
 const AiCampaignDetailPage = lazy(() => import("./pages/AiCampaignDetailPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const TrialsPage = lazy(() => import("./pages/TrialsPage"));
+const HealthPage = lazy(() => import("./pages/HealthPage"));
 const BlogPage = lazy(() => import("./pages/blog/BlogPage"));
 const BlogEditorPage = lazy(() => import("./pages/blog/BlogEditorPage"));
 
@@ -37,7 +38,7 @@ createRoot(document.getElementById("root")).render(
       <ThemeProvider>
         <DbTargetProvider>
           <AuthProvider>
-            <Suspense fallback={<div style={{ display: "flex", justifyContent: "center", paddingTop: "18vh" }}><BrandLoader /></div>}>
+            <Suspense fallback={<FullPageLoader />}>
               <Routes>
                 <Route path="/setup-password" element={<SetupPasswordPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
@@ -45,6 +46,7 @@ createRoot(document.getElementById("root")).render(
                   <Route element={<App />}>
                     <Route path="/" element={<HomePage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
+                    <Route path="/health" element={<HealthPage />} />
                     <Route path="/ask" element={<AskPage />} />
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />

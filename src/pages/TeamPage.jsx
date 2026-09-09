@@ -15,10 +15,10 @@ import {
 // GET /api/auth/admins). Status derives from last_login, so it stays
 // non-sortable and Last Active carries the last_login sort instead.
 const TEAM_COLUMNS = [
-  { key: "name",       label: "Name",        width: 240, sortKey: "name",       defaultDir: "asc", filterKey: "name" },
-  { key: "email",      label: "Email",       width: 280, sortKey: "email",      defaultDir: "asc", filterKey: "email" },
+  { key: "name",       label: "Name",        width: 240, sortKey: "name",       defaultDir: "asc", filterKey: "name",       filter: { type: "text", placeholder: "Name…" } },
+  { key: "email",      label: "Email",       width: 280, sortKey: "email",      defaultDir: "asc", filterKey: "email",      filter: { type: "text", placeholder: "Email…" } },
   { key: "status",     label: "Status",      width: 120 },
-  { key: "last_login", label: "Last Active", width: 150, sortKey: "last_login", defaultDir: "desc" },
+  { key: "last_login", label: "Last Active", width: 150, sortKey: "last_login", defaultDir: "desc", filterKey: "last_login", filter: { type: "date" } },
   { key: "actions",    label: "",            width: 60, resizable: false },
 ];
 const TEAM_DEFAULT_WIDTHS = Object.fromEntries(TEAM_COLUMNS.map((c) => [c.key, c.width]));
@@ -192,23 +192,18 @@ export default function TeamPage() {
                     ) : (
                       col.label
                     )}
-                    {col.resizable !== false && (
-                      <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
-                    )}
-                  </th>
-                ))}
-              </tr>
-              {/* Per-column filter row (server-side contains match) */}
-              <tr style={{ borderBottom: `1px solid ${t.border}`, background: t.surfaceAlt }}>
-                {TEAM_COLUMNS.map((col) => (
-                  <th key={col.key} style={{ padding: "4px 16px 8px", fontWeight: 400 }}>
-                    {col.filterKey && (
+                    {col.filter && (
                       <ColumnFilter
                         theme={t}
-                        type="text"
+                        label={col.label}
+                        type={col.filter.type}
+                        placeholder={col.filter.placeholder}
                         value={filters[col.filterKey] || ""}
                         onCommit={(v) => handleFilter(col.filterKey, v)}
                       />
+                    )}
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
                     )}
                   </th>
                 ))}

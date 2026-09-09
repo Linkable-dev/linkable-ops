@@ -1,6 +1,8 @@
 import express from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
-import { parseColumnFilters } from "../lib/tableQuery.js";
+import {
+  parseColumnFilters, textFilter, numberFilter, dateFilter, boolFilter,
+} from "../lib/tableQuery.js";
 
 export function tableRoutes() {
   const router = express.Router();
@@ -256,39 +258,56 @@ export function tableRoutes() {
         }
       }
 
-      // Column-level filters (supports _from/_to suffixes for date ranges)
-      for (const [rawKey, val] of Object.entries(filters)) {
-        if (!val) continue;
+      // Column-level filters. Values carry the shared operator grammar
+      // (server/lib/tableQuery.js) that the header filter popover writes, and
+      // the builder is chosen from the column's real Postgres type. The legacy
+      // filter[col_from] / filter[col_to] pair still works so older links and
+      // bookmarks keep resolving.
+      //
+      // Types are read once for the whole table instead of once per filtered
+      // column, which used to be a round trip per filter.
+      const { rows: tableCols } = await cloudSqlQuery(
+        `SELECT column_name, data_type FROM information_schema.columns
+         WHERE table_name = $1 AND table_schema = 'public'`,
+        [table]
+      );
+      const typeOf = new Map(tableCols.map((c) => [c.column_name, c.data_type]));
 
-        // Date range: filter[col_from] / filter[col_to]
+      for (const [rawKey, val] of Object.entries(filters)) {
+        if (val === "" || val == null) continue;
+
         const fromMatch = rawKey.match(/^(.+)_from$/);
         const toMatch = rawKey.match(/^(.+)_to$/);
-        const col = fromMatch ? fromMatch[1] : toMatch ? toMatch[1] : rawKey;
+        const col = typeOf.has(rawKey)
+          ? rawKey
+          : fromMatch && typeOf.has(fromMatch[1]) ? fromMatch[1]
+          : toMatch && typeOf.has(toMatch[1]) ? toMatch[1]
+          : null;
+        if (!col) continue;
 
-        const colCheck = await cloudSqlQuery(
-          `SELECT data_type FROM information_schema.columns WHERE table_name = $1 AND column_name = $2 AND table_schema = 'public'`,
-          [table, col]
-        );
-        if (colCheck.rows.length === 0) continue;
-        const dtype = colCheck.rows[0].data_type;
+        const dtype = typeOf.get(col);
+        const isDate = dtype.includes("timestamp") || dtype === "date";
+        const isNumber = ["integer", "bigint", "smallint", "numeric", "real", "double precision"].includes(dtype);
+        const expr = `"${col}"`;
 
-        if (fromMatch && (dtype.includes("timestamp") || dtype === "date")) {
+        // Legacy half-open range params keep their old meaning.
+        if (col !== rawKey && isDate) {
           params.push(val);
-          conditions.push(`"${col}" >= $${paramIdx++}`);
-        } else if (toMatch && (dtype.includes("timestamp") || dtype === "date")) {
-          params.push(val);
-          conditions.push(`"${col}" <= $${paramIdx++}`);
-        } else if (["integer", "bigint", "smallint", "numeric", "real", "double precision"].includes(dtype)) {
-          params.push(val);
-          conditions.push(`"${col}" = $${paramIdx++}`);
-        } else if (dtype === "boolean") {
-          params.push(val === "true");
-          conditions.push(`"${col}" = $${paramIdx++}`);
-        } else {
-          params.push(`%${val}%`);
-          conditions.push(`"${col}"::text ILIKE $${paramIdx++}`);
+          conditions.push(`${expr} ${fromMatch ? ">=" : "<="} $${params.length}`);
+          continue;
         }
+
+        const build = isDate ? dateFilter(expr)
+          : isNumber ? numberFilter(expr)
+          : dtype === "boolean" ? boolFilter(expr)
+          : textFilter(`${expr}::text`);
+        const cond = build(params, val);
+        if (cond) conditions.push(cond);
       }
+
+      // The builders number their placeholders from params.length, so realign
+      // the manual counter that LIMIT/OFFSET still uses below.
+      paramIdx = params.length + 1;
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 

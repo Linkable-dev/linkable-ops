@@ -9,8 +9,9 @@ import { Btn } from "../components/ui/Button";
 import { Skeleton, SkeletonStatGrid, SkeletonListRows } from "../components/ui/Skeleton";
 import { BrandLink } from "../components/brand/BrandLink";
 import { SEVERITY, notifyAlertsChanged } from "../lib/alerts";
+import NudgeModal from "../components/alerts/NudgeModal";
 
-const KINDS = [["all", "Everything"], ["shipping", "Samples"], ["applications", "Applications"], ["trials", "Trials"], ["billing", "Billing"], ["sales", "Sales"], ["deletion", "Deletion"]];
+const KINDS = [["all", "Everything"], ["shipping", "Samples"], ["applications", "Applications"], ["trials", "Trials"], ["billing", "Billing"], ["sales", "Sales"], ["deliverability", "Sending"], ["deletion", "Deletion"]];
 const SEV_ORDER = { danger: 0, warn: 1, info: 2 };
 
 // "waiting 34 days" for past dates, "in 3 days" for deadlines.
@@ -35,6 +36,8 @@ export default function AlertsPage() {
   const [showDismissed, setShowDismissed] = useState(false);
   const [busy, setBusy] = useState(null);
   const [actionError, setActionError] = useState(null);
+  const [nudgeAlert, setNudgeAlert] = useState(null); // alert whose nudge dialog is open
+  const [nudgeSent, setNudgeSent] = useState(null);   // { to } after a send
   const scope = showDismissed ? "all" : "open";
   const cacheKey = `${target}:${scope}`;
   const entry = results[cacheKey];
@@ -105,6 +108,21 @@ export default function AlertsPage() {
   };
   const isBusy = (a) => !!busy && busy.split("|").includes(a.key);
 
+  // A sent nudge changes the alert list (the send marks it done by default),
+  // so reload the same way a dismissal does.
+  const onNudged = async (to) => {
+    setNudgeAlert(null);
+    setNudgeSent({ to });
+    await Promise.all([fetchAlerts(`${target}:open`, false), showDismissed ? fetchAlerts(`${target}:all`, true) : null]);
+    notifyAlertsChanged();
+  };
+
+  useEffect(() => {
+    if (!nudgeSent) return;
+    const t = setTimeout(() => setNudgeSent(null), 6000);
+    return () => clearTimeout(t);
+  }, [nudgeSent]);
+
   const chip = (active, onClick, label) => (
     <button key={label} onClick={onClick} style={{
       height: 30, padding: "0 12px", borderRadius: 999, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
@@ -118,7 +136,7 @@ export default function AlertsPage() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: 0 }}>Alerts</h1>
           <p style={{ fontSize: 13, color: theme.textMuted, margin: "4px 0 0", maxWidth: 760 }}>
-            Things a brand has left hanging. Each line says what to do; mark it <b>Done</b> once you have chased it (it comes back only if the situation changes) or <b>Snooze</b> it for a week. Dismissals are shared with the whole team.
+            Things a brand has left hanging. <b>Send nudge</b> writes the chase email from the alert and sends it once you have read it; <b>Done</b> hides the alert until the situation changes and <b>Snooze</b> hides it for a week. Nudges and dismissals are shared with the whole team.
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -172,6 +190,11 @@ export default function AlertsPage() {
         </label>
       </div>
 
+      {nudgeSent && (
+        <Card style={{ borderColor: "#86EFAC", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: theme.text }}>Nudge sent to <b>{nudgeSent.to}</b>. Replies go to the shared inbox.</div>
+        </Card>
+      )}
       {actionError && <Card style={{ borderColor: "#FCA5A5" }}><div style={{ color: theme.danger, fontSize: 13 }}>{actionError}</div></Card>}
       {error && <Card><div style={{ color: theme.danger, fontSize: 13 }}>Failed to load alerts: {error}</div></Card>}
       {!error && loading && (
@@ -185,13 +208,17 @@ export default function AlertsPage() {
       )}
 
       {!error && !loading && view === "brand" && groups.map((g) => (
-        <BrandGroup key={g.id} group={g} theme={theme} isBusy={isBusy} onAct={act} onOpen={() => g.brand?.user_id && openBrand(g.brand.user_id)} />
+        <BrandGroup key={g.id} group={g} theme={theme} isBusy={isBusy} onAct={act} onNudge={setNudgeAlert} onOpen={() => g.brand?.user_id && openBrand(g.brand.user_id)} />
       ))}
+
+      {nudgeAlert && (
+        <NudgeModal alert={nudgeAlert} onClose={() => setNudgeAlert(null)} onSent={onNudged} />
+      )}
 
       {!error && !loading && view === "list" && visible.length > 0 && (
         <Card style={{ padding: 0, overflow: "hidden" }}>
           {[...visible].sort((x, y) => (x.dismissed ? 9 : SEV_ORDER[x.severity]) - (y.dismissed ? 9 : SEV_ORDER[y.severity]) || new Date(x.since || 0) - new Date(y.since || 0)).map((a, i, arr) => (
-            <AlertLine key={a.key} alert={a} theme={theme} showBrand isLast={i === arr.length - 1} busy={isBusy(a)} onAct={act} />
+            <AlertLine key={a.key} alert={a} theme={theme} showBrand isLast={i === arr.length - 1} busy={isBusy(a)} onAct={act} onNudge={setNudgeAlert} />
           ))}
         </Card>
       )}
@@ -199,7 +226,7 @@ export default function AlertsPage() {
   );
 }
 
-function BrandGroup({ group: g, theme, isBusy, onAct, onOpen }) {
+function BrandGroup({ group: g, theme, isBusy, onAct, onNudge, onOpen }) {
   // Clearing a whole brand hides work from every admin, so it takes two clicks.
   const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => {
@@ -231,7 +258,7 @@ function BrandGroup({ group: g, theme, isBusy, onAct, onOpen }) {
           {g.brand?.email && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.brand.email}</div>}
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          {g.brand?.email && <Btn size="sm" variant="outline" onClick={() => navigator.clipboard?.writeText(g.brand.email)} title="Copy the brand email to write the nudge">Copy email</Btn>}
+          {g.brand?.email && <Btn size="sm" variant="secondary" onClick={() => navigator.clipboard?.writeText(g.brand.email)} title="Copy the brand email">Copy email</Btn>}
           <Btn size="sm" variant="outline" onClick={onOpen}>Brand 360</Btn>
           {openAlerts.length > 0 && (
             confirmClear
@@ -241,13 +268,13 @@ function BrandGroup({ group: g, theme, isBusy, onAct, onOpen }) {
         </div>
       </div>
       {g.alerts.map((a, i) => (
-        <AlertLine key={a.key} alert={a} theme={theme} isLast={i === g.alerts.length - 1} busy={isBusy(a)} onAct={onAct} />
+        <AlertLine key={a.key} alert={a} theme={theme} isLast={i === g.alerts.length - 1} busy={isBusy(a)} onAct={onAct} onNudge={onNudge} />
       ))}
     </Card>
   );
 }
 
-function AlertLine({ alert: a, theme, isLast, busy, onAct, showBrand = false }) {
+function AlertLine({ alert: a, theme, isLast, busy, onAct, onNudge, showBrand = false }) {
   const sev = SEVERITY[a.severity] || SEVERITY.info;
   const when = age(a.since);
   const stale = when && when.days > 30;
@@ -266,6 +293,7 @@ function AlertLine({ alert: a, theme, isLast, busy, onAct, showBrand = false }) 
         </div>
         <div style={{ fontSize: 12, color: theme.textMid, marginTop: 3, lineHeight: 1.45 }}>{a.detail}</div>
         {a.action && !d && <div style={{ fontSize: 12, color: theme.text, marginTop: 3, lineHeight: 1.45 }}><span style={{ fontWeight: 600 }}>What to do:</span> {a.action}</div>}
+        {a.nudge && <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 3 }}>Nudged {friendlyDate(a.nudge.at)}{a.nudge.by ? ` by ${a.nudge.by}` : ""}</div>}
         {d && <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 3 }}>{d.mode === "snoozed" ? `Snoozed until ${friendlyDate(d.until)}` : `Marked done ${friendlyDate(d.at)}`}{d.by ? ` by ${d.by}` : ""}</div>}
       </div>
       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -273,6 +301,12 @@ function AlertLine({ alert: a, theme, isLast, busy, onAct, showBrand = false }) 
           <Btn size="sm" variant="outline" onClick={() => onAct(a, "restore")} loading={busy}>Reopen</Btn>
         ) : (
           <>
+            {a.brand?.email && onNudge && (
+              <Btn size="sm" variant="outline" onClick={() => onNudge(a)} disabled={busy}
+                title={a.nudge ? `Already nudged ${friendlyDate(a.nudge.at)} — write another` : "Write and send the chase email to this brand"}>
+                {a.nudge ? "Nudge again" : "Send nudge"}
+              </Btn>
+            )}
             <Btn size="sm" variant="outline" onClick={() => onAct(a, "snooze")} loading={busy} title="Hide for 7 days for everyone">Snooze 7d</Btn>
             <Btn size="sm" onClick={() => onAct(a, "done")} loading={busy} title="Hide until the situation changes">Done</Btn>
           </>

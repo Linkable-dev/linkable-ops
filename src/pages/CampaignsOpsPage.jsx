@@ -6,6 +6,7 @@ import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/ui/Skeleton";
 import { useColumnWidths, ResizeHandle, ColumnFilter } from "../components/table/tableTools";
+import CreatorMatchesModal from "../components/campaigns/CreatorMatchesModal";
 
 const STATUS_COLORS = {
   Rejected:          { bg: "#FEE2E2", fg: "#991B1B", bgDark: "#3F1313", fgDark: "#FCA5A5" },
@@ -40,6 +41,19 @@ const COLUMNS = [
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
 
+// The exact bottleneck_label values the campaigns query emits, so the filter
+// matches whole labels rather than substrings. "empty" is the healthy case
+// (no bottleneck label at all).
+const BOTTLENECK_OPTIONS = [
+  { value: "is:No outreach",                 label: "No outreach" },
+  { value: "is:Awaiting invite responses",   label: "Awaiting invite responses" },
+  { value: "is:No acceptances",              label: "No acceptances" },
+  { value: "is:Brand: accepted, not shipped", label: "Accepted, not shipped" },
+  { value: "is:Brand: not shipping",         label: "Not shipping" },
+  { value: "is:Content: no sales",           label: "No sales" },
+  { value: "empty",                          label: "No bottleneck" },
+];
+
 export default function CampaignsOpsPage() {
   const { theme, mode } = useTheme();
   const [campaigns, setCampaigns] = useState([]);
@@ -57,11 +71,25 @@ export default function CampaignsOpsPage() {
   const [sortBy, setSortBy] = useState("created");
   const [sortDir, setSortDir] = useState("desc");
   const [filters, setFilters] = useState({}); // per-column server-side filters
+  const [matchesFor, setMatchesFor] = useState(null); // campaign whose creator shortlist is open
 
   const { widths, startResize, resetWidth } = useColumnWidths("ops-campaigns", DEFAULT_WIDTHS);
   // Fixed columns keep their width; the two `fill` columns share whatever is
   // left, so the table fits the card and only scrolls when it really must.
   const totalWidth = COLUMNS.reduce((sum, c) => sum + (c.fill ? 140 : (widths[c.key] || c.width)), 0);
+
+  // One filter control for a header cell. The popover writes the operator
+  // grammar the server parses (see server/lib/tableQuery.js).
+  const colFilter = (key, type, label, extra = {}) => (
+    <ColumnFilter
+      theme={theme}
+      type={type}
+      label={label}
+      value={filters[key] || ""}
+      onCommit={(v) => handleFilter(key, v)}
+      {...extra}
+    />
+  );
 
   const handleFilter = (key, value) => {
     setPage(0);
@@ -172,6 +200,10 @@ export default function CampaignsOpsPage() {
         ))}
       </div>
 
+      {matchesFor && (
+        <CreatorMatchesModal campaign={matchesFor} onClose={() => setMatchesFor(null)} />
+      )}
+
       {/* Campaigns table */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -184,37 +216,16 @@ export default function CampaignsOpsPage() {
             <thead>
               <tr style={{ background: theme.bg }}>
                 <Th theme={theme}></Th>
-                <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "campaign_name", startResize, resetWidth }}>Campaign</Th>
-                <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "brand_name", startResize, resetWidth }}>Brand</Th>
-                <Th theme={theme} num sortKey="creators_invited"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_invited", startResize, resetWidth }}>Invited</Th>
-                <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_applied", startResize, resetWidth }}>Applied</Th>
-                <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_accepted", startResize, resetWidth }}>Accepted</Th>
-                <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "samples_accepted", startResize, resetWidth }}>Sample acc.</Th>
-                <Th theme={theme} num sortKey="products_shipped"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "products_shipped", startResize, resetWidth }}>Shipped</Th>
-                <Th theme={theme} num sortKey="clicks"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "clicks", startResize, resetWidth }}>Clicks</Th>
-                <Th theme={theme} num sortKey="sales"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "sales", startResize, resetWidth }}>Sales</Th>
-                <Th theme={theme}     sortKey="bottleneck"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "bottleneck", startResize, resetWidth }}>Bottleneck</Th>
-              </tr>
-              {/* Per-column filter row (server-side) */}
-              <tr style={{ background: theme.bg }}>
-                <td />
-                <td style={{ padding: "0 12px 10px" }}>
-                  <ColumnFilter
-                    theme={theme}
-                    placeholder="Filter campaign…"
-                    value={filters.campaign_name || ""}
-                    onCommit={(v) => handleFilter("campaign_name", v)}
-                  />
-                </td>
-                <td style={{ padding: "0 12px 10px" }}>
-                  <ColumnFilter
-                    theme={theme}
-                    placeholder="Filter brand…"
-                    value={filters.brand_name || ""}
-                    onCommit={(v) => handleFilter("brand_name", v)}
-                  />
-                </td>
-                <td colSpan={8} />
+                <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "campaign_name", startResize, resetWidth }} filter={colFilter("campaign_name", "text", "Campaign", { placeholder: "Campaign name…" })}>Campaign</Th>
+                <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "brand_name", startResize, resetWidth }} filter={colFilter("brand_name", "text", "Brand", { placeholder: "Brand name…" })}>Brand</Th>
+                <Th theme={theme} num sortKey="creators_invited"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_invited", startResize, resetWidth }} filter={colFilter("creators_invited", "number", "Invited")}>Invited</Th>
+                <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_applied", startResize, resetWidth }} filter={colFilter("creators_applied", "number", "Applied")}>Applied</Th>
+                <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_accepted", startResize, resetWidth }} filter={colFilter("creators_accepted", "number", "Accepted")}>Accepted</Th>
+                <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "samples_accepted", startResize, resetWidth }} filter={colFilter("samples_accepted", "number", "Samples accepted")}>Sample acc.</Th>
+                <Th theme={theme} num sortKey="products_shipped"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "products_shipped", startResize, resetWidth }} filter={colFilter("products_shipped", "number", "Shipped")}>Shipped</Th>
+                <Th theme={theme} num sortKey="clicks"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "clicks", startResize, resetWidth }} filter={colFilter("clicks", "number", "Clicks")}>Clicks</Th>
+                <Th theme={theme} num sortKey="sales"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "sales", startResize, resetWidth }} filter={colFilter("sales", "number", "Sales")}>Sales</Th>
+                <Th theme={theme}     sortKey="bottleneck"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "bottleneck", startResize, resetWidth }} filter={colFilter("bottleneck", "select", "Bottleneck", { options: BOTTLENECK_OPTIONS })}>Bottleneck</Th>
               </tr>
             </thead>
             <tbody>
@@ -253,7 +264,18 @@ export default function CampaignsOpsPage() {
                       <Td theme={theme} num>{friendlyNumber(c.clicks)}</Td>
                       <Td theme={theme} num style={{ fontWeight: c.sales > 0 ? 600 : 400, color: c.sales > 0 ? theme.text : theme.textMuted }}>{friendlyNumber(c.sales)}</Td>
                       <Td theme={theme}>
-                        {bottleneck ? <BottleneckBadge theme={theme} mode={mode} label={bottleneck.label} tone={bottleneck.tone} /> : <span style={{ color: theme.textMuted }}>—</span>}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          {bottleneck ? <BottleneckBadge theme={theme} mode={mode} label={bottleneck.label} tone={bottleneck.tone} /> : <span style={{ color: theme.textMuted }}>—</span>}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setMatchesFor(c); }}
+                            title="Rank the creator base against this campaign"
+                            style={{
+                              height: 22, padding: "0 8px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                              fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+                              border: `1px solid ${theme.border}`, background: theme.surface, color: theme.textMid,
+                            }}
+                          >Find creators</button>
+                        </div>
                       </Td>
                     </tr>
                     {isOpen && (
@@ -557,7 +579,7 @@ function SampleStatus({ theme, v }) {
   return <span style={{ color: theme.text, fontWeight: 500 }}>{label}</span>;
 }
 
-function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resize }) {
+function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resize, filter }) {
   const isSortable = !!sortKey && !!onSort;
   const isActive = isSortable && sortBy === sortKey;
   const arrow = !isActive ? "" : (sortDir === "asc" ? " ↑" : " ↓");
@@ -580,6 +602,7 @@ function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resiz
       onMouseLeave={isSortable ? (e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; } : undefined}
     >
       {children}{arrow}
+      {filter}
       {resize && (
         /* Swallow clicks from the handle so drag/reset never triggers the header sort. */
         <span onClick={(e) => e.stopPropagation()}>

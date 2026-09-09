@@ -25,6 +25,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { supabase } from "../lib/supabase.js";
 import { parseColumnFilters } from "../lib/tableQuery.js";
+import { applyFilters } from "../lib/supabaseFilter.js";
 import { getDefaultTeamId, createCampaign as createAiCampaign } from "../automation/conversation-state.js";
 import {
   DEFAULT_OFFERING,
@@ -164,16 +165,19 @@ export function outboundCampaignsRoutes() {
 
       // Column-level filters: filter[column_name]=value. Express's extended
       // query parser delivers this as a nested req.query.filter object, so we
-      // use the shared parser (handles nested + flat forms). Only `name` is
-      // applied here; unknown keys are ignored.
+      // use the shared parser (handles nested + flat forms). Values carry the
+      // operator grammar the header filter popover writes; unknown keys are
+      // ignored. status/audience_type are deliberately absent: the tabs above
+      // the table already own those, and a second filter would fight them.
       const filters = parseColumnFilters(req.query);
+      const FILTERABLE = { name: "text", daily_cap: "number", auto_reply: "boolean", created_at: "date" };
 
       let q = supabase.from("email_campaigns")
         .select("*", { count: "exact" })
         .eq("team_id", teamId);
       if (status !== "all") q = q.eq("status", status);
       if (audience !== "all") q = q.eq("audience_type", audience);
-      if (filters.name) q = q.ilike("name", `%${filters.name}%`);
+      q = applyFilters(q, filters, FILTERABLE);
       q = q.order(sortBy, { ascending }).range(offset, offset + limit - 1);
 
       const { data, error, count } = await q;

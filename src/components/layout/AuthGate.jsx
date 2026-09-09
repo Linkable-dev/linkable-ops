@@ -2,17 +2,13 @@ import { Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import LoginPage from "../../pages/LoginPage";
-import { BrandLoader } from "../ui/BrandLoader";
+import { FullPageLoader } from "../ui/BrandLoader";
 
 export default function AuthGate() {
   const { admin, loading, accessDenied } = useAuth();
   const { theme } = useTheme();
 
-  if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: theme.bg }}>
-      <BrandLoader />
-    </div>
-  );
+  if (loading) return <FullPageLoader />;
 
   if (accessDenied) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: theme.bg, color: theme.text, fontFamily: "inherit" }}>
