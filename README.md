@@ -148,6 +148,31 @@ back on is deliberate and manual.
 an at-risk and an auto-paused inbox raise an alert under **Sending** — a log
 nobody reads is not a safeguard.
 
+## Running the crons by hand, and CRON_SECRET
+
+Every `/api/cron/*` route needs `CRON_SECRET` as a bearer token
+(`?secret=` also works for a quick manual hit, but a URL is a poor place for a
+secret). Add `?dry=1` to any of them to see what a run would do without doing
+it.
+
+    curl -H "Authorization: Bearer $CRON_SECRET" \
+      "https://linkable-ops.vercel.app/api/cron/morning-brief?dry=1"
+
+**The local value drifts from production.** It has been rotated in Vercel at
+least once without `.env` being updated, and the only symptom is a flat 401
+that looks identical to a missing secret. If a cron works in production but
+401s from your machine, that is what has happened. Re-sync with:
+
+    vercel env pull .env.production        # needs a login that owns the project
+    grep CRON_SECRET .env.production       # then copy it into .env
+
+Note the Vercel CLI must be logged into the account that owns `linkable-ops`.
+`.vercel/project.json` is correct and should be left alone; if `vercel env ls`
+says "Could not retrieve Project Settings", the usual cause is being logged in
+as a different account rather than a broken link, and deleting `.vercel` will
+lose the correct project id for no gain. Check with `vercel whoami` and
+`vercel teams ls` first.
+
 ## The morning brief
 
 `server/lib/morning-brief.js` is the one push in an otherwise pull-only
