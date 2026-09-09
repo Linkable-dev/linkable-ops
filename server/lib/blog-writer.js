@@ -222,6 +222,20 @@ Follow every rule in the style guide and only state facts from the facts file.`;
       const heroImageId = candidates.some((c) => c.id === a.heroImageId) ? a.heroImageId : candidates[0].id;
       return { article: { ...a, heroImageId }, attempts: log, model: MODEL, cost: Number(spent.toFixed(4)), valid: true };
     }
+    // A full rewrite needs roughly as long as the attempt just made. When that no
+    // longer fits, try the cheap repair pass, which only rewrites what failed.
+    const noRoomForRewrite = Date.now() - started + took > DEADLINE_MS || spent + cost > MAX_COST_USD;
+    if (noRoomForRewrite && Date.now() - started + 12_000 < DEADLINE_MS && spent + 0.02 < MAX_COST_USD) {
+      const fixed = await repairArticle(client, a, problems);
+      spent += fixed.cost;
+      const after = validateArticle(fixed.article);
+      log.push({ attempt, note: `repair pass (${fixed.cost.toFixed(4)} USD)`, fixed: problems.filter((x) => !after.includes(x)), remaining: after });
+      if (!after.length) {
+        const heroImageId = candidates.some((c) => c.id === fixed.article.heroImageId) ? fixed.article.heroImageId : candidates[0].id;
+        return { article: { ...fixed.article, heroImageId }, attempts: log, model: MODEL, cost: Number(spent.toFixed(4)), valid: true };
+      }
+      if (after.length < best.problems.length) best = { article: fixed.article, problems: after };
+    }
     // Stop retrying when another attempt would blow the budget; hand back the
     // best draft so a human can fix it instead of publishing something invalid.
     if (spent + cost > MAX_COST_USD) { log.push({ note: `budget ${MAX_COST_USD} USD reached after ${attempt} attempt(s)` }); break; }
@@ -255,6 +269,73 @@ async function pickNextTopic() {
 
 // Title-only rewrite: cheap alternative to a full retry when the article is
 // fine but its title collides with an existing one.
+// Most rejected drafts fail on mechanical rules: a banned word, one H2 too many,
+// a title a few characters long. Regenerating the whole article costs another 38
+// seconds, which never fits the function's 60 second ceiling, so the retry loop
+// could never actually run. This asks only for the parts that need changing:
+// a few hundred output tokens, a few seconds, and it keeps the article that was
+// otherwise fine. Returns { article, cost } with the edits applied.
+const RepairSchema = z.object({
+  title: z.string().nullable(),
+  metaDescription: z.string().nullable(),
+  excerpt: z.string().nullable(),
+  blockEdits: z.array(z.object({
+    index: z.number().describe("0-based index of the block to replace"),
+    type: z.enum(["p", "h2", "h3", "ul", "ol", "quote"]),
+    text: z.string().nullable(),
+    items: z.array(z.string()).nullable(),
+  })),
+  deleteIndexes: z.array(z.number()),
+});
+
+export async function repairArticle(client, a, problems) {
+  const outline = (a.blocks || [])
+    .map((b, i) => `${i}. [${b.type}] ${(b.text || (b.items || []).join(" | ")).slice(0, 240)}`)
+    .join("\n");
+  const res = await client.messages.parse({
+    model: MODEL, max_tokens: 2000,
+    output_config: { effort: "low", format: zodOutputFormat(RepairSchema) },
+    system: [{ type: "text", text: style, cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: `This article was rejected by the style checker. Fix ONLY what the problems below require and change nothing else.
+
+Problems:
+- ${problems.join("\n- ")}
+
+Title (${a.title.length} chars): ${a.title}
+Meta description (${a.metaDescription.length} chars): ${a.metaDescription}
+Excerpt: ${a.excerpt}
+
+Blocks:
+${outline}
+
+Rules for your reply:
+- Set title, metaDescription or excerpt only if that field is named in a problem; otherwise null.
+- blockEdits replaces a block in place: give its index and the complete new block. To rewrite a sentence that uses a banned word, return the whole block text with that word replaced by a plain English alternative.
+- To reduce the number of H2 sections, change an H2 to type "h3" (keep its text) rather than deleting the section.
+- deleteIndexes removes blocks entirely; use it only when a problem needs fewer blocks and nothing else will do.
+- Keep the word count roughly the same. British English. No dashes, no exclamation marks, no colons in the title.` }],
+  });
+  const cost = usageCost(res.usage);
+  const out = res.parsed_output;
+  if (!out) return { article: a, cost };
+  const blocks = (a.blocks || []).map((b) => ({ ...b }));
+  for (const e of out.blockEdits || []) {
+    if (Number.isInteger(e.index) && e.index >= 0 && e.index < blocks.length) {
+      blocks[e.index] = { type: e.type, text: e.text ?? null, items: e.items ?? null };
+    }
+  }
+  const drop = new Set((out.deleteIndexes || []).filter((i) => Number.isInteger(i) && i >= 0 && i < blocks.length));
+  const article = {
+    ...a,
+    title: out.title || a.title,
+    metaDescription: out.metaDescription || a.metaDescription,
+    excerpt: out.excerpt || a.excerpt,
+    blocks: blocks.filter((_, i) => !drop.has(i)),
+  };
+  if (out.title) article.slug = slugify(out.title);
+  return { article, cost };
+}
+
 async function retitle(client, a, existingTitles, dup) {
   const Schema = z.object({ titles: z.array(z.string()) });
   const res = await client.messages.parse({
