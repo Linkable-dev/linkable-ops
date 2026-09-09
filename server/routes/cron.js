@@ -17,6 +17,7 @@ import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
 import { generatePost, triggerSiteRebuild, edgeEnabled, generateViaEdge } from "../lib/blog-writer.js";
 import { refreshConversions } from "../lib/outbound-attribution.js";
+import { loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -229,7 +230,26 @@ export function cronRoutes() {
       const batch = Math.min(Math.max(parseInt(req.query.batch) || 200, 10), 500);
       const dryRun = req.query.dry === "1" || req.query.dry === "true";
       const discovery = await autoTopUpDiscovery({ teamId, threshold, batch, dryRun });
-      res.json({ discovery });
+
+      // Record today's brand health scores while we are here. Tomorrow's radar
+      // needs yesterday's numbers to show a direction, and a falling score is
+      // the signal — the level alone says much less. Never blocks discovery.
+      let health = null;
+      if (!dryRun) {
+        try {
+          const facts = await loadBrandFacts();
+          health = await snapshotHealth(facts.map((b) => ({
+            user_id: b.user_id,
+            score: scoreBrand(b).score,
+            paying: /^shopify_[0-9]+/.test(b.account_id || "") && !b.sub_test,
+          })));
+        } catch (e) {
+          console.warn("[cron/auto-discover] health snapshot skipped:", e.message);
+          health = { error: e.message };
+        }
+      }
+
+      res.json({ discovery, health });
     } catch (err) {
       console.error("/cron/auto-discover error:", err);
       res.status(500).json({ error: err.message });

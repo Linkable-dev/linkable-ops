@@ -25,6 +25,7 @@ import { normalizeDomain } from "../lib/outbound-attribution.js";
 import {
   WEIGHTS, audienceScore, scoreCreator, parseShippingCountries, countryToIso,
 } from "../lib/campaign-matchmaking.js";
+import { HEALTH_WEIGHTS, scoreBrand } from "../lib/brand-health.js";
 
 let server, base;
 
@@ -518,5 +519,46 @@ describe("campaign matchmaking", { timeout: 120_000 }, () => {
     // Ranked, best first.
     const scores = matches.matches.map((m) => m.score);
     assert.deepEqual(scores, [...scores].sort((a, b) => b - a), "matches are not in rank order");
+describe("brand health", { timeout: 120_000 }, () => {
+  test("the weights sum to 100", () => {
+    assert.equal(Object.values(HEALTH_WEIGHTS).reduce((a, b) => a + b, 0), 100);
+  });
+
+  test("a score stays in range for any brand, however sparse the record", () => {
+    const rows = [
+      { last_sign_in: new Date().toISOString(), active_campaigns: 3, creators_accepted: 9, samples_accepted: 4, samples_shipped: 4, orders_30d: 8, orders_prev_30d: 2, clicks_30d: 900 },
+      {},
+      { last_sign_in: "nonsense", active_campaigns: "x", creators_accepted: null, samples_accepted: -3, samples_shipped: -9, orders_30d: -1, clicks_30d: -1 },
+      { last_sign_in: new Date(0).toISOString(), active_campaigns: 0, creators_accepted: 0, samples_accepted: 5, samples_shipped: 0, orders_30d: 0, clicks_30d: 0, sub_status: "FROZEN" },
+    ];
+    for (const r of rows) {
+      const { score, reasons, risks } = scoreBrand(r);
+      assert.ok(score >= 0 && score <= 100, `score ${score} out of range`);
+      assert.ok(Array.isArray(reasons) && Array.isArray(risks));
+    }
+  });
+
+  test("shipping nothing you owe scores below shipping all of it", () => {
+    const base = { last_sign_in: new Date().toISOString(), active_campaigns: 1, creators_accepted: 3, orders_30d: 1, clicks_30d: 10 };
+    const shipped = scoreBrand({ ...base, samples_accepted: 4, samples_shipped: 4 }).score;
+    const unshipped = scoreBrand({ ...base, samples_accepted: 4, samples_shipped: 0 }).score;
+    assert.ok(unshipped < shipped, `unshipped ${unshipped} should score below shipped ${shipped}`);
+  });
+
+  test("a failed payment is always the first thing an operator is told", () => {
+    const { risks } = scoreBrand({ last_sign_in: new Date().toISOString(), active_campaigns: 1, sub_status: "FROZEN", samples_accepted: 2, samples_shipped: 0 });
+    assert.match(risks[0], /Payment failed/);
+  });
+
+  test("the two rankings hold only the brands they are about", async () => {
+    const h = await get("/insights/health?limit=50");
+    assert.ok(h.totals.brands > 0, "no brands scored");
+    for (const b of h.churnRadar) assert.equal(b.paying, true, `${b.store_name} is on the churn radar but is not paying`);
+    for (const b of h.trialRanking) assert.equal(b.in_trial, true, `${b.store_name} is in the trial ranking but is not in a trial`);
+    const trialScores = h.trialRanking.map((b) => b.score);
+    assert.deepEqual(trialScores, [...trialScores].sort((a, b) => b - a), "trial ranking is not ordered");
+    for (const b of h.all) assert.ok(b.score >= 0 && b.score <= 100);
+    assert.equal(h.totals.bands.healthy + h.totals.bands.watch + h.totals.bands["at risk"], h.totals.brands,
+      "every brand must fall in exactly one band");
   });
 });

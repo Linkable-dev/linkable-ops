@@ -88,6 +88,8 @@ export const api = {
   saveMetric: (body) => request("/insights/metrics", { method: "POST", body: JSON.stringify(body) }),
   deleteMetric: (id) => request(`/insights/metrics/${id}`, { method: "DELETE" }),
   getBrand360: (userId) => request(`/insights/brand/${userId}`),
+  // Brand health: score per brand, plus the churn radar and trial ranking.
+  getBrandHealth: ({ limit = 50 } = {}) => request(`/insights/health?limit=${limit}`),
   getHomeSeries: (range = "90d") => request(`/insights/series?range=${encodeURIComponent(range)}`),
   askData: (question) => request("/insights/ask", { method: "POST", body: JSON.stringify({ question }) }),
   globalSearch: (q) => request(`/insights/search?q=${encodeURIComponent(q)}`),

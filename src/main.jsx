@@ -28,6 +28,7 @@ const AiCampaignsPage = lazy(() => import("./pages/AiCampaignsPage"));
 const AiCampaignDetailPage = lazy(() => import("./pages/AiCampaignDetailPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const TrialsPage = lazy(() => import("./pages/TrialsPage"));
+const HealthPage = lazy(() => import("./pages/HealthPage"));
 const BlogPage = lazy(() => import("./pages/blog/BlogPage"));
 const BlogEditorPage = lazy(() => import("./pages/blog/BlogEditorPage"));
 
@@ -45,6 +46,7 @@ createRoot(document.getElementById("root")).render(
                   <Route element={<App />}>
                     <Route path="/" element={<HomePage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
+                    <Route path="/health" element={<HealthPage />} />
                     <Route path="/ask" element={<AskPage />} />
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
