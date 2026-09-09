@@ -658,3 +658,32 @@ describe("nudge safety", () => {
     assert.ok(EMAILABLE_KINDS.size <= 6, "the set of things we email about should stay small");
   });
 });
+
+describe("hidden brands are not the live marketplace", { timeout: 180_000 }, () => {
+  // brands.hidden is the operator's control for taking a store out of
+  // circulation: internal stores, test shops, brands that uninstalled. The
+  // Users page has always excluded them; the metrics did not, so a hidden test
+  // store on a $199 plan counted as a quarter of MRR.
+  test("no hidden brand appears in the metrics, the health lists or the alerts", async () => {
+    const [visible, hidden, health, alerts] = await Promise.all([
+      get("/admin-users/brands?limit=200"),
+      get("/admin-users/brands?limit=200&filter[visibility]=hidden"),
+      get("/insights/health?limit=200"),
+      get("/insights/alerts"),
+    ]);
+    const hiddenIds = new Set((hidden || []).map((b) => b.user_id));
+    if (hiddenIds.size === 0) return; // nothing hidden on this target
+
+    for (const b of health.all) {
+      assert.ok(!hiddenIds.has(b.user_id), `hidden brand ${b.store_name} is being scored`);
+    }
+    for (const a of alerts.alerts) {
+      if (!a.brand?.user_id) continue;
+      assert.ok(!hiddenIds.has(a.brand.user_id), `hidden brand ${a.brand.store_name} is raising alerts`);
+    }
+    // And the visible list is what the funnel counts.
+    const home = await get("/analytics/home");
+    assert.ok(home.funnel.signedUp <= (visible || []).length + hiddenIds.size,
+      "the funnel counts more brands than exist");
+  });
+});

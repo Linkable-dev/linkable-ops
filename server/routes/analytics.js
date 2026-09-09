@@ -253,7 +253,13 @@ export function analyticsRoutes() {
   // out). A brand whose brands.trial_expiration_date is in the future is on a
   // free trial (standard 14-day or admin-granted) and NOT yet billed, so it is
   // excluded from live MRR and counted as pipeline instead.
-  const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz`;
+  // A brand is "live" only if it is also visible in the marketplace. brands.hidden
+  // is what an operator sets from Manage to take a store out of circulation —
+  // internal stores, test shops, and brands that have uninstalled the app — and
+  // the Users page has always excluded them so the list reads as the live
+  // marketplace. The metrics did not, so a hidden test store on a $199 plan was
+  // counted as a quarter of MRR.
+  const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz AND COALESCE(b.hidden, false) = false`;
   router.get("/home", async (req, res) => {
     try {
       // app_subscriptions is the main app's Shopify source-of-truth, but it does

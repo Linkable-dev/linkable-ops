@@ -17,7 +17,13 @@ import { inboxHealth } from "../lib/deliverability.js";
 
 // Soft-delete sentinel used across the main app's tables.
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
-const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz`;
+// A brand is "live" only if it is also visible in the marketplace. brands.hidden
+// is what an operator sets from Manage to take a store out of circulation —
+// internal stores, test shops, and brands that have uninstalled the app — and
+// the Users page has always excluded them so the list reads as the live
+// marketplace. The metrics did not, so a hidden test store on a $199 plan was
+// counted as a quarter of MRR.
+const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz AND COALESCE(b.hidden, false) = false`;
 const LINK = { INVITED: 1, APPLIED: 2, ACCEPTED: 3, REJECTED: 4, ENDED: 5 };
 // products.status 5 is a Shopify-synced product that was never launched as a campaign.
 const PRODUCT_STATUS = { 0: "unset", 1: "new", 2: "active", 3: "paused", 4: "ended", 5: "not launched" };
@@ -539,6 +545,10 @@ async function homeSeries(rangeKey) {
            AND (s.cancelled_at IS NULL OR s.cancelled_at >= g + $3::interval)
            AND (s.trial_ends_at IS NULL OR s.trial_ends_at < g + $3::interval)
            AND COALESCE(s.test, false) = false AND s.price_amount > 0
+           -- Same live-marketplace rule as the MRR tile; without it the tile
+           -- and the sparkline beside it disagree again.
+           AND NOT EXISTS (
+             SELECT 1 FROM brands hb WHERE hb.user_id = s.user_id AND COALESCE(hb.hidden, false) = true)
            -- One currency only. price_amount is in price_currency, so summing
            -- the column across rows was adding GBP subscriptions to USD ones
            -- and the sparkline drifted away from the MRR tile beside it.

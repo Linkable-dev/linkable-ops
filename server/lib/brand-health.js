@@ -163,7 +163,11 @@ export async function loadBrandFacts() {
       WHERE l3.brand_user_id = u.id AND ${ND("l3")}
         AND l3.updated >= NOW() - INTERVAL '30 days'
     ) lk ON true
-    WHERE u.role = 2 AND u.deleted = 'infinity'::timestamptz AND ${ND("b")}`);
+    WHERE u.role = 2 AND u.deleted = 'infinity'::timestamptz AND ${ND("b")}
+      -- Hidden means out of the live marketplace: internal stores, test shops,
+      -- and brands that uninstalled. Scoring them puts names on the churn
+      -- radar that nobody can act on.
+      AND COALESCE(b.hidden, false) = false`);
   return rows;
 }
 
