@@ -127,3 +127,23 @@ level alone says much less than the change.
 A missing signal never counts against a brand — nothing outstanding to ship
 scores as fulfilled, not as failed — and a frozen payment is always the first
 risk an operator is shown, because it locks the app for the customer.
+## Sender deliverability
+
+`server/lib/deliverability.js` replaces the runbook line "watch bounce rate per
+inbox, above 5% take it offline" — a human remembering to run a query — with a
+check on the outbound cron. It runs **before** senders are picked, so a burning
+inbox is out of the pool for that tick rather than after it.
+
+Thresholds over a 14-day window: bounce rate above 5%, or complaint rate above
+0.3% (mailbox providers start filtering there, well before bounces look
+alarming). An inbox with fewer than 25 sends in the window is never judged — one
+bounce out of three is 33% and means nothing.
+
+The asymmetry is the safety property, and is covered by tests: this pauses an
+inbox on its own and **never** resumes one. Pausing costs part of a day's send
+capacity; resuming into a reputation problem costs the domain. Turning an inbox
+back on is deliberate and manual.
+
+`GET /api/outbound/inbox-health` reports every inbox with its verdict, and both
+an at-risk and an auto-paused inbox raise an alert under **Sending** — a log
+nobody reads is not a safeguard.

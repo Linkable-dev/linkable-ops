@@ -17,6 +17,7 @@ import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { cancelPendingTouches } from "../automation/sequencer.js";
 import { normalizeInboundPayload, extractReplyBody } from "../automation/inbound-parser.js";
 import { attributionSummary, refreshConversions } from "../lib/outbound-attribution.js";
+import { inboxHealth, enforceInboxHealth, THRESHOLDS } from "../lib/deliverability.js";
 
 // Shared scope-window builder. Returns null when scope/run_date imply lifetime.
 // Callers apply the returned .or(...) clause to a Supabase query.
@@ -149,6 +150,15 @@ export function outboundRoutes() {
   router.post("/attribution/refresh", async (req, res) => {
     try { res.json(await refreshConversions(req.dbTarget)); }
     catch (e) { console.error("[outbound/attribution/refresh]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // ---------- SENDER DELIVERABILITY ----------
+  // Per-inbox bounce and complaint rates with the verdict for each. Read-only.
+  router.get("/inbox-health", async (req, res) => {
+    try {
+      const boxes = await inboxHealth();
+      res.json({ thresholds: THRESHOLDS, inboxes: boxes });
+    } catch (e) { console.error("[outbound/inbox-health]", e); res.status(500).json({ error: e.message }); }
   });
 
   router.get("/stats", async (req, res) => {

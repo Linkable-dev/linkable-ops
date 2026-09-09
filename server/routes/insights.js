@@ -13,6 +13,7 @@ import { commissionEarnedSql } from "../lib/mainAppSql.js";
 import { draftNudge } from "../lib/nudge-writer.js";
 import { sendNudgeEmail, nudgeFrom, nudgeReplyTo } from "../lib/nudge-mailer.js";
 import { brandHealth, loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
+import { inboxHealth } from "../lib/deliverability.js";
 
 // Soft-delete sentinel used across the main app's tables.
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -203,6 +204,38 @@ export async function buildAlerts({ shipDays = 5, applyDays = 7, trialDays = 3, 
     }
   } catch (e) {
     console.warn("[insights/alerts] blog freshness check skipped:", e.message);
+  }
+
+  // A sending inbox that has been taken out of the pool, automatically or by
+  // hand. Logged in the cron either way, but a log nobody reads is not a
+  // safeguard — outbound capacity silently dropping is worth a line here.
+  try {
+    for (const box of await inboxHealth()) {
+      if (!box.breaches.length && box.is_active) continue;
+      if (box.is_active) {
+        alerts.push({
+          key: `inbox-risk:${box.email}`,
+          fingerprint: `${box.sent}|${box.bounced}|${box.complained}`,
+          kind: "deliverability", severity: "danger",
+          title: `Sending inbox at risk: ${box.email}`,
+          detail: `${box.breaches.join(" and ")} over ${box.sent} sends in the last ${box.window_days} days. The daily job takes an inbox offline once it crosses either line.`,
+          action: "Check the list quality behind this campaign before the domain's reputation follows.",
+          since: null, href: "/ai/campaigns",
+        });
+      } else if (/auto-paused/.test(box.notes || "")) {
+        alerts.push({
+          key: `inbox-paused:${box.email}`,
+          fingerprint: String(box.notes || "").slice(-80),
+          kind: "deliverability", severity: "warn",
+          title: `Sending inbox paused: ${box.email}`,
+          detail: `Taken out of the pool automatically — ${box.breaches.join(" and ") || "it crossed a deliverability threshold"}. Outbound is running on fewer inboxes until somebody puts it back.`,
+          action: "Fix the list quality, then set is_active back to true by hand; nothing turns an inbox back on for you.",
+          since: null, href: "/ai/campaigns",
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[insights/alerts] inbox health check skipped:", e.message);
   }
 
   // Payment failures, only where the subscription mirror exists.
