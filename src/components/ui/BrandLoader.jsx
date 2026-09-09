@@ -13,3 +13,21 @@ export function BrandLoader({ size = 40, label }) {
     </div>
   );
 }
+
+// The full-page loading state, so every phase of a cold load puts the mark in
+// the same place. Auth resolving and the route chunk arriving are two separate
+// loaders shown back to back; when they disagreed on vertical position the mark
+// visibly jumped up the moment auth finished, right before the page painted.
+// It also paints the themed ground — a transparent fallback flashed white
+// between the two phases in dark mode.
+export function FullPageLoader({ label, size }) {
+  const { theme } = useTheme();
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "center",
+      minHeight: "100vh", background: theme.bg,
+    }}>
+      <BrandLoader label={label} size={size} />
+    </div>
+  );
+}

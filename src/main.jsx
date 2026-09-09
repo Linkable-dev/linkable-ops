@@ -6,7 +6,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { DbTargetProvider } from "./contexts/DbTargetContext";
 import AuthGate from "./components/layout/AuthGate";
 import App from "./App";
-import { BrandLoader } from "./components/ui/BrandLoader";
+import { FullPageLoader } from "./components/ui/BrandLoader";
 import "./index.css";
 
 // Every page is code split: the login screen no longer pays for the charting
@@ -37,7 +37,7 @@ createRoot(document.getElementById("root")).render(
       <ThemeProvider>
         <DbTargetProvider>
           <AuthProvider>
-            <Suspense fallback={<div style={{ display: "flex", justifyContent: "center", paddingTop: "18vh" }}><BrandLoader /></div>}>
+            <Suspense fallback={<FullPageLoader />}>
               <Routes>
                 <Route path="/setup-password" element={<SetupPasswordPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
