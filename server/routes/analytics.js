@@ -382,7 +382,17 @@ export function analyticsRoutes() {
               WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
                 AND LOWER(status) IN ('paid', 'succeeded', 'completed')
               GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1) AS paid_out_currency,
-            (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks`),
+            (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks,
+            -- Sample fulfilment. This is where campaigns actually stall: a
+            -- creator accepted and is waiting on a box, so it belongs on Home
+            -- next to the money rather than only inside Campaign Operations.
+            -- 'shipped' has already passed 'accepted', so accepted counts both.
+            (SELECT COUNT(*) FROM sample_requests WHERE deleted = '-infinity'::timestamptz
+               AND status IN ('accepted', 'shipped')) AS samples_accepted,
+            (SELECT COUNT(*) FROM sample_requests WHERE deleted = '-infinity'::timestamptz
+               AND status = 'shipped') AS samples_shipped,
+            (SELECT COUNT(*) FROM sample_requests WHERE deleted = '-infinity'::timestamptz
+               AND status = 'pending') AS samples_pending`),
 
         // Subscription/trial health across active brands.
         cloudSqlQuery(`
@@ -461,6 +471,9 @@ export function analyticsRoutes() {
           paidOut: parseFloat(mk.paid_out || 0),
           paidOutCount: parseInt(mk.paid_out_count || 0),
           paidOutCurrency: mk.paid_out_currency || "USD",
+          samplesAccepted: parseInt(mk.samples_accepted || 0),
+          samplesShipped: parseInt(mk.samples_shipped || 0),
+          samplesPending: parseInt(mk.samples_pending || 0),
           clicks: parseInt(mk.clicks || 0),
         },
         subscriptions: {

@@ -197,7 +197,7 @@ export default function HomePage() {
         </Section>
         <Section title="Marketplace" hint="the two-sided activity brands and creators generate, in the shop currency">
           <div className="lk-grid">
-            {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" seed={i + 4} sub={i !== 1} /></div>)}
+            {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" seed={i + 4} sub={i !== 1} /></div>)}
           </div>
         </Section>
         <Section title="Subscription & trial health" hint="how the active brand base breaks down today">
@@ -224,6 +224,29 @@ export default function HomePage() {
   const maxTierMrr = Math.max(1, ...revenue.byTier.map((t) => t.mrr));
 
   // Funnel stages, each as a share of the top (signed-up) plus step conversion.
+  const pctOfBase = (n) => (funnel.signedUp ? `${Math.round((num(n) / funnel.signedUp) * 100)}%` : "—");
+
+  // The buckets are meant to partition the active base. They have not always
+  // summed to it, so any shortfall is shown as its own segment instead of
+  // silently disappearing.
+  const baseSplit = (() => {
+    const parts = [
+      { label: "Paying", n: num(subscriptions.paying), color: GREEN },
+      { label: "In free trial", n: num(subscriptions.inTrial), color: AMBER },
+      { label: "Linkable trial", n: num(subscriptions.extendedTrialActive), color: BLUE },
+      { label: "Cancelled · in grace", n: num(subscriptions.cancelledInGrace), color: ROSE },
+      { label: "No plan yet", n: num(subscriptions.noPaidPlan), color: "#9CA3AF" },
+    ];
+    const counted = parts.reduce((a, b) => a + b.n, 0);
+    const rest = num(funnel.signedUp) - counted;
+    if (rest > 0) parts.push({ label: "Unclassified", n: rest, color: "#D1D5DB" });
+    return parts;
+  })();
+
+  // Accepted samples the brand has not put in the post yet — the commonest
+  // reason a campaign stalls.
+  const samplesOwed = Math.max(0, num(marketplace.samplesAccepted) - num(marketplace.samplesShipped));
+
   const stages = [
     { label: "Signed up", value: funnel.signedUp, color: theme.text },
     { label: "Launched a campaign", value: funnel.launchedCampaign, color: BLUE },
@@ -348,13 +371,32 @@ export default function HomePage() {
           <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`creator share of GMV · ${num(marketplace.clicks)} link clicks`} spark={spark("commission")} delta={delta("clicks") && { ...delta("clicks"), text: `clicks ${delta("clicks").text}` }} />
           <Stat label="Average order" value={money(marketplace.avgOrder, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.linksWithOrders)} link${marketplace.linksWithOrders === 1 ? "" : "s"} have sold`} />
           <Stat label="Paid out to creators" value={money(marketplace.paidOut, { cents: true, currency: marketplace.paidOutCurrency })} sub={`${num(marketplace.paidOutCount)} completed payout${marketplace.paidOutCount === 1 ? "" : "s"}`} />
+          {/* The two tiles that say whether the marketplace is actually
+              working: samples are where campaigns stall, and clicks-to-sales
+              is whether the traffic creators send converts at all. */}
+          <Stat
+            label="Samples shipped"
+            value={num(marketplace.samplesShipped)}
+            accent={samplesOwed > 0 ? AMBER : undefined}
+            sub={
+              samplesOwed > 0
+                ? `${num(samplesOwed)} accepted but not sent · ${num(marketplace.samplesPending)} awaiting a yes or no`
+                : `all ${num(marketplace.samplesAccepted)} accepted samples sent · ${num(marketplace.samplesPending)} awaiting a yes or no`
+            }
+          />
+          <Stat
+            label="Click to sale"
+            value={marketplace.clicks ? `${((marketplace.orders / marketplace.clicks) * 100).toFixed(2)}%` : "—"}
+            accent={marketplace.orders > 0 ? GREEN : undefined}
+            sub={`${num(marketplace.clicks)} link click${marketplace.clicks === 1 ? "" : "s"} → ${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"}`}
+          />
         </div>
       </Section>
 
       {/* ── Subscription & trial health ───────────────────────────────────── */}
       <Section title="Subscription & trial health" hint="how the active brand base breaks down today">
         <div className="lk-grid">
-          <Stat span={2} label="Paying" value={num(subscriptions.paying)} accent={GREEN} />
+          <Stat span={2} label="Paying" value={num(subscriptions.paying)} accent={GREEN} sub={`${pctOfBase(subscriptions.paying)} of the brand base`} />
           <Stat span={2} label="In free trial" value={num(subscriptions.inTrial)} accent={AMBER} sub="on a plan, not yet billed" />
           <Stat span={2} label="Linkable extended trials" value={num(subscriptions.extendedTrialActive)} accent={BLUE} sub="admin-granted, active" />
           <Stat span={2} label="Cancelled · in grace" value={num(subscriptions.cancelledInGrace)} accent={ROSE} sub="cancelled, trial access ending" />
@@ -373,6 +415,31 @@ export default function HomePage() {
             accent={momentumDelta < 0 ? RED : momentumDelta > 0 ? GREEN : undefined}
           />
         </div>
+
+        {/* The six tiles above are counts; this is the shape of the base in one
+            line. It also makes the unclassified remainder visible rather than
+            leaving it to be inferred from six numbers that do not quite add up
+            to the brand count. */}
+        <Card style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 12 }}>
+            How the {num(funnel.signedUp)} active brands break down
+          </div>
+          <div style={{ display: "flex", height: 12, borderRadius: 6, overflow: "hidden", background: theme.surfaceAlt }}>
+            {baseSplit.filter((b) => b.n > 0).map((b) => (
+              <div key={b.label} title={`${b.label}: ${b.n}`}
+                style={{ width: `${(b.n / Math.max(1, funnel.signedUp)) * 100}%`, background: b.color }} />
+            ))}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", marginTop: 12 }}>
+            {baseSplit.filter((b) => b.n > 0).map((b) => (
+              <div key={b.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: theme.textMid }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: b.color, flexShrink: 0 }} />
+                {b.label}
+                <span style={{ color: theme.text, fontWeight: 600 }}>{num(b.n)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
       </Section>
     </div>
   );
