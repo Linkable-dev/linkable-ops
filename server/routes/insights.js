@@ -9,6 +9,8 @@ import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { blogDb } from "../lib/blog-supabase.js";
+import { draftNudge } from "../lib/nudge-writer.js";
+import { sendNudgeEmail, nudgeFrom, nudgeReplyTo } from "../lib/nudge-mailer.js";
 
 // Soft-delete sentinel used across the main app's tables.
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -245,6 +247,52 @@ export async function loadDismissals(target = "prod") {
   await ensureDismissTable(target);
   const { rows } = await cloudSqlQuery(`SELECT key, fingerprint, until, by_email, created FROM ops_alert_dismissals`);
   return new Map(rows.map((r) => [r.key, r]));
+}
+
+// Nudges sent to a brand about an alert. Stored beside the dismissals so the
+// whole team can see that somebody already wrote to this brand today — the
+// failure mode this feature could otherwise introduce is three admins chasing
+// the same store within an hour.
+const nudgeTableReady = {};
+async function ensureNudgeTable(target) {
+  if (!nudgeTableReady[target]) {
+    nudgeTableReady[target] = cloudSqlQuery(`
+      CREATE TABLE IF NOT EXISTS ops_brand_nudges (
+        id bigserial PRIMARY KEY,
+        alert_key text NOT NULL,
+        alert_kind text,
+        fingerprint text,
+        user_id uuid,
+        to_email text NOT NULL,
+        subject text NOT NULL,
+        body text NOT NULL,
+        by_email text,
+        resend_id text,
+        created timestamptz NOT NULL DEFAULT NOW()
+      )`)
+      .then(() => cloudSqlQuery(
+        `CREATE INDEX IF NOT EXISTS ops_brand_nudges_key_idx ON ops_brand_nudges (alert_key, created DESC)`))
+      .catch((e) => { delete nudgeTableReady[target]; throw e; });
+  }
+  return nudgeTableReady[target];
+}
+
+// Latest nudge per alert key.
+export async function loadNudges(target = "prod") {
+  await ensureNudgeTable(target);
+  const { rows } = await cloudSqlQuery(`
+    SELECT DISTINCT ON (alert_key) alert_key, to_email, by_email, subject, created
+    FROM ops_brand_nudges ORDER BY alert_key, created DESC`);
+  return new Map(rows.map((r) => [r.alert_key, r]));
+}
+
+// Re-derive one alert server-side from its key. The browser is never trusted
+// to say what an alert contains: those strings become the prompt and the
+// recipient, so a forged "detail" would be a way to send arbitrary mail from
+// a linkable.link address.
+async function findAlert(key) {
+  const alerts = await buildAlerts();
+  return alerts.find((a) => a.key === key) || null;
 }
 
 // Returns the alert with a `dismissed` reason when a dismissal still applies.
@@ -721,15 +769,20 @@ export function insightsRoutes() {
   // GET /alerts?all=1      → every alert, dismissed ones carry `dismissed`
   router.get("/alerts", async (req, res) => {
     try {
-      const [alerts, dismissals] = await Promise.all([
+      const [alerts, dismissals, nudges] = await Promise.all([
         buildAlerts({
           shipDays: int(req.query.shipDays) || undefined,
           applyDays: int(req.query.applyDays) || undefined,
           trialDays: int(req.query.trialDays) || undefined,
         }),
         loadDismissals(req.dbTarget).catch((e) => { console.warn("[insights/alerts] dismissals unavailable:", e.message); return new Map(); }),
+        loadNudges(req.dbTarget).catch((e) => { console.warn("[insights/alerts] nudges unavailable:", e.message); return new Map(); }),
       ]);
-      const withState = alerts.map((a) => applyDismissal(a, dismissals.get(a.key)));
+      const withState = alerts.map((a) => {
+        const withDismissal = applyDismissal(a, dismissals.get(a.key));
+        const n = nudges.get(a.key);
+        return n ? { ...withDismissal, nudge: { at: n.created, by: n.by_email, to: n.to_email } } : withDismissal;
+      });
       const open = withState.filter((a) => !a.dismissed);
       res.json({
         alerts: req.query.all === "1" ? withState : open,
@@ -771,6 +824,87 @@ export function insightsRoutes() {
       await cloudSqlQuery(`DELETE FROM ops_alert_dismissals WHERE key = ANY($1)`, [keys]);
       res.json({ ok: true, count: keys.length });
     } catch (e) { console.error("[insights/alerts/restore]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /alerts/draft { key } → { subject, body, to, from, alert }
+  // Writes the email but sends nothing. The operator reads it, edits it if
+  // they want, and sends from the modal.
+  router.post("/alerts/draft", async (req, res) => {
+    try {
+      const key = String(req.body?.key || "").slice(0, 200);
+      if (!key) return res.status(400).json({ error: "key required" });
+
+      const alert = await findAlert(key);
+      if (!alert) return res.status(404).json({ error: "That alert no longer exists — refresh the page." });
+      if (!alert.brand?.email) return res.status(400).json({ error: "This alert has no brand to write to." });
+
+      // Brand 360 is best-effort context: a draft without it is still usable.
+      const brand = alert.brand.user_id
+        ? await brand360(alert.brand.user_id).catch((e) => { console.warn("[alerts/draft] brand360:", e.message); return null; })
+        : null;
+
+      const sender = { name: req.admin?.name || req.admin?.email || "The Linkable team" };
+      const draft = await draftNudge({ alert, brand, sender });
+
+      // Some brand accounts are our own (internal test stores signed up with a
+      // linkable.link address). Sending a customer nudge to our own shared
+      // inbox is harmless but confusing, so say so rather than hide it.
+      const selfAddressed = /@(?:try)?linkable\.link$/i.test(alert.brand.email);
+
+      res.json({
+        ...draft,
+        to: alert.brand.email,
+        toName: alert.brand.store_name || null,
+        warning: selfAddressed
+          ? "That address is one of ours — this brand looks like an internal test account."
+          : null,
+        from: nudgeFrom(),
+        replyTo: nudgeReplyTo(),
+        alert: { key: alert.key, title: alert.title, detail: alert.detail, action: alert.action, severity: alert.severity },
+      });
+    } catch (e) { console.error("[insights/alerts/draft]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /alerts/send { key, subject, body, alsoDone? }
+  // The operator's edited text is trusted (a human wrote it); the RECIPIENT is
+  // not — it is re-derived from the alert so the UI can never redirect a send.
+  router.post("/alerts/send", async (req, res) => {
+    try {
+      const key = String(req.body?.key || "").slice(0, 200);
+      const subject = String(req.body?.subject || "").trim().slice(0, 200);
+      const body = String(req.body?.body || "").trim();
+      if (!key || !subject || !body) return res.status(400).json({ error: "key, subject and body are required" });
+
+      const alert = await findAlert(key);
+      if (!alert) return res.status(404).json({ error: "That alert no longer exists — refresh the page." });
+      const to = alert.brand?.email;
+      if (!to) return res.status(400).json({ error: "This alert has no brand to write to." });
+
+      const sent = await sendNudgeEmail({ to, subject, body });
+      if (!sent.success) return res.status(502).json({ error: `Could not send: ${sent.error}` });
+
+      await ensureNudgeTable(req.dbTarget);
+      await cloudSqlQuery(`
+        INSERT INTO ops_brand_nudges (alert_key, alert_kind, fingerprint, user_id, to_email, subject, body, by_email, resend_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [key, alert.kind || null, alert.fingerprint || null, alert.brand.user_id || null,
+         to, subject, body, req.admin?.email || null, sent.resendId || null]);
+
+      // Sending IS the chase, so close the alert unless asked not to. It comes
+      // back on its own if the brand still has not acted and the count changes.
+      if (req.body?.alsoDone !== false) {
+        await ensureDismissTable(req.dbTarget);
+        await cloudSqlQuery(`
+          INSERT INTO ops_alert_dismissals (key, fingerprint, until, by_email, created)
+          VALUES ($1, $2, NULL, $3, NOW())
+          ON CONFLICT (key) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, until = NULL, by_email = EXCLUDED.by_email, created = NOW()`,
+          [key, String(alert.fingerprint || ""), req.admin?.email || null]).catch((e) => {
+            console.warn("[alerts/send] could not auto-dismiss:", e.message);
+          });
+      }
+
+      res.json({ ok: true, to, resendId: sent.resendId || null });
+    } catch (e) { console.error("[insights/alerts/send]", e); res.status(500).json({ error: e.message }); }
   });
 
   router.get("/brand/:userId", async (req, res) => {
