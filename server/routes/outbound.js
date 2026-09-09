@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { cancelPendingTouches } from "../automation/sequencer.js";
 import { normalizeInboundPayload, extractReplyBody } from "../automation/inbound-parser.js";
+import { attributionSummary, refreshConversions } from "../lib/outbound-attribution.js";
 
 // Shared scope-window builder. Returns null when scope/run_date imply lifetime.
 // Callers apply the returned .or(...) clause to a Supabase query.
@@ -135,6 +136,21 @@ export function outboundRoutes() {
   //   scope=today (default) | all     — lifetime when "all"
   //   campaign_id=<uuid>              — filter to one campaign
   //   run_date=YYYY-MM-DD             — filter to one run; overrides scope
+  // ---------- REVENUE ATTRIBUTION ----------
+  // What outbound produced, not just what it sent. Joins the Supabase sends to
+  // the main app's brands on shop domain and contact email; see
+  // lib/outbound-attribution.js for why the two keys are not equally strong.
+  router.get("/attribution", async (req, res) => {
+    try { res.json(await attributionSummary(req.dbTarget)); }
+    catch (e) { console.error("[outbound/attribution]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Recompute now. Also runs nightly from the outbound cron.
+  router.post("/attribution/refresh", async (req, res) => {
+    try { res.json(await refreshConversions(req.dbTarget)); }
+    catch (e) { console.error("[outbound/attribution/refresh]", e); res.status(500).json({ error: e.message }); }
+  });
+
   router.get("/stats", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();

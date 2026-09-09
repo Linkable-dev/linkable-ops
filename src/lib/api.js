@@ -132,6 +132,9 @@ export const api = {
   getOutboundSend: (id) => request(`/outbound/sends/${id}`),
   getOutboundStats: ({ scope, campaignId, runDate } = {}) =>
     request(`/outbound/stats?${buildQs({ scope, campaign_id: campaignId, run_date: runDate })}`),
+  // Outbound revenue attribution: sends joined to the brands they produced.
+  getOutboundAttribution: () => request("/outbound/attribution"),
+  refreshOutboundAttribution: () => request("/outbound/attribution/refresh", { method: "POST", body: "{}" }),
   listOutboundRuns: ({ campaignId } = {}) =>
     request(`/outbound/runs?${buildQs({ campaign_id: campaignId })}`),
   stopOutbound: ({ emails, reason }) =>

@@ -21,6 +21,7 @@ import { outboundRoutes } from "../routes/outbound.js";
 import { adminUsersRoutes } from "../routes/admin-users.js";
 import { closeCloudSql } from "../lib/cloudsql.js";
 import { wordCount, readMinutes, validateArticle, LIMITS } from "../lib/blog-writer.js";
+import { normalizeDomain } from "../lib/outbound-attribution.js";
 
 let server, base;
 
@@ -368,5 +369,51 @@ describe("blog article rules", () => {
     const body = Array.from({ length: 70 }, () => ({ type: "p", text: "word ".repeat(10) }));
     const withDash = validateArticle({ title: "x".repeat(50), excerpt: "e", metaDescription: "m".repeat(130), blocks: [...body, { type: "p", text: "an em dash — here" }], faqs: [] });
     assert.ok(withDash.some((p) => p.includes("dash")), "an em dash passed the style check");
+  });
+});
+
+describe("outbound revenue attribution", { timeout: 120_000 }, () => {
+  // normalizeDomain IS the join. If it drifts, attribution silently reports
+  // zero conversions and nothing else fails, so pin the behaviour directly.
+  test("domains normalise to something two databases can agree on", () => {
+    const cases = [
+      ["https://www.Acme-Store.co.uk/collections/all", "acme-store.co.uk"],
+      ["acme.com", "acme.com"],
+      ["WWW.ACME.COM/", "acme.com"],
+      ["http://shop.acme.com:443", "shop.acme.com"],
+      ["acme.com.", "acme.com"],
+      ["mailto:hi@acme.com", "acme.com"],
+    ];
+    for (const [input, want] of cases) {
+      assert.equal(normalizeDomain(input), want, `normalizeDomain(${JSON.stringify(input)})`);
+    }
+  });
+
+  test("things that are not domains never become a join key", () => {
+    // Two blanks matching each other would attribute the whole brand base.
+    for (const junk of ["", null, undefined, "   ", "not a domain", "localhost", "/", "@"]) {
+      assert.equal(normalizeDomain(junk), null, `normalizeDomain(${JSON.stringify(junk)}) must be null`);
+    }
+  });
+
+  test("the funnel narrows and never claims more than was sent", async () => {
+    const a = await get("/outbound/attribution");
+    const t = a.totals;
+    assert.ok(t.contacted <= t.sends, `${t.contacted} addresses from ${t.sends} sends`);
+    assert.ok(t.signups <= t.matched, `${t.signups} signups from ${t.matched} matches`);
+    assert.ok(t.paying <= t.signups, `${t.paying} paying from ${t.signups} signups`);
+    assert.ok(t.mrr >= 0, "attributed MRR cannot be negative");
+    assert.equal(t.matched, t.signups + t.preExisting,
+      "every match is either attributed or pre-existing");
+  });
+
+  test("each split accounts for every send exactly once", async () => {
+    const a = await get("/outbound/attribution");
+    for (const key of ["byGroup", "bySender", "byTemplate"]) {
+      const sends = a[key].reduce((n, r) => n + r.sends, 0);
+      assert.equal(sends, a.totals.sends, `${key} covers ${sends} of ${a.totals.sends} sends`);
+      const signups = a[key].reduce((n, r) => n + r.signups, 0);
+      assert.equal(signups, a.totals.signups, `${key} covers ${signups} of ${a.totals.signups} signups`);
+    }
   });
 });

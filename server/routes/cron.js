@@ -16,6 +16,7 @@ import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discov
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
 import { generatePost, triggerSiteRebuild, edgeEnabled, generateViaEdge } from "../lib/blog-writer.js";
+import { refreshConversions } from "../lib/outbound-attribution.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -193,7 +194,21 @@ export function cronRoutes() {
         }
       }
       if (results.length === 0) log("[scheduler] no campaigns due to fire this tick");
-      res.json({ tick: now.toISOString(), fired: results.length, results, log: lines });
+
+      // Refresh the send → signup → revenue join on the same tick. It is a
+      // read of both databases and a small rewrite, and it never blocks the
+      // send: a failure here is logged, not raised.
+      let attribution = null;
+      if (!dryRun) {
+        try {
+          attribution = await refreshConversions("prod");
+          log(`[attribution] ${attribution.matched} matched, ${attribution.attributed} attributed to outbound`);
+        } catch (e) {
+          log(`[attribution] skipped: ${e.message}`);
+        }
+      }
+
+      res.json({ tick: now.toISOString(), fired: results.length, results, attribution, log: lines });
     } catch (err) {
       console.error("/cron/run-daily-outbound error:", err);
       res.status(500).json({ error: err.message });
