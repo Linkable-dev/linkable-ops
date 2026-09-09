@@ -79,12 +79,20 @@ export default function AiCampaignsPage() {
 
   const { widths, startResize, resetWidth } = useColumnWidths("ai-campaigns", DEFAULT_WIDTHS);
   const tableWidth = COLUMNS.reduce((sum, c) => sum + (widths[c.key] || c.width), 0);
-  const handleSort = (key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir));
-  const commitFilter = (col, val) => setFilters((f) => {
-    const next = { ...f };
-    if (val) next[col] = val; else delete next[col];
-    return next;
-  });
+  // Anything that changes the result set sends you back to page 1. Done in the
+  // handlers rather than an effect so there is no extra render pass.
+  const handleSort = (key, defaultDir) => { setPage(1); setSort((s) => nextSort(s, key, defaultDir)); };
+  const commitFilter = (col, val) => {
+    setPage(1);
+    setFilters((f) => {
+      const next = { ...f };
+      if (val) next[col] = val; else delete next[col];
+      return next;
+    });
+  };
+  const selectTab = (t) => { setPage(1); setTab(t); };
+  const selectAudience = (a) => { setPage(1); setAudience(a); };
+  const changePageSize = (n) => { setPage(1); setPageSize(n); };
 
   const loadCounts = useCallback(() => {
     api.getOutboundCampaignStatusCounts()
@@ -108,9 +116,10 @@ export default function AiCampaignsPage() {
       .finally(() => setLoading(false));
   }, [tab, audience, page, pageSize, sort, filters]);
 
+  // reload/loadCounts own their loading and error state; the effect only triggers them.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { loadCounts(); }, [loadCounts]);
-  useEffect(() => { setPage(1); }, [tab, audience, pageSize, sort, filters]);
 
   return (
     <div>
@@ -149,7 +158,7 @@ export default function AiCampaignsPage() {
         <TabBar
           tabs={AUDIENCE_TABS}
           active={audience}
-          onSelect={setAudience}
+          onSelect={selectAudience}
         />
       </div>
       <TabBar
@@ -158,7 +167,7 @@ export default function AiCampaignsPage() {
           return [id, n != null ? `${label} (${n})` : label];
         })}
         active={tab}
-        onSelect={setTab}
+        onSelect={selectTab}
       />
 
       {loading && campaigns.length === 0 ? (
@@ -266,7 +275,7 @@ export default function AiCampaignsPage() {
           pageSize={pageSize}
           total={total}
           onPageChange={setPage}
-          onPageSizeChange={setPageSize}
+          onPageSizeChange={changePageSize}
         />
       )}
     </div>

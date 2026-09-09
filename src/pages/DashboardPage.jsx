@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
-import { api, friendlyName, friendlyNumber } from "../lib/api";
+import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Skeleton, SkeletonStatGrid, SkeletonChartCard, SkeletonBars } from "../components/ui/Skeleton";
 import {
@@ -82,11 +82,9 @@ export default function DashboardPage() {
     </div>
   );
 
-  const { kpis, growth, trends, distributions, igStats, monetization, revenue, creatorPayments, payouts } = data;
-  // Only payouts that actually went out count as "paid out"; pending/failed/reversed are reported separately.
-  const isPaid = (p) => /^(paid|succeeded|completed|complete)$/i.test(p.status || "");
-  const paidOut = payouts.filter(isPaid).reduce((a, p) => ({ amount: a.amount + p.amount, count: a.count + p.count }), { amount: 0, count: 0 });
-  const pendingPayouts = payouts.filter((p) => !isPaid(p)).reduce((a, p) => ({ amount: a.amount + p.amount, count: a.count + p.count }), { amount: 0, count: 0 });
+  // Revenue, payouts, subscriptions and trials live on Home; this page covers the
+  // database itself: record counts, audience make-up and payment readiness.
+  const { kpis, growth, trends, distributions, igStats, monetization, creatorPayments } = data;
 
   return (
     <div>
@@ -110,23 +108,8 @@ export default function DashboardPage() {
         <MiniStat theme={theme} label="Invitations Sent" value={friendlyNumber(kpis.invitations)} />
       </div>
 
-      {/* Money — single card with clear sections */}
-      <Card style={{ padding: 0, marginBottom: 20 }}>
-        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${theme.border}` }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>Money</div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-          <MetricCell theme={theme} label="Revenue" value={moneyByCurrency(revenue.byCurrency, revenue.total)} sub={revenue.byCurrency.length > 1 ? "mixed currencies, not converted" : null} />
-          <MetricCell theme={theme} label="Orders" value={revenue.totalOrders} border />
-          <MetricCell theme={theme} label="Avg Order" value={money(revenue.avgOrderValue, primaryCurrency(revenue.byCurrency), { cents: true })} border />
-          <MetricCell theme={theme} label="Paid Out" value={money(paidOut.amount, "USD")} sub={`${paidOut.count} paid payout${paidOut.count === 1 ? "" : "s"}${pendingPayouts.count ? ` · ${pendingPayouts.count} not paid` : ""}`} border />
-          <MetricCell theme={theme} label="Links That Sold" value={revenue.uniqueLinksWithOrders} sub={`of ${kpis.links} links`} border />
-        </div>
-      </Card>
-
-      {/* Payments & Trials — two side-by-side cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
-        {/* Who can pay / get paid */}
+      {/* Who can pay / get paid. Revenue, subscriptions and trials live on Home. */}
+      <div style={{ marginBottom: 20 }}>
         <Card style={{ padding: 0, marginBottom: 0 }}>
           <div style={{ padding: "14px 20px", borderBottom: `1px solid ${theme.border}` }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Payment Readiness</div>
@@ -138,41 +121,16 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Trials */}
-        <Card style={{ padding: 0, marginBottom: 0 }}>
-          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Trials</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr" }}>
-            <MetricCell theme={theme} label="Active" value={monetization.activeTrial} />
-            <MetricCell theme={theme} label="Expired" value={monetization.expiredTrial} border />
-            <MetricCell theme={theme} label="Never trialed" value={kpis.brands - monetization.onTrial} border />
-          </div>
-          {monetization.trialPlans.length > 0 && (
-            <div style={{ padding: "10px 20px 16px", borderTop: `1px solid ${theme.border}` }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {monetization.trialPlans.map((tp) => (
-                  <span key={`${tp.plan}-${tp.interval}`} style={{
-                    padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 500,
-                    background: theme.surfaceAlt, color: theme.text,
-                  }}>
-                    {tp.count} on <strong>{tp.plan}</strong> ({tp.interval})
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
       </div>
 
       {/* Activity Trends */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-        <TrendChart theme={theme} mode={mode} title="User Signups" period="all time" data={trends.signups} color={theme.accent} tooltipStyle={tooltipStyle} />
-        <TrendChart theme={theme} mode={mode} title="Links Created" period="last 6 months" data={trends.links} color={theme.accent} tooltipStyle={tooltipStyle} />
+        <TrendChart theme={theme} title="User Signups" period="all time" data={trends.signups} color={theme.accent} tooltipStyle={tooltipStyle} />
+        <TrendChart theme={theme} title="Links Created" period="last 6 months" data={trends.links} color={theme.accent} tooltipStyle={tooltipStyle} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-        <TrendChart theme={theme} mode={mode} title="Messages" period="last 6 months" data={trends.chats} color={theme.accent} tooltipStyle={tooltipStyle} />
-        <TrendChart theme={theme} mode={mode} title="Products Added" period="all time" data={trends.products} color={theme.accent} tooltipStyle={tooltipStyle} />
+        <TrendChart theme={theme} title="Messages" period="last 6 months" data={trends.chats} color={theme.accent} tooltipStyle={tooltipStyle} />
+        <TrendChart theme={theme} title="Products Added" period="all time" data={trends.products} color={theme.accent} tooltipStyle={tooltipStyle} />
       </div>
 
       {/* Distributions */}
@@ -273,19 +231,6 @@ export default function DashboardPage() {
   );
 }
 
-// Money is shown in full with its currency (no 1.2K abbreviations, no hard-coded "$").
-function money(n, currency = "USD", { cents = false } = {}) {
-  try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 }).format(Number(n || 0));
-  } catch { return `${currency} ${Number(n || 0).toLocaleString()}`; }
-}
-function primaryCurrency(byCurrency) { return byCurrency?.[0]?.currency || "USD"; }
-// One currency → a single figure; several → each shown, never summed across currencies.
-function moneyByCurrency(byCurrency, fallbackTotal) {
-  if (!byCurrency || byCurrency.length === 0) return money(fallbackTotal, "USD");
-  if (byCurrency.length === 1) return money(byCurrency[0].total, byCurrency[0].currency);
-  return byCurrency.map((c) => money(c.total, c.currency)).join(" + ");
-}
 
 function Kpi({ theme, label, value, growth, sub, link }) {
   // Rolling windows (NOW() - 7/30 days), not calendar week/month.
@@ -294,7 +239,7 @@ function Kpi({ theme, label, value, growth, sub, link }) {
     <div style={{
       background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10,
       padding: "16px 18px", boxShadow: theme.shadow, transition: "background 0.2s, border-color 0.2s",
-      cursor: link ? "pointer" : "default", overflow: "hidden", height: 110, display: "flex", flexDirection: "column", justifyContent: "center",
+      cursor: link ? "pointer" : "default", minHeight: 110, display: "flex", flexDirection: "column", justifyContent: "center",
     }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color: theme.text }}>{friendlyNumber(value)}</div>
@@ -322,7 +267,7 @@ function MiniStat({ theme, label, value }) {
   );
 }
 
-function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
+function TrendChart({ theme, title, period, data, color, tooltipStyle }) {
   // "all time" series are bucketed by month on the server; the rest by week.
   const monthly = /all time/i.test(period || "");
   const tickLabel = (d) => new Date(d).toLocaleDateString(undefined, monthly ? { month: "short", year: "2-digit" } : { month: "short", day: "numeric" });
@@ -357,18 +302,6 @@ function TrendChart({ theme, mode, title, period, data, color, tooltipStyle }) {
   );
 }
 
-function MetricCell({ theme, label, value, sub, border }) {
-  return (
-    <div style={{
-      padding: "12px 16px",
-      borderLeft: border ? `1px solid ${theme.border}` : "none",
-    }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>{typeof value === "number" ? friendlyNumber(value) : value}</div>
-      <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>{label}</div>
-      {sub && <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 1 }}>{sub}</div>}
-    </div>
-  );
-}
 
 function ProgressRow({ theme, label, value, total }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0;

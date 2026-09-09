@@ -8,6 +8,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
+import { blogDb } from "../lib/blog-supabase.js";
 
 // Soft-delete sentinel used across the main app's tables.
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -167,6 +168,38 @@ export async function buildAlerts({ shipDays = 5, applyDays = 7, trialDays = 3, 
     action: "Check the creators posted and that their links work; ask the brand how the content is doing.",
     since: r.since, brand: brand(r), campaign: campaign(r), href: "/ops/campaigns",
   });
+
+  // The daily article cron can fail quietly, so treat a stale blog as an alert.
+  // Checked once per call and only on the prod target (the blog has one database).
+  try {
+    const { data, error } = await blogDb
+      .from("blog_posts")
+      .select("title, published_at, updated_at")
+      .eq("status", "published")
+      .order("published_at", { ascending: false, nullsFirst: false })
+      .limit(1);
+    if (error) throw new Error(error.message);
+    const latest = data?.[0];
+    const lastAt = latest?.published_at ? new Date(latest.published_at) : null;
+    const hours = lastAt ? (Date.now() - lastAt.getTime()) / 3_600_000 : Infinity;
+    if (hours > 48) {
+      alerts.push({
+        key: "blog:stale",
+        fingerprint: lastAt ? lastAt.toISOString().slice(0, 10) : "never",
+        kind: "blog",
+        severity: hours > 96 ? "warn" : "info",
+        title: "Daily article has not published",
+        detail: lastAt
+          ? `The last article went live ${Math.floor(hours / 24)} days ago ("${latest.title}"). The 07:00 UTC job publishes one a day.`
+          : "No article has ever been published from the ops app.",
+        action: "Check the Blog page for a failed draft, then run the daily job or write one by hand.",
+        since: lastAt ? lastAt.toISOString() : null,
+        href: "/blog",
+      });
+    }
+  } catch (e) {
+    console.warn("[insights/alerts] blog freshness check skipped:", e.message);
+  }
 
   // Payment failures, only where the subscription mirror exists.
   if (await hasTable("app_subscriptions")) {
@@ -358,6 +391,17 @@ const RANGES = {
   "all": { unit: "month", step: "1 month", count: null, label: null },
 };
 
+// node-postgres parses a DATE column into a JS Date at local midnight, so
+// String(d) gives "Tue Aug 11". That is not a date the client can read, and as a
+// lookup key it collides across years. Format from the local parts, which
+// round-trips what pg parsed (toISOString would shift the day west of UTC).
+function isoDay(d) {
+  if (!d) return "";
+  if (typeof d === "string") return d.slice(0, 10);
+  const dt = d instanceof Date ? d : new Date(d);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
 async function homeSeries(rangeKey) {
   const range = RANGES[rangeKey] || RANGES["90d"];
   const { unit, step } = range;
@@ -400,14 +444,14 @@ async function homeSeries(rangeKey) {
       : Promise.resolve(null),
   ]);
 
-  const byDate = (rows, key = "n") => Object.fromEntries(rows.map((r) => [String(r.date).slice(0, 10), num(r[key])]));
+  const byDate = (rows, key = "n") => Object.fromEntries(rows.map((r) => [isoDay(r.date), num(r[key])]));
   const maps = {
     brands: byDate(brands), creators: byDate(creators), campaigns: byDate(campaigns), accepted: byDate(accepted),
     orders: byDate(orders), gmv: byDate(orders, "gmv"), commission: byDate(orders, "commission"),
     clicks: byDate(clicks), trials: byDate(trials), mrr: mrr ? byDate(mrr, "mrr") : null,
   };
   const points = buckets.map((d) => {
-    const k = String(d).slice(0, 10);
+    const k = isoDay(d);
     const p = { date: k };
     for (const [name, m] of Object.entries(maps)) if (m) p[name] = m[k] || 0;
     return p;
@@ -564,6 +608,73 @@ ${DOMAIN_NOTES}`;
   return { sql, explanation, chart: chart || "none", summary, ...result, model: ASK_MODEL, cost_usd: Math.round(costUsd * 10000) / 10000 };
 }
 
+/* ----------------------------------------------------------- saved metrics */
+
+// A question from "Ask the data" pinned to Home. The SQL is re-validated on save
+// and again before every run, so a stored row can never become a write.
+let metricsTableReady = null;
+async function ensureMetricsTable() {
+  if (!metricsTableReady) {
+    metricsTableReady = cloudSqlQuery(`
+      CREATE TABLE IF NOT EXISTS ops_saved_metrics (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        name text NOT NULL,
+        question text NOT NULL,
+        sql text NOT NULL,
+        format text,
+        by_email text,
+        created timestamptz NOT NULL DEFAULT NOW()
+      )`).catch((e) => { metricsTableReady = null; throw e; });
+  }
+  return metricsTableReady;
+}
+
+// Reduce a result set to something a card can show:
+//   one row, one column        -> a single figure
+//   many rows, label + number  -> a sparkline with the latest figure
+//   anything else              -> the row count
+const metricLabel = (v) => {
+  const str = String(v ?? "");
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : str;
+};
+
+function shapeMetric(result) {
+  const { columns, rows } = result;
+  if (!rows.length) return { kind: "empty", value: null };
+  const numeric = (v) => typeof v === "number" || (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v));
+  if (rows.length === 1 && columns.length === 1) {
+    const v = rows[0][columns[0]];
+    return { kind: "scalar", value: numeric(v) ? Number(v) : v, label: columns[0] };
+  }
+  if (rows.length === 1) {
+    const col = columns.find((c) => numeric(rows[0][c]));
+    if (col) return { kind: "scalar", value: Number(rows[0][col]), label: col };
+  }
+  const valueCol = columns.find((c) => rows.every((r) => r[c] == null || numeric(r[c])));
+  const labelCol = columns.find((c) => c !== valueCol);
+  if (valueCol && rows.length > 1) {
+    const series = rows.map((r) => Number(r[valueCol]) || 0);
+    return {
+      kind: "series", value: series[series.length - 1], label: valueCol,
+      series, points: rows.length,
+      // Dates come back as ISO strings; show the day, not the timestamp.
+      lastLabel: labelCol ? metricLabel(rows[rows.length - 1][labelCol]) : null,
+    };
+  }
+  return { kind: "rows", value: rows.length, label: `${rows.length} rows` };
+}
+
+async function runMetric(m) {
+  try {
+    const sql = checkSql(m.sql);
+    const result = await runReadOnly(sql, 200);
+    return { ...m, ...shapeMetric(result), columns: result.columns, rowCount: result.rows.length };
+  } catch (e) {
+    return { ...m, kind: "error", error: e.message };
+  }
+}
+
 /* ------------------------------------------------------------------ search */
 
 async function globalSearch(q) {
@@ -682,6 +793,39 @@ export function insightsRoutes() {
       if (question.length < 4) return res.status(400).json({ error: "Ask a question first" });
       res.json(await askData(question));
     } catch (e) { console.error("[insights/ask]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /metrics — saved questions with their current value (each runs read-only)
+  router.get("/metrics", async (_req, res) => {
+    try {
+      await ensureMetricsTable();
+      const { rows } = await cloudSqlQuery(`SELECT id, name, question, sql, by_email, created FROM ops_saved_metrics ORDER BY created`);
+      res.json({ metrics: await Promise.all(rows.map(runMetric)) });
+    } catch (e) { console.error("[insights/metrics]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  router.post("/metrics", async (req, res) => {
+    try {
+      const name = String(req.body?.name || "").trim().slice(0, 80);
+      const question = String(req.body?.question || "").trim().slice(0, 600);
+      if (!name) return res.status(400).json({ error: "Give the metric a name" });
+      const sql = checkSql(req.body?.sql);
+      await runReadOnly(sql, 1); // must actually run before we store it
+      await ensureMetricsTable();
+      const { rows } = await cloudSqlQuery(
+        `INSERT INTO ops_saved_metrics (name, question, sql, by_email) VALUES ($1, $2, $3, $4) RETURNING id, name, question, sql, by_email, created`,
+        [name, question, sql, req.admin?.email || null]);
+      res.json(await runMetric(rows[0]));
+    } catch (e) { console.error("[insights/metrics:create]", e); res.status(400).json({ error: e.message }); }
+  });
+
+  router.delete("/metrics/:id", async (req, res) => {
+    try {
+      if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(400).json({ error: "Invalid id" });
+      await ensureMetricsTable();
+      await cloudSqlQuery(`DELETE FROM ops_saved_metrics WHERE id = $1::uuid`, [req.params.id]);
+      res.json({ ok: true });
+    } catch (e) { console.error("[insights/metrics:delete]", e); res.status(500).json({ error: e.message }); }
   });
 
   router.get("/search", async (req, res) => {

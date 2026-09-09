@@ -25,7 +25,7 @@ export default function RecordForm({ table, id, onSaved, onCancel }) {
         const fkCols = s.filter((c) => c.fk);
         const fkOpts = {};
         await Promise.all(fkCols.map(async (col) => {
-          try { fkOpts[col.column_name] = await api.getFkOptions(col.fk.refTable); } catch {}
+          try { fkOpts[col.column_name] = await api.getFkOptions(col.fk.refTable); } catch { /* a missing lookup table just means no dropdown */ }
         }));
         setFkOptions(fkOpts);
 
@@ -177,6 +177,31 @@ function shouldHideInForm(col, isNew) {
   return false;
 }
 
+// Its own component so useState is never called conditionally: FieldInput picks
+// a branch per column type, and a column can change type when the schema loads.
+function JsonField({ value, onChange, disabled, theme, inputStyle }) {
+  const [formatted, setFormatted] = useState(false);
+  const formatJson = () => {
+    try {
+      const obj = typeof value === "string" ? JSON.parse(value) : value;
+      onChange(JSON.stringify(obj, null, 2));
+      setFormatted(true);
+      setTimeout(() => setFormatted(false), 1500);
+    } catch { /* leave invalid JSON exactly as typed */ }
+  };
+  return (
+    <div style={{ position: "relative" }}>
+      <textarea value={typeof value === "object" ? JSON.stringify(value, null, 2) : (value ?? "")} onChange={(e) => onChange(e.target.value)} disabled={disabled} rows={5}
+        style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12 }} />
+      <button type="button" onClick={formatJson} style={{
+        position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4,
+        border: `1px solid ${theme.border}`, background: theme.surfaceAlt, color: theme.textMid,
+        fontSize: 10, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+      }}>{formatted ? "✓ Formatted" : "Format"}</button>
+    </div>
+  );
+}
+
 function FieldInput({ col, value, onChange, disabled, theme, mode, fkData }) {
   const type = col.data_type;
   const isBoolean = type === "boolean";
@@ -242,28 +267,7 @@ function FieldInput({ col, value, onChange, disabled, theme, mode, fkData }) {
   }
 
   // JSON — pretty textarea with format button
-  if (isJson) {
-    const [formatted, setFormatted] = useState(false);
-    const formatJson = () => {
-      try {
-        const obj = typeof value === "string" ? JSON.parse(value) : value;
-        onChange(JSON.stringify(obj, null, 2));
-        setFormatted(true);
-        setTimeout(() => setFormatted(false), 1500);
-      } catch {}
-    };
-    return (
-      <div style={{ position: "relative" }}>
-        <textarea value={typeof value === "object" ? JSON.stringify(value, null, 2) : (value ?? "")} onChange={(e) => onChange(e.target.value)} disabled={disabled} rows={5}
-          style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12 }} />
-        <button type="button" onClick={formatJson} style={{
-          position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4,
-          border: `1px solid ${theme.border}`, background: theme.surfaceAlt, color: theme.textMid,
-          fontSize: 10, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
-        }}>{formatted ? "✓ Formatted" : "Format"}</button>
-      </div>
-    );
-  }
+  if (isJson) return <JsonField value={value} onChange={onChange} disabled={disabled} theme={theme} inputStyle={inputStyle} />;
 
   // Long text
   if (isText) {

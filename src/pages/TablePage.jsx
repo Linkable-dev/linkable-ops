@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyName, friendlyDate, friendlyNumber } from "../lib/api";
@@ -131,7 +131,7 @@ export default function TablePage() {
         await Promise.all(fkCols.map(async (col) => {
           const ids = rowsRes.rows.map((r) => r[col.column_name]).filter(Boolean);
           if (ids.length === 0) return;
-          try { labels[col.column_name] = await api.resolveFks(col.fk.refTable, ids); } catch {}
+          try { labels[col.column_name] = await api.resolveFks(col.fk.refTable, ids); } catch { /* fall back to showing the raw id */ }
         }));
         setFkLabels(labels);
       } else {
@@ -142,7 +142,7 @@ export default function TablePage() {
       if (fkCols.length > 0) {
         const opts = {};
         await Promise.all(fkCols.map(async (col) => {
-          try { opts[col.column_name] = await api.getFkOptions(col.fk.refTable); } catch {}
+          try { opts[col.column_name] = await api.getFkOptions(col.fk.refTable); } catch { /* a missing lookup table just means no dropdown */ }
         }));
         setFkFilterOptions(opts);
       }
@@ -230,7 +230,6 @@ export default function TablePage() {
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
 
   // Column resize
-  const resizeRef = useRef(null);
   const startResize = (colName, e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -602,7 +601,7 @@ export default function TablePage() {
 }
 
 // ---- Type-aware filter controls ----
-function FilterControl({ col, theme, mode, filters, onFilter, fkOptions }) {
+function FilterControl({ col, theme, filters, onFilter, fkOptions }) {
   const name = col.column_name;
   const type = col.data_type;
   const label = friendlyName(col.fk ? name.replace(/_id$/, "") : name);
@@ -697,7 +696,7 @@ function FilterControl({ col, theme, mode, filters, onFilter, fkOptions }) {
 }
 
 // ---- Cell rendering ----
-function CellValue({ value, type, fk, fkLabel, theme, mode }) {
+function CellValue({ value, type, fk, fkLabel, theme }) {
   if (value === null || value === undefined) {
     return <span style={{ color: theme.textMuted, fontStyle: "italic", fontSize: 11 }}>—</span>;
   }

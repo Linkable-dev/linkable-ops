@@ -16,6 +16,7 @@ function readTarget() {
   }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getDbTarget() {
   return readTarget();
 }
@@ -27,7 +28,7 @@ export function DbTargetProvider({ children }) {
 
   const setTarget = useCallback((next) => {
     const v = next === "dev" ? "dev" : "prod";
-    try { localStorage.setItem(STORAGE_KEY, v); } catch {}
+    try { localStorage.setItem(STORAGE_KEY, v); } catch { /* private mode: the choice just will not persist */ }
     setTargetState(v);
   }, []);
 
@@ -38,6 +39,7 @@ export function DbTargetProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useDbTarget() {
   const ctx = useContext(DbTargetContext);
   if (!ctx) throw new Error("useDbTarget must be used within DbTargetProvider");

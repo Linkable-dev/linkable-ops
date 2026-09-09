@@ -25,6 +25,8 @@ export default function AskPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showSql, setShowSql] = useState(false);
+  const [saveName, setSaveName] = useState(null); // null = closed, string = editing
+  const [saveState, setSaveState] = useState(null);
   const [history, setHistory] = useState(() => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch { return []; } });
   const inputRef = useRef(null);
   const [params] = useSearchParams();
@@ -51,6 +53,14 @@ export default function AskPage() {
   useEffect(() => {
     if (initialQ && !ranInitial.current) { ranInitial.current = true; run(initialQ); }
   }, [initialQ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveMetric = async () => {
+    setSaveState({ busy: true });
+    try {
+      await api.saveMetric({ name: saveName.trim(), question, sql: result.sql });
+      setSaveState({ ok: true }); setSaveName(null);
+    } catch (e) { setSaveState({ error: e.message }); }
+  };
 
   const chip = (text, onClick) => (
     <button key={text} onClick={onClick} style={{ border: `1px solid ${theme.border}`, background: theme.surface, color: theme.textMid, borderRadius: 999, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>{text}</button>
@@ -112,8 +122,25 @@ export default function AskPage() {
               <span>{result.rows.length}{result.truncated ? "+" : ""} row{result.rows.length === 1 ? "" : "s"}</span>
               <span>· {result.model} · ${result.cost_usd.toFixed(4)}</span>
               <button onClick={() => setShowSql((v) => !v)} style={{ background: "none", border: "none", color: theme.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline", padding: 0 }}>{showSql ? "Hide SQL" : "Show SQL"}</button>
+              {saveName === null && saveState?.ok !== true && (
+                <button onClick={() => { setSaveName(question.replace(/\?$/, "").slice(0, 60)); setSaveState(null); }} style={{ background: "none", border: "none", color: theme.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline", padding: 0 }} title="Pin this question to the Home page">Save as metric</button>
+              )}
+              {saveState?.ok && <span style={{ color: theme.brand }}>Saved to Home</span>}
               {showSql && <button onClick={() => navigator.clipboard?.writeText(result.sql)} style={{ background: "none", border: "none", color: theme.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline", padding: 0 }}>Copy SQL</button>}
             </div>
+            {saveName !== null && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+                <input
+                  value={saveName} onChange={(e) => setSaveName(e.target.value)} autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") saveMetric(); if (e.key === "Escape") setSaveName(null); }}
+                  placeholder="Name shown on Home, e.g. Brands signed up this month"
+                  style={{ flex: 1, minWidth: 240, height: 34, padding: "0 12px", borderRadius: 8, border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: 13, fontFamily: "inherit", outline: "none" }}
+                />
+                <Btn size="sm" onClick={saveMetric} loading={saveState?.busy} disabled={!saveName.trim()}>Save</Btn>
+                <Btn size="sm" variant="outline" onClick={() => setSaveName(null)}>Cancel</Btn>
+                {saveState?.error && <span style={{ fontSize: 12, color: theme.danger }}>{saveState.error}</span>}
+              </div>
+            )}
             {showSql && (
               <pre style={{ marginTop: 10, marginBottom: 0, padding: 12, borderRadius: 10, background: theme.surfaceAlt, color: theme.text, fontSize: 12, lineHeight: 1.5, overflowX: "auto", whiteSpace: "pre-wrap" }}>{result.sql}</pre>
             )}

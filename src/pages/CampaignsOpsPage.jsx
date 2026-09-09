@@ -135,7 +135,7 @@ export default function CampaignsOpsPage() {
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: 0 }}>Campaign Operations</h1>
         <p style={{ fontSize: 13, color: theme.textMuted, margin: "4px 0 0" }}>
-          Find what's blocking sales. Click a row to drill into per-creator status.
+          Live campaigns only (paused and ended ones are not listed). Find what's blocking sales, and click a row for per-creator status.
         </p>
       </div>
 
@@ -220,7 +220,7 @@ export default function CampaignsOpsPage() {
             <tbody>
               {loading && <SkeletonTableRows rows={8} cols={["expand", "text", "text", "num", "num", "num", "num", "num", "num", "num", "pill"]} theme={theme} />}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No campaigns match.</td></tr>
+                <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No live campaigns match. Paused and ended campaigns are never listed here.</td></tr>
               )}
               {filtered.map((c) => {
                 const isOpen = expandedId === c.id;
@@ -473,19 +473,21 @@ function StageFunnel({ theme, mode, creators }) {
     padding: "2.5px 8.5px",
   });
 
-  // One entry pill per source × entry stage, all merging into Accepted.
+  // Two waiting states, not two sources: "Awaiting creator" is a brand invite the
+  // creator has not answered; once they respond the link moves to "Awaiting brand",
+  // which is also where creator-initiated applications land. Both merge into Accepted.
   const entries = [
-    { key: "inv",     label: "Invited",          count: counts.Invited - ext.Invited, style: pillStyle("Invited") },
-    ...(ext.Invited > 0 ? [{ key: "ext-inv", label: "External invited", count: ext.Invited, style: extPillStyle("Invited") }] : []),
-    { key: "app",     label: "Applied",          count: counts.Applied - ext.Applied, style: pillStyle("Applied") },
-    ...(ext.Applied > 0 ? [{ key: "ext-app", label: "External applied", count: ext.Applied, style: extPillStyle("Applied") }] : []),
+    { key: "inv",     label: "Awaiting creator", title: "Brand invited them; the creator has not responded yet", count: counts.Invited - ext.Invited, style: pillStyle("Invited") },
+    ...(ext.Invited > 0 ? [{ key: "ext-inv", label: "Awaiting creator (external)", title: "Invited by email; not a Linkable user yet", count: ext.Invited, style: extPillStyle("Invited") }] : []),
+    { key: "app",     label: "Awaiting brand", title: "Creator applied, or answered an invite; waiting on the brand to accept or reject", count: counts.Applied - ext.Applied, style: pillStyle("Applied") },
+    ...(ext.Applied > 0 ? [{ key: "ext-app", label: "Awaiting brand (external)", title: "External creator responded; waiting on the brand", count: ext.Applied, style: extPillStyle("Applied") }] : []),
   ];
 
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
         {entries.map((e) => (
-          <span key={e.key} style={e.style}>{e.label} <span style={{ opacity: 0.8 }}>· {e.count}</span></span>
+          <span key={e.key} style={e.style} title={e.title}>{e.label} <span style={{ opacity: 0.8 }}>· {e.count}</span></span>
         ))}
       </div>
       <EntryMergeConnector color={theme.textMuted} count={entries.length} />

@@ -13,8 +13,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          recharts: ['recharts'],
+        // Vendor code is split so a page only downloads what it uses: charting
+        // is pulled in by the two chart pages, the Supabase client by auth.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('recharts') || id.includes('d3-')) return 'recharts'
+          if (id.includes('@supabase')) return 'supabase'
+          if (id.includes('react-router')) return 'router'
+          if (id.includes('/react-dom/') || id.includes('/react/') || id.includes('scheduler')) return 'react'
+          return 'vendor'
         },
       },
     },

@@ -16,9 +16,10 @@ const COLORS_DARK = ["#FAFAFA", "#D4D4D4", "#A3A3A3", "#737373", "#525252", "#E5
 export default function TableAnalyticsPage() {
   const { table } = useParams();
   const { theme, mode } = useTheme();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const data = result?.table === table ? result.data : null;
+  const error = result?.table === table ? result.error : null;
+  const loading = !data && !error;
   const colors = mode === "dark" ? COLORS_DARK : COLORS;
 
   const tooltipStyle = {
@@ -26,9 +27,14 @@ export default function TableAnalyticsPage() {
     borderRadius: 8, boxShadow: theme.shadowMd, fontSize: 12, color: theme.text,
   };
 
+  // Results carry the table they belong to, so "loading" is derived rather than
+  // reset on every change (which forced an extra render).
   useEffect(() => {
-    setLoading(true); setError(null);
-    api.getTableAnalytics(table).then(setData).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    let alive = true;
+    api.getTableAnalytics(table)
+      .then((d) => alive && setResult({ table, data: d }))
+      .catch((e) => alive && setResult({ table, error: e.message }));
+    return () => { alive = false; };
   }, [table]);
 
   if (loading) return (

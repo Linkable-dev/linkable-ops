@@ -237,7 +237,7 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
             fontSize: 11, color: theme.textMuted,
           }}>
             <span>Audit log entry will be created with your admin email.</span>
-            <DbTargetPill isDev={isDev} theme={theme} />
+            <DbTargetPill isDev={isDev} />
           </div>
 
           {error && <ErrorBox error={error} mode={mode} />}
@@ -277,7 +277,7 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
               theme={theme}
             />
           </div>
-          <DbTargetPill isDev={isDev} theme={theme} />
+          <DbTargetPill isDev={isDev} />
         </div>
 
         {/* Quick-pick presets */}
@@ -419,7 +419,7 @@ function StatusLine({ theme, color, text }) {
   );
 }
 
-function DbTargetPill({ isDev, theme }) {
+function DbTargetPill({ isDev }) {
   return (
     <span style={{
       fontFamily: "ui-monospace, SFMono-Regular, monospace",

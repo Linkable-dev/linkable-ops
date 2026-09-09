@@ -91,17 +91,44 @@ function Stat({ label, value, sub, accent, span = 3, spark, delta }) {
   );
 }
 
+// A question pinned from "Ask the data": its current value, a trend when the
+// result is a series, and the question itself as the caption.
+function MetricCard({ metric: m, onRemove }) {
+  const { theme } = useTheme();
+  const value = m.kind === "error" ? "—"
+    : m.kind === "empty" ? "no rows"
+    : typeof m.value === "number" ? num(Math.round(m.value * 100) / 100)
+    : String(m.value ?? "—");
+  return (
+    <Card span={3}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+        <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, minWidth: 0, overflowWrap: "anywhere" }}>{m.name}</div>
+        <button onClick={onRemove} title="Remove from Home" style={{ background: "none", border: "none", color: theme.textMuted, cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10, marginTop: 8 }}>
+        <div style={{ fontSize: 24, fontWeight: 700, color: m.kind === "error" ? theme.textMuted : theme.text, lineHeight: 1.1, letterSpacing: -0.5, overflowWrap: "anywhere" }}>{value}</div>
+        {m.kind === "series" && m.series?.length > 1 && <Sparkline data={m.series} color={theme.brand} width={92} height={30} />}
+      </div>
+      <div style={{ fontSize: 11, color: m.kind === "error" ? "#B45309" : theme.textMuted, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={m.kind === "error" ? m.error : m.question}>
+        {m.kind === "error" ? `Query failed: ${m.error}` : m.kind === "series" ? `${m.label} · latest${m.lastLabel ? ` (${m.lastLabel})` : ""}` : m.question}
+      </div>
+    </Card>
+  );
+}
+
 export default function HomePage() {
   const { theme } = useTheme();
   const { target } = useDbTarget();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState(null);
+  const data = result?.target === target ? result.data : null;
+  const error = result?.target === target ? result.error : null;
+  const loading = !data && !error;
   // Time travel: sparklines + deltas for the chosen range (the headline figures are always "now").
   const [range, setRange] = useState(() => { try { return localStorage.getItem("lk-home-range") || "90d"; } catch { return "90d"; } });
   // Cached per target+range so switching back is instant and no state is reset inside effects.
   const [seriesCache, setSeriesCache] = useState({});
   const [alertsCache, setAlertsCache] = useState({});
+  const [metrics, setMetrics] = useState(null);
   const seriesKey = `${target}:${range}`;
   const series = seriesCache[seriesKey] || null;
   const alerts = alertsCache[target] || null;
@@ -121,19 +148,28 @@ export default function HomePage() {
     window.addEventListener(ALERTS_CHANGED, refresh);
     return () => { alive = false; window.removeEventListener(ALERTS_CHANGED, refresh); };
   }, [target]);
+  // Questions pinned from "Ask the data".
+  useEffect(() => {
+    let alive = true;
+    api.getSavedMetrics().then((d) => alive && setMetrics(d.metrics || [])).catch(() => alive && setMetrics([]));
+    return () => { alive = false; };
+  }, [target]);
+  const removeMetric = async (id) => {
+    setMetrics((m) => m.filter((x) => x.id !== id));
+    try { await api.deleteMetric(id); } catch { api.getSavedMetrics().then((d) => setMetrics(d.metrics || [])).catch(() => {}); }
+  };
   const pickRange = (r) => { setRange(r); try { localStorage.setItem("lk-home-range", r); } catch { /* ignore */ } };
   const spark = (key) => series?.buckets?.map((b) => b[key]);
   const delta = (key) => series?.totals?.current ? deltaLabel(series.totals.current[key], series.totals.previous?.[key], series.previousLabel) : null;
 
+  // Keyed by target so switching database shows a fresh load without resetting
+  // state synchronously inside the effect.
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError(null);
     api
       .getHome()
-      .then((d) => alive && setData(d))
-      .catch((e) => alive && setError(e.message))
-      .finally(() => alive && setLoading(false));
+      .then((d) => alive && setResult({ target, data: d }))
+      .catch((e) => alive && setResult({ target, error: e.message }));
     return () => {
       alive = false;
     };
@@ -231,6 +267,15 @@ export default function HomePage() {
         </Card>
       </Section>
 
+      {/* ── Saved metrics (pinned from Ask the data) ──────────────────────── */}
+      {metrics && metrics.length > 0 && (
+        <Section title="Your metrics" hint="questions you pinned from Ask the data">
+          <div className="lk-grid">
+            {metrics.map((m) => <MetricCard key={m.id} metric={m} onRemove={() => removeMetric(m.id)} />)}
+          </div>
+        </Section>
+      )}
+
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
       <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
         <div className="lk-grid">
@@ -301,6 +346,8 @@ export default function HomePage() {
           <Stat label="Active campaigns" value={num(marketplace.activeCampaigns)} spark={spark("campaigns")} delta={delta("campaigns") && { ...delta("campaigns"), text: `launches ${delta("campaigns").text}` }} />
           <Stat label="GMV" value={money(marketplace.gmv, { currency: marketplace.gmvCurrency })} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} spark={spark("gmv")} delta={delta("gmv")} />
           <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.clicks)} link clicks`} spark={spark("commission")} delta={delta("clicks") && { ...delta("clicks"), text: `clicks ${delta("clicks").text}` }} />
+          <Stat label="Average order" value={money(marketplace.avgOrder, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.linksWithOrders)} link${marketplace.linksWithOrders === 1 ? "" : "s"} have sold`} />
+          <Stat label="Paid out to creators" value={money(marketplace.paidOut, { cents: true })} sub={`${num(marketplace.paidOutCount)} completed payout${marketplace.paidOutCount === 1 ? "" : "s"}`} />
         </div>
       </Section>
 

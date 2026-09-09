@@ -32,7 +32,7 @@ export async function callClaude(systemPrompt, userMessage, onChunk, maxTokens =
           full += d.delta.text;
           onChunk(full);
         }
-      } catch {}
+      } catch { /* a partial SSE frame: wait for the rest */ }
     }
   }
   return full;

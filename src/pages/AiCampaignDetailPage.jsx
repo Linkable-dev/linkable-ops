@@ -12,7 +12,6 @@ import { Skeleton, SkeletonRow, SkeletonStat, SkeletonStatGrid, SkeletonTableRow
 import { TabBar } from "../components/ui/TabBar";
 import { Pagination } from "../components/ui/Pagination";
 import { useColumnWidths, ResizeHandle, SortLabel, nextSort } from "../components/table/tableTools";
-import { suggestCampaignName } from "../lib/campaign-name";
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },
@@ -80,6 +79,8 @@ export default function AiCampaignDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // reload owns its own loading and error state; the effect only triggers it.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { reload(); }, [reload]);
 
   if (loading && !data) {
@@ -119,7 +120,7 @@ export default function AiCampaignDetailPage() {
             {campaign.name}
             <Pill tint={STATUS_TINTS[campaign.status] || {}}>{campaign.status}</Pill>
             {campaign.auto_reply && <Pill tint={{ bg: "#E0E7FF", fg: "#3730A3" }}>auto-reply</Pill>}
-            <ScheduleBadge schedule={campaign.config?.schedule} theme={theme} />
+            <ScheduleBadge schedule={campaign.config?.schedule} />
           </h1>
           <div style={{ fontSize: 12, color: theme.textMuted }}>
             Daily cap {campaign.daily_cap || 200} · Sender {campaign.sender_from} · Reply-to {campaign.reply_to}
@@ -267,7 +268,7 @@ function ClickStat({ label, value, sub, onClick, theme }) {
   );
 }
 
-function ScheduleBadge({ schedule, theme }) {
+function ScheduleBadge({ schedule }) {
   if (!schedule || schedule.cadence === "off") {
     return <Pill tint={{ bg: "#FEE2E2", fg: "#991B1B" }} title="Auto-send is off — set a schedule in Settings">manual</Pill>;
   }
@@ -585,9 +586,9 @@ function SendsTab({ campaign, theme }) {
             value={runSel}
             onChange={(e) => setRunSel(e.target.value)}
             style={sendSelectStyle(theme)}
-            title="Filter by daily run"
+            title="Filter by daily run. Days are counted in UTC, which can differ from the campaign's own sending timezone around midnight."
           >
-            <option value="today">Today</option>
+            <option value="today">Today (UTC)</option>
             <option value="all">All runs (aggregated)</option>
             {runs.length > 0 && <option disabled>──────────</option>}
             {runs.map((r) => (
@@ -784,15 +785,17 @@ function SendsTab({ campaign, theme }) {
 // Lazy-loads the full email body via /outbound/sends/:id and shows headers,
 // rendered subject + body, status pill, and the engagement timeline.
 function EmailPreviewModal({ sendId, campaign, theme, onClose }) {
-  const [send, setSend] = useState(null);
-  const [error, setError] = useState(null);
+  // Keyed by sendId so opening another email shows its own loading state without
+  // having to clear this one first.
+  const [result, setResult] = useState(null);
+  const send = result?.sendId === sendId ? result.send : null;
+  const error = result?.sendId === sendId ? result.error : null;
 
   useEffect(() => {
     let cancelled = false;
-    setSend(null); setError(null);
     api.getOutboundSend(sendId)
-      .then((d) => { if (!cancelled) setSend(d); })
-      .catch((e) => { if (!cancelled) setError(e.message); });
+      .then((d) => { if (!cancelled) setResult({ sendId, send: d }); })
+      .catch((e) => { if (!cancelled) setResult({ sendId, error: e.message }); });
     return () => { cancelled = true; };
   }, [sendId]);
 
@@ -1494,16 +1497,24 @@ function LeadPoolPanel({ theme, campaign }) {
   // Server-side sort + drag-resizable columns (persisted per table).
   const [sort, setSort] = useState({ sortBy: "imported_at", sortDir: "desc" });
   const { widths, startResize, resetWidth } = useColumnWidths("ai-leads", LEAD_COL_WIDTHS);
-  const handleSort = useCallback((key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir)), []);
+  // Anything that changes the result set sends you back to page 1.
+  const handleSort = useCallback((key, defaultDir) => { setPage(1); setSort((s) => nextSort(s, key, defaultDir)); }, []);
+  const changeQ = (v) => { setPage(1); setQ(v); };
+  const changeOnlyQualified = (v) => { setPage(1); setOnlyQualified(v); };
+  const changeScope = (v) => { setPage(1); setScopeToCampaign(v); };
+  const changePageSize = (v) => { setPage(1); setPageSize(v); };
 
   // Filters derived from the campaign's target_filters when scoped.
   const tf = campaign?.target_filters || {};
   const hasTargeting = (tf.countries?.length || tf.min_revenue || tf.max_revenue);
-  const filterArgs = scopeToCampaign && hasTargeting ? {
-    country: (tf.countries || []).join(","),
-    minRevenue: tf.min_revenue,
-    maxRevenue: tf.max_revenue,
-  } : {};
+  // Memoised so it can be a dependency directly, instead of stringifying it.
+  const filterArgs = useMemo(() => {
+    const t = campaign?.target_filters || {};
+    const targeted = (t.countries?.length || t.min_revenue || t.max_revenue);
+    return scopeToCampaign && targeted
+      ? { country: (t.countries || []).join(","), minRevenue: t.min_revenue, maxRevenue: t.max_revenue }
+      : {};
+  }, [campaign?.target_filters, scopeToCampaign]);
 
   const [poolState, setPoolState] = useState({ loading: false, error: null });
   const load = useCallback(() => {
@@ -1520,14 +1531,13 @@ function LeadPoolPanel({ theme, campaign }) {
       .then((res) => { setRows(res.rows || []); setTotal(res.total || 0); setPoolState({ loading: false, error: null }); })
       .catch((e) => setPoolState({ loading: false, error: e.message }));
     api.getOutboundLeadCounts(filterArgs).then(setCounts).catch(() => {});
-  }, [q, page, onlyQualified, scopeToCampaign, sort, JSON.stringify(filterArgs)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, page, onlyQualified, pageSize, sort, filterArgs]);
 
   useEffect(() => {
     const t = setTimeout(load, 200);
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [q, onlyQualified, scopeToCampaign, pageSize, sort]);
 
   return (
     <Card style={{ marginBottom: 16, padding: 0 }}>
@@ -1550,18 +1560,18 @@ function LeadPoolPanel({ theme, campaign }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {hasTargeting && (
             <label style={{ fontSize: 11, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <input type="checkbox" checked={scopeToCampaign} onChange={(e) => setScopeToCampaign(e.target.checked)} style={{ margin: 0 }} />
+              <input type="checkbox" checked={scopeToCampaign} onChange={(e) => changeScope(e.target.checked)} style={{ margin: 0 }} />
               this campaign only
             </label>
           )}
           <label style={{ fontSize: 11, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <input type="checkbox" checked={onlyQualified} onChange={(e) => setOnlyQualified(e.target.checked)} style={{ margin: 0 }} />
+            <input type="checkbox" checked={onlyQualified} onChange={(e) => changeOnlyQualified(e.target.checked)} style={{ margin: 0 }} />
             with email only
           </label>
           <input
             type="search"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => changeQ(e.target.value)}
             placeholder="Search domain or contact"
             style={{ padding: "6px 10px", borderRadius: 6, fontSize: 12, fontFamily: "inherit",
               border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, minWidth: 200 }}
@@ -1622,7 +1632,7 @@ function LeadPoolPanel({ theme, campaign }) {
             pageSize={pageSize}
             total={total}
             onPageChange={setPage}
-            onPageSizeChange={setPageSize}
+            onPageSizeChange={changePageSize}
           />
         </div>
       )}

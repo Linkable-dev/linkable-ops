@@ -6,7 +6,8 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "outreach": "node automation/run.js",
-    "outreach:dry": "node automation/run.js --dry-run"
+    "outreach:dry": "node automation/run.js --dry-run",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

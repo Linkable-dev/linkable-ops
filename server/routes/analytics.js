@@ -353,6 +353,15 @@ export function analyticsRoutes() {
               GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1) AS gmv_currency,
             (SELECT COALESCE(SUM((commission)::numeric), 0) FROM orders WHERE deleted = '-infinity'::timestamptz AND commission ~ '^[0-9]+(\\.[0-9]+)?$') AS commission_paid,
             (SELECT COUNT(*) FROM orders WHERE deleted = '-infinity'::timestamptz) AS orders,
+            (SELECT COALESCE(AVG(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS avg_order,
+            (SELECT COUNT(DISTINCT link_id) FROM orders WHERE deleted = '-infinity'::timestamptz) AS links_with_orders,
+            -- Money that actually left the account: pending, failed and reversed payouts excluded.
+            -- amount_value is text, so only numeric-looking rows are summed.
+            (SELECT COALESCE(SUM(CASE WHEN amount_value ~ '^[0-9]+(\.[0-9]+)?$' THEN amount_value::numeric ELSE 0 END), 0)
+               FROM payouts WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+                AND LOWER(status) IN ('paid', 'succeeded', 'completed')) AS paid_out,
+            (SELECT COUNT(*) FROM payouts WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+                AND LOWER(status) IN ('paid', 'succeeded', 'completed')) AS paid_out_count,
             (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks`),
 
         // Subscription/trial health across active brands.
@@ -424,6 +433,10 @@ export function analyticsRoutes() {
           gmvCurrency: mk.gmv_currency || "USD",
           commissionPaid: parseFloat(mk.commission_paid || 0),
           orders: parseInt(mk.orders || 0),
+          avgOrder: parseFloat(mk.avg_order || 0),
+          linksWithOrders: parseInt(mk.links_with_orders || 0),
+          paidOut: parseFloat(mk.paid_out || 0),
+          paidOutCount: parseInt(mk.paid_out_count || 0),
           clicks: parseInt(mk.clicks || 0),
         },
         subscriptions: {
