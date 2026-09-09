@@ -3,8 +3,10 @@
 //
 // Auth: caller must send `Authorization: Bearer ${CRON_SECRET}` OR
 //       `?secret=${CRON_SECRET}`. Vercel's cron sends a special header
-//       `x-vercel-cron` plus a system bearer token; we accept either.
+//       `x-vercel-cron` plus that bearer token. Only the bearer is accepted:
+//       a header on its own proves nothing, since anyone can send one.
 
+import crypto from "node:crypto";
 import { Router } from "express";
 import { sendDueScheduled } from "../automation/conversation-runner.js";
 import { processFollowUps } from "../automation/conversation-followup.js";
@@ -51,19 +53,30 @@ function scheduleDecision(schedule, dailyCap, now = new Date()) {
   return null;
 }
 
+// These endpoints send email, write articles and spend money, so they fail
+// closed. The x-vercel-cron header used to be accepted on its own, but any
+// caller can set a header, which left every cron route open to the internet.
+// Vercel adds `Authorization: Bearer $CRON_SECRET` to its own cron requests
+// whenever that variable exists, so the secret alone is enough to let the real
+// scheduler through.
 function checkCronAuth(req) {
   const expected = process.env.CRON_SECRET;
   if (!expected) {
-    // Without a secret configured, allow only Vercel's signed cron requests.
-    return req.headers["x-vercel-cron"] === "1";
+    console.error("CRON_SECRET is not set; refusing every cron request");
+    return false;
   }
-  const auth = req.headers.authorization || "";
-  const bearer = auth.replace(/^Bearer\s+/i, "");
-  if (bearer === expected) return true;
-  if (req.query.secret === expected) return true;
-  // Vercel's built-in cron passes its own bearer; cross-check.
-  if (req.headers["x-vercel-cron"] === "1") return true;
-  return false;
+  const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  // ?secret= stays for hitting a job by hand; a URL is a poor place for a
+  // secret, so prefer the header.
+  return safeEqual(bearer, expected) || safeEqual(req.query.secret, expected);
+}
+
+// Constant time, so a wrong guess takes as long as a right one.
+function safeEqual(given, expected) {
+  if (typeof given !== "string" || given.length === 0) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export function cronRoutes() {

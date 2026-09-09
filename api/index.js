@@ -47,7 +47,7 @@ app.use("/api/auth", authRoutes());
 // Public webhook (no admin auth — secured by Svix signature).
 app.use("/api/conversations", conversationsWebhookRoutes());
 
-// Cron routes (no admin auth — secured by CRON_SECRET / x-vercel-cron).
+// Cron routes (no admin auth — secured by the CRON_SECRET bearer token).
 app.use("/api/cron", cronRoutes());
 
 // dbTargetMiddleware reads the x-db-target header from the ops UI and binds
