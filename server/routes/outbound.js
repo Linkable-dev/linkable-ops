@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { cancelPendingTouches } from "../automation/sequencer.js";
 import { normalizeInboundPayload, extractReplyBody } from "../automation/inbound-parser.js";
+import { inboxHealth, enforceInboxHealth, THRESHOLDS } from "../lib/deliverability.js";
 
 // Shared scope-window builder. Returns null when scope/run_date imply lifetime.
 // Callers apply the returned .or(...) clause to a Supabase query.
@@ -135,6 +136,15 @@ export function outboundRoutes() {
   //   scope=today (default) | all     — lifetime when "all"
   //   campaign_id=<uuid>              — filter to one campaign
   //   run_date=YYYY-MM-DD             — filter to one run; overrides scope
+  // ---------- SENDER DELIVERABILITY ----------
+  // Per-inbox bounce and complaint rates with the verdict for each. Read-only.
+  router.get("/inbox-health", async (req, res) => {
+    try {
+      const boxes = await inboxHealth();
+      res.json({ thresholds: THRESHOLDS, inboxes: boxes });
+    } catch (e) { console.error("[outbound/inbox-health]", e); res.status(500).json({ error: e.message }); }
+  });
+
   router.get("/stats", async (req, res) => {
     try {
       const teamId = await getDefaultTeamId();

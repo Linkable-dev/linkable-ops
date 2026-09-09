@@ -21,6 +21,7 @@ import { outboundRoutes } from "../routes/outbound.js";
 import { adminUsersRoutes } from "../routes/admin-users.js";
 import { closeCloudSql } from "../lib/cloudsql.js";
 import { wordCount, readMinutes, validateArticle, LIMITS } from "../lib/blog-writer.js";
+import { verdictFor, THRESHOLDS } from "../lib/deliverability.js";
 
 let server, base;
 
@@ -368,5 +369,70 @@ describe("blog article rules", () => {
     const body = Array.from({ length: 70 }, () => ({ type: "p", text: "word ".repeat(10) }));
     const withDash = validateArticle({ title: "x".repeat(50), excerpt: "e", metaDescription: "m".repeat(130), blocks: [...body, { type: "p", text: "an em dash — here" }], faqs: [] });
     assert.ok(withDash.some((p) => p.includes("dash")), "an em dash passed the style check");
+  });
+});
+
+describe("sender deliverability", { timeout: 120_000 }, () => {
+  test("a handful of sends is never enough to pause an inbox", () => {
+    // 1 bounce out of 3 is 33% and means nothing. Pausing on that would take
+    // a healthy inbox out of the pool for noise.
+    for (let sent = 0; sent < THRESHOLDS.minSends; sent++) {
+      const v = verdictFor({ sent, bounced: sent, complained: sent, isActive: true });
+      assert.equal(v.shouldPause, false, `paused on only ${sent} sends`);
+      assert.equal(v.judged, false);
+    }
+  });
+
+  test("a genuinely burning inbox is paused", () => {
+    const v = verdictFor({ sent: 200, bounced: 20, complained: 0, isActive: true });
+    assert.equal(v.shouldPause, true);
+    assert.match(v.breaches[0], /bounce rate/);
+  });
+
+  test("complaints bite earlier than bounces, as providers do", () => {
+    // 1% complaints with a clean bounce rate must still stop the inbox.
+    const v = verdictFor({ sent: 500, bounced: 0, complained: 5, isActive: true });
+    assert.equal(v.shouldPause, true);
+    assert.match(v.breaches.join(" "), /complaint rate/);
+  });
+
+  test("an inbox already out of the pool is never paused again", () => {
+    const v = verdictFor({ sent: 200, bounced: 100, complained: 50, isActive: false });
+    assert.equal(v.shouldPause, false);
+    assert.ok(v.breaches.length > 0, "it should still report the breach");
+  });
+
+  test("no input can ever produce a decision to resume", () => {
+    // The asymmetry is the safety property: pausing costs a day of capacity,
+    // resuming into a reputation problem costs the domain.
+    const inputs = [
+      { sent: 1000, bounced: 0, complained: 0, isActive: false },
+      { sent: 0, bounced: 0, complained: 0, isActive: false },
+      { sent: -5, bounced: -5, complained: -5, isActive: false },
+      { sent: "200", bounced: "0", complained: "0", isActive: false },
+    ];
+    for (const i of inputs) {
+      const v = verdictFor(i);
+      assert.ok(!("shouldResume" in v), "there is no resume decision to make");
+      assert.equal(v.shouldPause, false);
+    }
+  });
+
+  test("rates stay sane for junk input", () => {
+    for (const i of [{}, { sent: null }, { sent: "abc", bounced: "x" }, { sent: 10, bounced: 999 }]) {
+      const v = verdictFor(i);
+      assert.ok(v.bounceRate >= 0 && Number.isFinite(v.bounceRate), `bounceRate ${v.bounceRate}`);
+      assert.ok(v.complaintRate >= 0 && Number.isFinite(v.complaintRate));
+    }
+  });
+
+  test("every configured inbox is reported on", async () => {
+    const h = await get("/outbound/inbox-health");
+    assert.ok(Array.isArray(h.inboxes));
+    for (const b of h.inboxes) {
+      assert.ok(b.bounce_rate >= 0 && b.bounce_rate <= 1, `${b.email} bounce_rate ${b.bounce_rate}`);
+      assert.ok(b.complaint_rate >= 0 && b.complaint_rate <= 1);
+      if (!b.judged) assert.equal(b.should_pause, false, `${b.email} would pause without enough volume`);
+    }
   });
 });

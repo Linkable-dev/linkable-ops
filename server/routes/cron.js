@@ -16,6 +16,7 @@ import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discov
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
 import { generatePost, triggerSiteRebuild, edgeEnabled, generateViaEdge } from "../lib/blog-writer.js";
+import { enforceInboxHealth } from "../lib/deliverability.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -167,6 +168,17 @@ export function cronRoutes() {
         const runner = runnerFor(c || {});
         const result = await runner({ cap, campaignId: req.query.campaign, dryRun, log });
         return res.json({ ...result, log: lines });
+      }
+
+      // Deliverability brake FIRST, so a burning inbox is out of the pool
+      // before this tick picks senders — checking afterwards would still let
+      // it send today's batch.
+      let deliverability = null;
+      try {
+        deliverability = await enforceInboxHealth({ dryRun });
+        for (const p2 of deliverability.paused) log(`[deliverability] paused ${p2.email}: ${p2.reason}`);
+      } catch (e) {
+        log(`[deliverability] check skipped: ${e.message}`);
       }
 
       // Auto mode (default for the cron tick): walk every active campaign,

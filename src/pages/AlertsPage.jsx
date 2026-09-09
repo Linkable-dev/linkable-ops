@@ -10,7 +10,7 @@ import { Skeleton, SkeletonStatGrid, SkeletonListRows } from "../components/ui/S
 import { BrandLink } from "../components/brand/BrandLink";
 import { SEVERITY, notifyAlertsChanged } from "../lib/alerts";
 
-const KINDS = [["all", "Everything"], ["shipping", "Samples"], ["applications", "Applications"], ["trials", "Trials"], ["billing", "Billing"], ["sales", "Sales"], ["deletion", "Deletion"]];
+const KINDS = [["all", "Everything"], ["shipping", "Samples"], ["applications", "Applications"], ["trials", "Trials"], ["billing", "Billing"], ["sales", "Sales"], ["deliverability", "Sending"], ["deletion", "Deletion"]];
 const SEV_ORDER = { danger: 0, warn: 1, info: 2 };
 
 // "waiting 34 days" for past dates, "in 3 days" for deadlines.
