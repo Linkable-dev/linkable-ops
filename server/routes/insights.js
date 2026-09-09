@@ -352,6 +352,43 @@ async function findAlerts(keys) {
   return emailable;
 }
 
+// Draft-and-send for one brand, used by the automatic chaser. The operator's
+// button in the UI takes the human-written subject and body instead; both end
+// up in the same log and close the same alerts, so an automatic nudge is
+// indistinguishable from a hand-sent one afterwards except by `by_email`.
+export async function sendBrandNudge({ alerts, sender, adminEmail = null, target = "prod" }) {
+  const list = [].concat(alerts).filter(isEmailable);
+  if (!list.length) throw new Error("nothing emailable to send");
+  const first = list[0];
+  const to = first.brand?.email;
+  if (!to) throw new Error("that brand has no address");
+
+  const brand = first.brand?.user_id
+    ? await brand360(first.brand.user_id).catch(() => null)
+    : null;
+  const draft = await draftNudge({ alerts: list, brand, sender });
+
+  const sent = await sendNudgeEmail({ to, subject: draft.subject, body: draft.body });
+  if (!sent.success) throw new Error(sent.error);
+
+  await ensureNudgeTable(target);
+  await cloudSqlQuery(`
+    INSERT INTO ops_brand_nudges (alert_key, alert_kind, fingerprint, user_id, to_email, subject, body, by_email, resend_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [list.map((a) => a.key).join(","), first.kind || null, first.fingerprint || null,
+     first.brand.user_id || null, to, draft.subject, draft.body, adminEmail, sent.resendId || null]);
+
+  await ensureDismissTable(target);
+  for (const a of list) {
+    await cloudSqlQuery(`
+      INSERT INTO ops_alert_dismissals (key, fingerprint, until, by_email, created)
+      VALUES ($1, $2, NULL, $3, NOW())
+      ON CONFLICT (key) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, until = NULL, by_email = EXCLUDED.by_email, created = NOW()`,
+      [a.key, String(a.fingerprint || ""), adminEmail]).catch(() => {});
+  }
+  return { to, covered: list.length, subject: draft.subject, resendId: sent.resendId || null };
+}
+
 // Returns the alert with a `dismissed` reason when a dismissal still applies.
 function applyDismissal(alert, d) {
   if (!d) return alert;

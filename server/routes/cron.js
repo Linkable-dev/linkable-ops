@@ -19,6 +19,9 @@ import { generatePost, triggerSiteRebuild, edgeEnabled, generateViaEdge } from "
 import { refreshConversions } from "../lib/outbound-attribution.js";
 import { loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
 import { enforceInboxHealth } from "../lib/deliverability.js";
+import { sendMorningBrief } from "../lib/morning-brief.js";
+import { loadRules, selectTargets } from "../lib/auto-nudge.js";
+import { buildAlerts, loadDismissals, sendBrandNudge } from "./insights.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -94,6 +97,50 @@ export function cronRoutes() {
   // Daily blog article for www.linkable.link: writes one AI article from the
   // topic backlog, publishes it and asks the landing-page repo to re-render.
   //   ?draft=1  — save as draft instead of publishing
+  // The one push in an otherwise pull-only console. ?dry=1 renders it without
+  // sending, which is how you check the wording.
+  router.get("/morning-brief", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const dryRun = req.query.dry === "1" || req.query.dry === "true";
+      res.json(await sendMorningBrief({ dryRun }));
+    } catch (err) {
+      console.error("/cron/morning-brief error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Chases the brands whose alert kinds have been switched on. Everything is
+  // off until somebody enables it, so on a fresh install this sends nothing.
+  // ?dry=1 shows exactly who would be written to.
+  router.get("/auto-nudge", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const dryRun = req.query.dry === "1" || req.query.dry === "true";
+      const rules = await loadRules();
+      if (!rules.some((r) => r.auto)) {
+        return res.json({ enabled: [], targets: 0, sent: 0, note: "no alert kind is set to chase automatically" });
+      }
+      const [alerts, dismissals] = await Promise.all([buildAlerts(), loadDismissals("prod")]);
+      const targets = selectTargets({ alerts, dismissals, rules });
+
+      const sent = [];
+      for (const t of targets) {
+        if (dryRun) { sent.push({ to: t.brand.email, covers: t.alerts.length, dryRun: true }); continue; }
+        try {
+          const r = await sendBrandNudge({ alerts: t.alerts, sender: { name: "Luca" }, adminEmail: "auto-nudge" });
+          sent.push({ to: r.to, covers: t.alerts.length });
+        } catch (e) {
+          sent.push({ to: t.brand.email, error: e.message });
+        }
+      }
+      res.json({ enabled: rules.filter((r) => r.auto).map((r) => r.kind), targets: targets.length, sent, dryRun });
+    } catch (err) {
+      console.error("/cron/auto-nudge error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get("/blog-daily", async (req, res) => {
     if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {

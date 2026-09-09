@@ -20,6 +20,9 @@ const money = (n, { cents, currency = "USD" } = {}) => {
   }
 };
 const num = (n) => Number(n || 0).toLocaleString("en-US");
+// num() is for display only — it returns a locale string, so "1,234" - "38" is
+// NaN. Arithmetic goes through this.
+const val = (n) => Number(n) || 0;
 const pct = (part, base) => (base > 0 ? Math.round((part / base) * 100) : 0);
 
 const GREEN = "#10B981";
@@ -224,28 +227,28 @@ export default function HomePage() {
   const maxTierMrr = Math.max(1, ...revenue.byTier.map((t) => t.mrr));
 
   // Funnel stages, each as a share of the top (signed-up) plus step conversion.
-  const pctOfBase = (n) => (funnel.signedUp ? `${Math.round((num(n) / funnel.signedUp) * 100)}%` : "—");
+  const pctOfBase = (n) => (funnel.signedUp ? `${Math.round((val(n) / val(funnel.signedUp)) * 100)}%` : "—");
 
   // The buckets are meant to partition the active base. They have not always
   // summed to it, so any shortfall is shown as its own segment instead of
   // silently disappearing.
   const baseSplit = (() => {
     const parts = [
-      { label: "Paying", n: num(subscriptions.paying), color: GREEN },
-      { label: "In free trial", n: num(subscriptions.inTrial), color: AMBER },
-      { label: "Linkable trial", n: num(subscriptions.extendedTrialActive), color: BLUE },
-      { label: "Cancelled · in grace", n: num(subscriptions.cancelledInGrace), color: ROSE },
-      { label: "No plan yet", n: num(subscriptions.noPaidPlan), color: "#9CA3AF" },
+      { label: "Paying", n: val(subscriptions.paying), color: GREEN },
+      { label: "In free trial", n: val(subscriptions.inTrial), color: AMBER },
+      { label: "Linkable trial", n: val(subscriptions.extendedTrialActive), color: BLUE },
+      { label: "Cancelled · in grace", n: val(subscriptions.cancelledInGrace), color: ROSE },
+      { label: "No plan yet", n: val(subscriptions.noPaidPlan), color: "#9CA3AF" },
     ];
     const counted = parts.reduce((a, b) => a + b.n, 0);
-    const rest = num(funnel.signedUp) - counted;
+    const rest = val(funnel.signedUp) - counted;
     if (rest > 0) parts.push({ label: "Unclassified", n: rest, color: "#D1D5DB" });
     return parts;
   })();
 
   // Accepted samples the brand has not put in the post yet — the commonest
   // reason a campaign stalls.
-  const samplesOwed = Math.max(0, num(marketplace.samplesAccepted) - num(marketplace.samplesShipped));
+  const samplesOwed = Math.max(0, val(marketplace.samplesAccepted) - val(marketplace.samplesShipped));
 
   const stages = [
     { label: "Signed up", value: funnel.signedUp, color: theme.text },
@@ -401,12 +404,16 @@ export default function HomePage() {
           <Stat span={2} label="Linkable extended trials" value={num(subscriptions.extendedTrialActive)} accent={BLUE} sub="admin-granted, active" />
           <Stat span={2} label="Cancelled · in grace" value={num(subscriptions.cancelledInGrace)} accent={ROSE} sub="cancelled, trial access ending" />
           <Stat span={2} label="No plan yet" value={num(subscriptions.noPaidPlan)} sub="never subscribed / lapsed" />
+          {/* Same shape as the five beside it — one label line, a value, one
+              sub-line. A wrapping label and an extra delta row made this tile
+              taller than the rest, and the grid stretched the others to match,
+              leaving five cards of white space. The sparkline sits in its own
+              column so it costs no height. */}
           <Stat
-            label="New brands this month"
+            label="New this month"
             value={num(brands.newThisMonth)}
             span={2}
             spark={spark("brands")}
-            delta={delta("brands") && { ...delta("brands"), text: `signups ${delta("brands").text}` }}
             sub={
               momentumDelta === 0
                 ? `same as last month (${num(brands.newLastMonth)})`
@@ -427,7 +434,7 @@ export default function HomePage() {
           <div style={{ display: "flex", height: 12, borderRadius: 6, overflow: "hidden", background: theme.surfaceAlt }}>
             {baseSplit.filter((b) => b.n > 0).map((b) => (
               <div key={b.label} title={`${b.label}: ${b.n}`}
-                style={{ width: `${(b.n / Math.max(1, funnel.signedUp)) * 100}%`, background: b.color }} />
+                style={{ width: `${(b.n / Math.max(1, val(funnel.signedUp))) * 100}%`, background: b.color }} />
             ))}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", marginTop: 12 }}>
