@@ -158,6 +158,46 @@ export async function proposeTopics(count = 10) {
 
 /* --------------------------------------------------------------- article */
 // Returns { article, attempts, problems } where article passed validation.
+// The checks that reject an article are all countable, so they are stated as a
+// contract beside the task instead of being left in the middle of the style
+// guide, and the model is asked to count before it answers. Two of the first
+// three articles failed here: one invented figures, one wrote seven H2 sections
+// and used a banned word inside a hyphenated compound ("highest-leverage").
+// The numbers come from LIMITS, so this brief and the validator cannot drift.
+const CONTRACT = `
+CHECKED AUTOMATICALLY. Any one of these rejects the article, so count before you answer.
+
+- H2 sections: write exactly 4 or 5. H3 headings do not count towards this. (Rejected outside ${LIMITS.h2[0]} to ${LIMITS.h2[1]}.)
+- FAQs: exactly 3 or 4, none repeating a question an H2 already asks. (Rejected outside ${LIMITS.faqs[0]} to ${LIMITS.faqs[1]}.)
+- Lists: at most ${LIMITS.lists} ul or ol blocks in the whole article. None at all is fine and usually better.
+- Body length: aim for 750 to 950 words. (Rejected outside ${LIMITS.words[0]} to ${LIMITS.words[1]}.)
+- Title: aim for 45 to 62 characters. (Rejected outside ${LIMITS.title[0]} to ${LIMITS.title[1]}.)
+- Meta description: aim for 120 to 155 characters. (Rejected outside ${LIMITS.meta[0]} to ${LIMITS.meta[1]}.)
+- Reading time must stay under ${MAX_READ_MINUTES} minutes, which the body length gives you.
+
+NUMBERS. Every digit, percentage, currency amount and multiplier anywhere in the article must
+appear verbatim in the verified facts you were given. You may not estimate, round, illustrate or
+invent one, and that applies inside hypothetical examples too. A worked example can say "a skincare
+brand doing a few hundred orders a month" but not "doing 300 orders a month". If you want to make a
+quantitative point you cannot source, make it qualitatively instead: "most of the sales come from a
+handful of creators", not "80% of sales come from 20% of creators".
+
+BANNED WORDS. These are rejected anywhere in the article, including inside hyphenated compounds
+and inflections, so "high-leverage", "leveraging" and "leveraged" all break the "leverage" rule:
+${banned.join(", ")}.
+
+PUNCTUATION. No em dash or en dash anywhere. No exclamation mark anywhere.
+
+Before you return the article, run this check and fix anything that fails:
+1. Count the h2 blocks. Is the total 4 or 5?
+2. Count the ul and ol blocks. Is the total 2 or fewer?
+3. Count the FAQs. Is it 3 or 4, and does each ask something no H2 asks?
+4. Count the characters of the title, then of the meta description.
+5. Re-read every digit in the article. Is each one in the verified facts?
+6. Search the whole text for each banned word, including as part of a longer word.
+7. Search the whole text for the characters em dash, en dash and exclamation mark.
+`;
+
 export async function writeArticle({ keyword, angle = "", category = "Guide", date = new Date().toISOString().slice(0, 10), onProgress = () => {} }) {
   if (!apiKey()) throw new Error("BLOG_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY) not set");
   const client = anthropic();
@@ -182,7 +222,8 @@ Output format:
 - "faqs": 3 or 4 question/answer pairs that do not repeat the H2s.
 - "imageQuery": 2 to 4 words describing a concrete photo scene for this article (stock-photo search).
 - "slug": lower case words joined by hyphens, 3 to 7 words, containing the keyword's main words.
-Follow every rule in the style guide and only state facts from the facts file.`;
+Follow every rule in the style guide and only state facts from the facts file.
+${CONTRACT}`;
 
   let feedback = "";
   const log = [];
