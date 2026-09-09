@@ -180,7 +180,7 @@ export default function HomePage() {
       <div>
         <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 24 }}>Home</div>
         {/* Same sections, grids and card shapes as the loaded page. */}
-        <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
+        <Section title="Recurring revenue" hint="from active paid subscriptions, billed in USD (trials and Shopify test charges excluded)">
           <div className="lk-grid">
             {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" seed={i} /></div>)}
             <Card pad={18} span={12}>
@@ -195,7 +195,7 @@ export default function HomePage() {
             <SkeletonBars rows={4} labelWidth={150} valueWidth={110} barHeight={12} gap={14} />
           </Card>
         </Section>
-        <Section title="Marketplace" hint="the two-sided activity brands and creators generate">
+        <Section title="Marketplace" hint="the two-sided activity brands and creators generate, in the shop currency">
           <div className="lk-grid">
             {[0, 1, 2, 3].map((i) => <div key={i} className="lk-c3"><SkeletonStat variant="stat" seed={i + 4} sub={i !== 1} /></div>)}
           </div>
@@ -277,10 +277,10 @@ export default function HomePage() {
       )}
 
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
-      <Section title="Recurring revenue" hint="from active paid subscriptions (trials excluded)">
+      <Section title="Recurring revenue" hint="from active paid subscriptions, billed in USD (trials and Shopify test charges excluded)">
         <div className="lk-grid">
-          <Stat label="MRR" value={money(revenue.mrr)} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox && delta("mrr") ? { ...delta("mrr"), text: `${delta("mrr").text} (from subscription records)` } : null} />
-          <Stat label="ARR" value={money(revenue.arr)} sub="MRR × 12" spark={series?.mrrApprox ? spark("mrr") : null} />
+          <Stat label="MRR" value={money(revenue.mrr, { cents: true })} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox && delta("mrr") ? { ...delta("mrr"), text: `${delta("mrr").text} (from subscription records)` } : null} />
+          <Stat label="ARR" value={money(revenue.arr, { cents: true })} sub="MRR × 12" spark={series?.mrrApprox ? spark("mrr") : null} />
           <Stat label="ARPA" value={money(revenue.arpa, { cents: true })} sub="avg revenue / paying brand" />
           <Stat
             label="Trial pipeline"
@@ -340,14 +340,14 @@ export default function HomePage() {
       </Section>
 
       {/* ── Marketplace ───────────────────────────────────────────────────── */}
-      <Section title="Marketplace" hint="the two-sided activity brands and creators generate">
+      <Section title="Marketplace" hint="the two-sided activity brands and creators generate, in the shop currency">
         <div className="lk-grid">
           <Stat label="Creators" value={num(marketplace.creatorsTotal)} sub={`${num(marketplace.creatorsActive)} active (accepted a campaign)`} spark={spark("creators")} delta={delta("creators") && { ...delta("creators"), text: `new creators ${delta("creators").text}` }} />
           <Stat label="Active campaigns" value={num(marketplace.activeCampaigns)} spark={spark("campaigns")} delta={delta("campaigns") && { ...delta("campaigns"), text: `launches ${delta("campaigns").text}` }} />
           <Stat label="GMV" value={money(marketplace.gmv, { currency: marketplace.gmvCurrency })} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} spark={spark("gmv")} delta={delta("gmv")} />
-          <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.clicks)} link clicks`} spark={spark("commission")} delta={delta("clicks") && { ...delta("clicks"), text: `clicks ${delta("clicks").text}` }} />
+          <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`creator share of GMV · ${num(marketplace.clicks)} link clicks`} spark={spark("commission")} delta={delta("clicks") && { ...delta("clicks"), text: `clicks ${delta("clicks").text}` }} />
           <Stat label="Average order" value={money(marketplace.avgOrder, { cents: true, currency: marketplace.gmvCurrency })} sub={`${num(marketplace.linksWithOrders)} link${marketplace.linksWithOrders === 1 ? "" : "s"} have sold`} />
-          <Stat label="Paid out to creators" value={money(marketplace.paidOut, { cents: true })} sub={`${num(marketplace.paidOutCount)} completed payout${marketplace.paidOutCount === 1 ? "" : "s"}`} />
+          <Stat label="Paid out to creators" value={money(marketplace.paidOut, { cents: true, currency: marketplace.paidOutCurrency })} sub={`${num(marketplace.paidOutCount)} completed payout${marketplace.paidOutCount === 1 ? "" : "s"}`} />
         </div>
       </Section>
 

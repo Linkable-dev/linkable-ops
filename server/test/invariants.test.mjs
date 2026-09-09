@@ -79,7 +79,10 @@ describe("home metrics", { timeout: 120_000 }, () => {
   });
 
   test("ARR is twelve months of MRR and ARPA divides evenly", () => {
-    assert.equal(home.revenue.arr, Math.round(home.revenue.mrr * 12));
+    // The tile is labelled "MRR x 12", so it has to be exactly that — rounding
+    // ARR to whole dollars made the two tiles disagree on screen.
+    assert.ok(Math.abs(home.revenue.arr - home.revenue.mrr * 12) < 0.01,
+      `ARR ${home.revenue.arr} != MRR ${home.revenue.mrr} x 12`);
     if (home.revenue.payingBrands > 0) {
       const arpa = home.revenue.mrr / home.revenue.payingBrands;
       assert.ok(Math.abs(home.revenue.arpa - arpa) < 0.02, `ARPA ${home.revenue.arpa} != MRR/brands ${arpa}`);
@@ -103,6 +106,40 @@ describe("home metrics", { timeout: 120_000 }, () => {
     assert.ok(m.linksWithOrders <= m.orders || m.orders === 0,
       `${m.linksWithOrders} links sold but only ${m.orders} orders`);
     assert.ok(m.paidOutCount >= 0 && m.paidOut >= 0, "paid out cannot be negative");
+    assert.match(m.paidOutCurrency, /^[A-Z]{3}$/,
+      `payouts need an ISO currency, got ${m.paidOutCurrency} — the tile rendered GBP payouts as dollars`);
+  });
+
+  // orders.commission holds the commission RATE in percent, not an amount.
+  // Summing the column reported four orders at 10/10/10/30 as "60 earned" on
+  // 162 of GMV. Commission is a share of GMV, so it cannot exceed it.
+  test("commission earned is a share of GMV, not a sum of percentages", () => {
+    const m = home.marketplace;
+    assert.ok(m.commissionPaid <= m.gmv || m.gmv === 0,
+      `commission ${m.commissionPaid} exceeds GMV ${m.gmv}, so it is not money`);
+    if (m.gmv > 0) {
+      const rate = (m.commissionPaid / m.gmv) * 100;
+      assert.ok(rate > 0 && rate <= 100, `implied commission rate is ${rate.toFixed(1)}%`);
+    }
+  });
+
+  test("the two places that count paying brands agree", () => {
+    // Revenue counts them one way and subscription health another; a Shopify
+    // test charge was paying in one and not the other, so the page showed
+    // "3 paying brands" above "Paying: 4".
+    assert.equal(home.subscriptions.paying, home.revenue.payingBrands,
+      `subscription health says ${home.subscriptions.paying} paying, revenue says ${home.revenue.payingBrands}`);
+  });
+
+  test("the MRR tile agrees with the MRR sparkline beside it", async () => {
+    const series = await get("/insights/series?range=90d");
+    if (!series.mrrApprox) return; // no subscription mirror on this target
+    const latest = series.buckets[series.buckets.length - 1]?.mrr ?? 0;
+    // Two independent queries over different tables. They drifted apart when
+    // one excluded Shopify test charges and the other did not, and again when
+    // one summed GBP and USD subscriptions together.
+    assert.ok(Math.abs(latest - home.revenue.mrr) < 1,
+      `sparkline says ${latest} but the tile says ${home.revenue.mrr}`);
   });
 });
 

@@ -1,5 +1,6 @@
 import express from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { commissionEarnedSql, NOT_TEST_SUB } from "../lib/mainAppSql.js";
 
 export function analyticsRoutes() {
   const router = express.Router();
@@ -267,7 +268,7 @@ export function analyticsRoutes() {
         .catch(() => false);
       const subLateral = hasAppSubs
         ? `LEFT JOIN LATERAL (
-             SELECT status, price_after_discount FROM app_subscriptions
+             SELECT status, price_after_discount, test FROM app_subscriptions
              WHERE user_id = u.id
              ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
                       shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
@@ -277,8 +278,16 @@ export function analyticsRoutes() {
       const amtExpr = hasAppSubs
         ? `COALESCE(NULLIF(asub.price_after_discount, 0), (substring(u.account_id from 'shopify_([0-9]+)'))::numeric)`
         : `(substring(u.account_id from 'shopify_([0-9]+)'))::numeric`;
+      // A test-mode Shopify charge stays ACTIVE forever and bills nobody, so
+      // status alone is not enough — the MRR series in insights.js already
+      // excludes them and the tiles disagreed with their own trend line.
+      // A brand on a Shopify TEST charge is not paying anyone. Needed in the
+      // subscription-health counts too, which sat next to the revenue tiles
+      // reporting a different number of paying brands.
+      const notTestFilter = hasAppSubs ? `AND ${NOT_TEST_SUB()}` : "";
+      const isTestExpr = hasAppSubs ? `COALESCE(asub.test, false)` : "false";
       const subActiveFilter = hasAppSubs
-        ? `AND (asub.status IS NULL OR asub.status = 'ACTIVE')`
+        ? `AND (asub.status IS NULL OR asub.status = 'ACTIVE') AND ${NOT_TEST_SUB()}`
         : "";
 
       const [
@@ -351,7 +360,8 @@ export function analyticsRoutes() {
             -- the currency most orders were placed in (orders are stored in the shop currency, not converted)
             (SELECT COALESCE(NULLIF(shopify_currency, ''), 'USD') FROM orders WHERE deleted = '-infinity'::timestamptz
               GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1) AS gmv_currency,
-            (SELECT COALESCE(SUM((commission)::numeric), 0) FROM orders WHERE deleted = '-infinity'::timestamptz AND commission ~ '^[0-9]+(\\.[0-9]+)?$') AS commission_paid,
+            -- orders.commission is a PERCENT RATE, not an amount (see lib/mainAppSql.js).
+            (SELECT COALESCE(${commissionEarnedSql()}, 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS commission_paid,
             (SELECT COUNT(*) FROM orders WHERE deleted = '-infinity'::timestamptz) AS orders,
             (SELECT COALESCE(AVG(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS avg_order,
             (SELECT COUNT(DISTINCT link_id) FROM orders WHERE deleted = '-infinity'::timestamptz) AS links_with_orders,
@@ -362,12 +372,16 @@ export function analyticsRoutes() {
                 AND LOWER(status) IN ('paid', 'succeeded', 'completed')) AS paid_out,
             (SELECT COUNT(*) FROM payouts WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
                 AND LOWER(status) IN ('paid', 'succeeded', 'completed')) AS paid_out_count,
+            (SELECT COALESCE(NULLIF(amount_currency, ''), 'USD') FROM payouts
+              WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+                AND LOWER(status) IN ('paid', 'succeeded', 'completed')
+              GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1) AS paid_out_currency,
             (SELECT COALESCE(SUM(clicks_counter), 0) FROM links WHERE deleted = '-infinity'::timestamptz) AS clicks`),
 
         // Subscription/trial health across active brands.
         cloudSqlQuery(`
           SELECT
-            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS paying,
+            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false ${notTestFilter}) AS paying,
             -- Standard 14-day trial only (trial_plan_name empty). Admin-granted
             -- trials carry a trial_plan_name and are counted in extended_trial_active
             -- instead, so the two buckets stay mutually exclusive rather than
@@ -384,8 +398,11 @@ export function analyticsRoutes() {
             -- access. A cancelled-in-grace brand is NOT counted here (it still
             -- has access) — that was the bug where it read "signed up, not
             -- subscribed" despite having subscribed then cancelled.
-            COUNT(*) FILTER (WHERE (COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan')) AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS no_paid_plan
-          FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}`),
+            -- A live test charge belongs here rather than in "paying": it has an
+            -- account_id but bills nobody.
+            COUNT(*) FILTER (WHERE ((COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan')) OR ${isTestExpr})
+                             AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS no_paid_plan
+          FROM users u JOIN brands b ON b.user_id = u.id ${subLateral} WHERE ${BRAND_ACTIVE}`),
 
         // New brands this month vs last (momentum).
         cloudSqlQuery(`
@@ -412,7 +429,7 @@ export function analyticsRoutes() {
       res.json({
         revenue: {
           mrr: liveMrr,
-          arr: Math.round(liveMrr * 12),
+          arr: Math.round(liveMrr * 12 * 100) / 100,
           payingBrands,
           arpa: payingBrands ? parseFloat((liveMrr / payingBrands).toFixed(2)) : 0,
           pipelineMrr: parseFloat(m.pipeline_mrr || 0),
@@ -437,6 +454,7 @@ export function analyticsRoutes() {
           linksWithOrders: parseInt(mk.links_with_orders || 0),
           paidOut: parseFloat(mk.paid_out || 0),
           paidOutCount: parseInt(mk.paid_out_count || 0),
+          paidOutCurrency: mk.paid_out_currency || "USD",
           clicks: parseInt(mk.clicks || 0),
         },
         subscriptions: {

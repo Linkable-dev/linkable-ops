@@ -9,6 +9,7 @@ import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { blogDb } from "../lib/blog-supabase.js";
+import { commissionEarnedSql } from "../lib/mainAppSql.js";
 
 // Soft-delete sentinel used across the main app's tables.
 const ND = (a) => `(${a}.deleted IS NULL OR ${a}.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`;
@@ -319,7 +320,7 @@ async function brand360(userId) {
       ORDER BY o.created DESC LIMIT 20`, [userId]),
     cloudSqlQuery(`
       SELECT COALESCE(NULLIF(o.shopify_currency, ''), 'USD') AS currency, COUNT(*) AS orders, COALESCE(SUM(o.shopify_amount), 0) AS gmv,
-             COALESCE(SUM(CASE WHEN o.commission ~ '^[0-9]+(\\.[0-9]+)?$' THEN o.commission::numeric ELSE 0 END), 0) AS commission
+             COALESCE(${commissionEarnedSql("o")}, 0) AS commission
       FROM orders o JOIN links l ON l.id = o.link_id
       WHERE l.brand_user_id = $1::uuid AND ${ND("o")} AND ${ND("l")}
       GROUP BY 1 ORDER BY gmv DESC`, [userId]),
@@ -425,7 +426,7 @@ async function homeSeries(rangeKey) {
     series("creators", `SELECT ${bucket("created")} AS date, COUNT(*) AS n FROM influencers WHERE created >= $1::date GROUP BY 1`, [start]),
     series("campaigns", `SELECT ${bucket("COALESCE(activated_at, created)")} AS date, COUNT(*) AS n FROM products WHERE ${ND("products")} AND activated_at IS NOT NULL AND COALESCE(activated_at, created) >= $1::date GROUP BY 1`, [start]),
     series("accepted", `SELECT ${bucket("COALESCE(accepted_at, created)")} AS date, COUNT(*) AS n FROM links WHERE ${ND("links")} AND status = ${LINK.ACCEPTED} AND COALESCE(accepted_at, created) >= $1::date GROUP BY 1`, [start]),
-    series("orders", `SELECT ${bucket("created")} AS date, COUNT(*) AS n, COALESCE(SUM(shopify_amount), 0) AS gmv, COALESCE(SUM(CASE WHEN commission ~ '^[0-9]+(\\.[0-9]+)?$' THEN commission::numeric ELSE 0 END), 0) AS commission FROM orders WHERE ${ND("orders")} AND created >= $1::date GROUP BY 1`, [start]),
+    series("orders", `SELECT ${bucket("created")} AS date, COUNT(*) AS n, COALESCE(SUM(shopify_amount), 0) AS gmv, COALESCE(${commissionEarnedSql()}, 0) AS commission FROM orders WHERE ${ND("orders")} AND created >= $1::date GROUP BY 1`, [start]),
     series("clicks", `SELECT ${bucket("created")} AS date, COUNT(*) AS n FROM link_clicks WHERE created >= $1::date GROUP BY 1`, [start]),
     series("trials", `SELECT ${bucket("trial_activation_date")} AS date, COUNT(*) AS n FROM brands WHERE ${ND("brands")} AND trial_activation_date > '-infinity'::timestamptz AND trial_activation_date >= $1::date GROUP BY 1`, [start]),
     hasSubs
@@ -440,6 +441,13 @@ async function homeSeries(rangeKey) {
            AND (s.cancelled_at IS NULL OR s.cancelled_at >= g + $3::interval)
            AND (s.trial_ends_at IS NULL OR s.trial_ends_at < g + $3::interval)
            AND COALESCE(s.test, false) = false AND s.price_amount > 0
+           -- One currency only. price_amount is in price_currency, so summing
+           -- the column across rows was adding GBP subscriptions to USD ones
+           -- and the sparkline drifted away from the MRR tile beside it.
+           AND COALESCE(NULLIF(s.price_currency, ''), 'USD') = (
+             SELECT COALESCE(NULLIF(price_currency, ''), 'USD') FROM app_subscriptions
+             WHERE COALESCE(test, false) = false AND price_amount > 0
+             GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1)
           GROUP BY 1 ORDER BY 1`, [start, unit, step])
       : Promise.resolve(null),
   ]);
@@ -504,7 +512,7 @@ Domain notes (important):
 - users.role: 1 admin, 2 brand, 3 creator (influencer). brands.user_id and influencers.user_id reference users.id. products.user_id is the brand's user id; links.brand_user_id / links.influencer_user_id likewise.
 - A "campaign" is a row in products. products.status: 1 new, 2 active, 3 paused, 4 ended. products.activated_at is when it went live.
 - links = a creator on a campaign. links.status: 1 invited (brand-initiated, pending creator), 2 applied (creator-initiated, pending brand), 3 accepted, 4 rejected, 5 ended. links.clicks_counter = clicks.
-- orders reference links (orders.link_id); orders.shopify_amount is in orders.shopify_currency (do not sum across currencies without grouping). orders.commission is text (numeric-looking).
+- orders reference links (orders.link_id); orders.shopify_amount is in orders.shopify_currency (do not sum across currencies without grouping). orders.commission is text holding the commission RATE IN PERCENT for that order (e.g. '30' = 30%), copied from products.sale_commission — NEVER sum it as money; commission earned is SUM(shopify_amount * commission::numeric / 100).
 - sample_requests.status: 'pending' | 'accepted' | 'shipped' | others. payouts.status 'paid' means money went out; amount_value is text.
 - Paid plans: users.account_id like 'shopify_<price>_<monthly|yearly>' (e.g. shopify_199_monthly); 'shopify_free_plan' is free; empty = never subscribed. Trials: brands.trial_expiration_date > NOW() means in trial; brands.trial_plan_name set = Linkable-granted trial.
 - app_subscriptions (when present) mirrors Shopify: status ACTIVE/CANCELLED/FROZEN/EXPIRED, price_amount, price_after_discount, interval, trial_ends_at, cancelled_at, test.
