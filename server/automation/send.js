@@ -1,6 +1,8 @@
 // Email sending via Resend API
 // Spam-proof: plain text, rate-limited, proper headers, CAN-SPAM compliant
 
+import { sandboxRecipient } from "../lib/outbound-sandbox.js";
+
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 // Rate limit: max 2 emails per second, 100 per hour (conservative for warming)
@@ -83,6 +85,11 @@ export async function sendEmail({ to, toName, subject, body, from, replyTo, rese
   if (!resendApiKey) {
     return { success: false, error: "Missing Resend API key" };
   }
+
+  // With OUTBOUND_TEST_RECIPIENT set, this goes to the tester instead.
+  const target = sandboxRecipient({ to, subject });
+  to = target.to;
+  subject = target.subject;
 
   try {
     const res = await fetch(RESEND_API_URL, {

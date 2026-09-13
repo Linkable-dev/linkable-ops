@@ -210,3 +210,13 @@ Marking an alert done or snoozing it stops the robot on that alert.
 An automatic nudge is indistinguishable from a hand-sent one afterwards except
 by `by_email` on `ops_brand_nudges` — both go through the same
 `sendBrandNudge()`, land in the same log, and close the same alerts.
+
+
+## Testing outbound without emailing anyone
+
+Set `OUTBOUND_TEST_RECIPIENT=you@example.com` on the server (Vercel env, then
+redeploy). Every outbound email — cold outreach, AI conversation first messages
+and replies, brand nudges — goes to that address instead, with the intended
+recipient in the subject (`[TEST → prospect@shop.com] …`). Everything else runs
+for real: rows are written, threads are stamped, the crons drain. Unset it to
+go live again. One switch, one place: `server/lib/outbound-sandbox.js`.

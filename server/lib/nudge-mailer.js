@@ -8,6 +8,8 @@
 // specifically to STOP Gmail threading. A nudge wants the opposite of
 // all three.
 
+import { sandboxRecipient } from "./outbound-sandbox.js";
+
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 // Who the brand sees. Both must be on a Resend-verified domain.
@@ -36,6 +38,11 @@ export async function sendNudgeEmail({ to, subject, body, from, replyTo }) {
   }
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { success: false, error: "RESEND_API_KEY is not set on the server" };
+
+  // With OUTBOUND_TEST_RECIPIENT set, this goes to the tester instead.
+  const target = sandboxRecipient({ to, subject });
+  to = target.to;
+  subject = target.subject;
 
   try {
     const res = await fetch(RESEND_API_URL, {

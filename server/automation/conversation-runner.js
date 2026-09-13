@@ -35,6 +35,8 @@ import {
 import { supabase } from "../lib/supabase.js";
 import { cancelPendingTouches } from "./sequencer.js";
 
+import { sandboxRecipient } from "../lib/outbound-sandbox.js";
+
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 function replyToAddress() {
@@ -439,6 +441,12 @@ export async function sendDueScheduled({ limit = 50 } = {}) {
 
   const results = [];
   for (const msg of due || []) {
+    // One row that throws — a missing campaign, a network error the sender
+    // did not catch — used to abort the whole pass with a 500, which failed
+    // the cron, emailed the team, and left every other due message waiting.
+    // It is recorded on the row instead, so it is not retried for ever, and
+    // the pass carries on.
+    try {
     const conv = await getConversation(msg.conversation_id, teamId);
     if (!conv) continue;
     if (["opted_out", "dead"].includes(conv.status)) {
@@ -529,6 +537,15 @@ export async function sendDueScheduled({ limit = 50 } = {}) {
       });
     }
     results.push({ id: msg.id, sent: send.success, error: send.error });
+    } catch (err) {
+      console.error(`run-due: message ${msg.id} failed:`, err);
+      await supabase
+        .from("ai_messages")
+        .update({ error: `failed: ${String(err?.message || err).slice(0, 500)}` })
+        .eq("id", msg.id)
+        .then(() => {}, () => {});
+      results.push({ id: msg.id, sent: false, error: String(err?.message || err) });
+    }
   }
 
   return { processed: results.length, results };
@@ -539,6 +556,15 @@ export async function sendDueScheduled({ limit = 50 } = {}) {
 async function sendOutbound({ campaign, toEmail, toName, subject, body, messageId, inReplyTo, references }) {
   if (!process.env.RESEND_API_KEY) {
     return { success: false, error: "RESEND_API_KEY not set" };
+  }
+
+  // With OUTBOUND_TEST_RECIPIENT set, this goes to the tester instead — the
+  // display name is dropped so the address is exactly theirs.
+  const target = sandboxRecipient({ to: toEmail, subject });
+  if (target.redirected) {
+    toEmail = target.to;
+    toName = null;
+    subject = target.subject;
   }
 
   const fromEmail = campaign.persona?.sender_email || "brand@linkable.link";
