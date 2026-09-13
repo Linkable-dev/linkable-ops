@@ -22,18 +22,30 @@ jobs:
     steps:
       # The secret travels as a bearer token, not in the query string, so it
       # cannot end up in an access log, a proxy or a referrer.
+      # About one poll in fifteen used to fail ~5s in, before anything was
+      # sent — an upstream hiccup on the first Supabase call or a cold start —
+      # and every one of them failed the run and emailed the team. Two retries
+      # ten seconds apart absorb a blip; a real outage still fails. And the
+      # status and body are printed on failure, because Vercel's runtime logs
+      # are gone by the time anyone reads the email.
       - name: Drain due AI replies
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -sf --max-time 55 \
+          code=$(curl -s --max-time 55 --retry 2 --retry-delay 10 --retry-all-errors \
+            -o /tmp/body -w '%{http_code}' \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "https://linkable-ops.vercel.app/api/cron/run-due"
+            "https://linkable-ops.vercel.app/api/cron/run-due")
+          echo "HTTP $code"; cat /tmp/body; echo
+          [ "$code" -lt 400 ]
       - name: Follow-ups (weekday morning schedule only)
         if: github.event.schedule == '30 9 * * 1-5'
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -sf --max-time 55 \
+          code=$(curl -s --max-time 55 --retry 2 --retry-delay 10 --retry-all-errors \
+            -o /tmp/body -w '%{http_code}' \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "https://linkable-ops.vercel.app/api/cron/follow-ups"
+            "https://linkable-ops.vercel.app/api/cron/follow-ups")
+          echo "HTTP $code"; cat /tmp/body; echo
+          [ "$code" -lt 400 ]
