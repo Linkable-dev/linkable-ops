@@ -231,6 +231,13 @@ export const api = {
   // Undo a soft-delete (reactivates the brand + cancels the scheduled purge).
   restoreBrand: (userId) =>
     request(`/admin-users/${userId}/restore`, { method: "POST" }),
+  // Rule a creator out of applying anywhere, or lift it. A reason is required
+  // to set it and is shown wherever the standing is.
+  setCreatorDisqualified: (userId, disqualified, reason) =>
+    request(`/admin-users/${userId}/disqualify-creator`, {
+      method: "POST",
+      body: JSON.stringify({ disqualified, reason }),
+    }),
   impersonateUser: (userId) =>
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
   grantTrial: (userId, body) =>

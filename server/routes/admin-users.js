@@ -179,7 +179,77 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Rule a creator out, or lift it. The counts a brand sees (accepted,
+  // delivered, missed) are evidence; this is the judgement, and it is a
+  // person's to make — a threshold would already have fired on somebody whose
+  // sample was lost in the post.
+  router.post("/:userId/disqualify-creator", async (req, res) => {
+    try {
+      const out = await setCreatorDisqualified(
+        req.params.userId,
+        req.body?.disqualified !== false,
+        req.body?.reason || "",
+        req.admin,
+        req.dbTarget || "prod",
+      );
+      res.json(out);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   return router;
+}
+
+// Sets or clears influencers.disqualified_at. A reason is required to set it:
+// a row saying somebody was ruled out and not why is one nobody can review,
+// defend, or undo with confidence.
+async function setCreatorDisqualified(userId, disqualified, reason, admin, dbTarget) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  if (disqualified && !String(reason).trim()) {
+    const e = new Error("A reason is required"); e.status = 400; throw e;
+  }
+
+  // The column is created by the main app at boot, so a database it has not
+  // been promoted to does not have it yet. Say that, rather than handing the
+  // operator a raw SQL error about a missing column.
+  const { rows: cols } = await cloudSqlQuery(
+    `SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'influencers' AND column_name = 'disqualified_at'`,
+    [], dbTarget,
+  );
+  if (!cols.length) {
+    const e = new Error(
+      "This database has no creator-standing column yet — it arrives with the next promotion.",
+    );
+    e.status = 409;
+    throw e;
+  }
+
+  const { rows } = await cloudSqlQuery(
+    disqualified
+      ? `UPDATE influencers
+            SET disqualified_at = COALESCE(disqualified_at, NOW()),
+                disqualified_reason = $2,
+                updated = NOW()
+          WHERE user_id = $1::uuid AND deleted = '-infinity'
+      RETURNING user_id::text, disqualified_at, disqualified_reason`
+      : `UPDATE influencers
+            SET disqualified_at = NULL, disqualified_reason = '', updated = NOW()
+          WHERE user_id = $1::uuid AND deleted = '-infinity'
+      RETURNING user_id::text, disqualified_at, disqualified_reason`,
+    disqualified ? [userId, String(reason).trim()] : [userId],
+    dbTarget,
+  );
+  if (!rows.length) {
+    const e = new Error("No active creator with that id"); e.status = 404; throw e;
+  }
+  console.info("[ops] creator standing changed", {
+    admin: admin?.email, userId, disqualified, dbTarget,
+  });
+  return rows[0];
 }
 
 // DEV-ONLY hard delete of a brand + everything hanging off it, in one
@@ -677,6 +747,12 @@ async function listCreators(query) {
             i.location_country,
             i.location_city,
             i.niche,
+            -- Read through to_jsonb so this query still runs against a database
+            -- that has not had the column yet. Production has not: the main app
+            -- creates it at boot and has not been promoted. A listing that 500s
+            -- on prod to show a dev-only field is a bad trade.
+            to_jsonb(i) ->> 'disqualified_at'     AS disqualified_at,
+            COALESCE(to_jsonb(i) ->> 'disqualified_reason', '') AS disqualified_reason,
             sig.last_sign_in,
             COALESCE(part.n, 0)::int    AS active_partnerships,
             COALESCE(rev.amount, 0)     AS total_revenue,

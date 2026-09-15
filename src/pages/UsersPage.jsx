@@ -115,6 +115,7 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [impersonating, setImpersonating] = useState(null); // user_id being acted on
   const [restoring, setRestoring] = useState(null); // user_id being restored
+  const [disqualifying, setDisqualifying] = useState(null); // user_id being ruled out
   const [actionError, setActionError] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [filters, setFilters] = useState({});
@@ -205,6 +206,35 @@ export default function UsersPage() {
       setActionError(`${row.email}: ${err.message}`);
     } finally {
       setImpersonating(null);
+    }
+  }
+
+  // Ruling a creator out is a judgement about a person, so it asks for the
+  // reason in the same breath and shows it back on the row afterwards. Lifting
+  // it asks nothing: undoing a punishment should never be the harder path.
+  async function handleDisqualify(row) {
+    const label = row.instagram_username ? `@${row.instagram_username.replace(/^@+/, "")}`
+      : (`${row.first_name || ""} ${row.last_name || ""}`.trim() || row.email);
+    let reason = "";
+    if (!row.disqualified_at) {
+      const answer = window.prompt(
+        `Rule out ${label}?\n\nThey will not be able to apply to any campaign. ` +
+        `A brand can still invite them directly.\n\nWhy?`,
+      );
+      if (answer === null || !answer.trim()) return;
+      reason = answer.trim();
+    }
+    setActionError("");
+    setDisqualifying(row.user_id);
+    try {
+      const out = await api.setCreatorDisqualified(row.user_id, !row.disqualified_at, reason);
+      setRows((rs) => rs.map((r) => (r.user_id === row.user_id
+        ? { ...r, disqualified_at: out.disqualified_at, disqualified_reason: out.disqualified_reason }
+        : r)));
+    } catch (err) {
+      setActionError(`${row.email}: ${err.message}`);
+    } finally {
+      setDisqualifying(null);
     }
   }
 
@@ -388,8 +418,10 @@ export default function UsersPage() {
               theme={theme}
               template={template}
               busy={impersonating === row.user_id}
+              disqualifyBusy={disqualifying === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
               onManage={() => setManageRow(row)}
+              onDisqualify={() => handleDisqualify(row)}
             />
           ))
         )}
@@ -423,7 +455,7 @@ export default function UsersPage() {
   );
 }
 
-function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
+function UserRow({ row, tab, theme, template, busy, disqualifyBusy, onImpersonate, onManage, onDisqualify }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -517,6 +549,20 @@ function UserRow({ row, tab, theme, template, busy, onImpersonate, onManage }) {
       )}
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
+        {tab === "creators" && (
+          <Btn
+            size="sm"
+            variant={row.disqualified_at ? "solid" : "outline"}
+            color={row.disqualified_at ? "#DC2626" : undefined}
+            onClick={onDisqualify}
+            loading={disqualifyBusy}
+            title={row.disqualified_at
+              ? `Ruled out: ${row.disqualified_reason || "no reason recorded"} — click to lift`
+              : "Stop this creator applying to campaigns"}
+          >
+            {row.disqualified_at ? "Ruled out" : "Rule out"}
+          </Btn>
+        )}
         {tab === "brands" && (
           <Btn
             size="sm"
