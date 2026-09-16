@@ -1,65 +1,6 @@
-import express from "express";
-import cors from "cors";
-import { tableRoutes } from "./routes/tables.js";
-import { analyticsRoutes } from "./routes/analytics.js";
-import { opsRoutes } from "./routes/ops.js";
-import { adminUsersRoutes } from "./routes/admin-users.js";
-import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
-import {
-  conversationsRoutes,
-  conversationsWebhookRoutes,
-} from "./routes/conversations.js";
-import { cronRoutes } from "./routes/cron.js";
-import { outboundRoutes } from "./routes/outbound.js";
-import { outboundCampaignsRoutes } from "./routes/outbound-campaigns.js";
-import { insightsRoutes } from "./routes/insights.js";
-import { autopilotRoutes } from "./routes/autopilot.js";
-import { outboundAgentsRoutes } from "./routes/outbound-agents.js";
-import { blogRoutes } from "./routes/blog.js";
+// Local development entry point: the same app the deployment serves, on a port.
+import app from "./app.js";
 import { closeCloudSql } from "./lib/cloudsql.js";
-import { dbTargetMiddleware } from "./middleware/dbTarget.js";
-
-const app = express();
-app.use(cors({ origin: ["http://localhost:3010", "http://localhost:5173"] }));
-// Larger limit for inbound email webhooks (HTML bodies + headers add up).
-// `verify` callback captures raw body so we can verify Svix signatures —
-// computing HMAC over the parsed JSON would re-stringify and not match.
-app.use(express.json({
-  limit: "5mb",
-  verify: (req, _res, buf) => {
-    if (buf && buf.length) req.rawBody = buf;
-  },
-}));
-
-app.get("/api/health", (req, res) => res.json({ status: "ok" }));
-
-// Auth routes — mounted without middleware (each route handles its own auth)
-app.use("/api/auth", authRoutes());
-
-// Public webhook (no admin auth — secured by Svix signature).
-app.use("/api/conversations", conversationsWebhookRoutes());
-
-// Cron routes (no admin auth — secured by the CRON_SECRET bearer token).
-app.use("/api/cron", cronRoutes());
-
-// Protected routes. The dbTarget middleware reads the x-db-target header
-// from the ops UI and binds the per-request target to AsyncLocalStorage so
-// cloudSqlQuery() inside route handlers picks the matching pool. Auth and
-// cron/webhook routes intentionally bypass it — those always hit prod.
-app.use("/api/tables", dbTargetMiddleware, requireOpsAdmin, tableRoutes());
-app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes());
-app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
-app.use("/api/insights", dbTargetMiddleware, requireOpsAdmin, insightsRoutes());
-// Recruiting, watched from here now that the brand app no longer shows it.
-app.use("/api/autopilot", dbTargetMiddleware, requireOpsAdmin, autopilotRoutes());
-// GTM outreach as agents: a goal, a budget, and a clock — see lib/outbound-agent.js.
-app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
-app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
-app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
-app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
-app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
-// Blog articles for www.linkable.link (Supabase-backed, see migration 018).
-app.use("/api/blog", requireOpsAdmin, blogRoutes());
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Linkable Ops server running on port ${PORT}`));
