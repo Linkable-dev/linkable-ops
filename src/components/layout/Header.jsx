@@ -18,7 +18,6 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/ai/campaigns/")) return { title: "Outbound", subtitle: "Campaign detail" };
   if (pathname.startsWith("/ai/agents")) return { title: "Outbound", subtitle: "Agents with a goal and a budget" };
   if (pathname.startsWith("/ai/inbox")) return { title: "Inbox", subtitle: "Replies that need a human" };
-  if (pathname.startsWith("/ai/test-lab")) return { title: "Test Lab", subtitle: "Try the reply agent" };
   if (pathname === "/blog") return { title: "Blog", subtitle: "Articles published on linkable.link" };
   if (pathname === "/blog/new") return { title: "Blog", subtitle: "New article" };
   if (pathname.startsWith("/blog/")) return { title: "Blog", subtitle: "Edit article" };

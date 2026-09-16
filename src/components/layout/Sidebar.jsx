@@ -275,7 +275,6 @@ export default function Sidebar() {
             {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), campaignsIcon)}
             {navItem("/ai/inbox", "Replies", path.startsWith("/ai/inbox"), inboxIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
-            {navItem("/ai/test-lab", "Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
           </div>
         )}
 

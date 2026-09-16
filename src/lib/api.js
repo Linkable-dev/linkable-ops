@@ -129,15 +129,9 @@ export const api = {
   getCreatorMatches: (id, { limit = 25 } = {}) => request(`/ops/campaigns/${id}/creator-matches?limit=${limit}`),
 
   // AI conversation manager
-  getAiCampaigns: () => request("/conversations/campaigns"),
   getAiCampaign: (id) => request(`/conversations/campaigns/${id}`),
-  createAiCampaign: (data) =>
-    request("/conversations/campaigns", { method: "POST", body: JSON.stringify(data) }),
   updateAiCampaign: (id, data) =>
     request(`/conversations/campaigns/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  getAiDefaults: () => request("/conversations/defaults"),
-  testLabTurn: (data) =>
-    request("/conversations/test-lab/turn", { method: "POST", body: JSON.stringify(data) }),
   startAiConversation: (data) =>
     request("/conversations/start", { method: "POST", body: JSON.stringify(data) }),
   listAiThreads: ({ campaign, status, limit } = {}) =>
