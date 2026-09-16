@@ -142,6 +142,21 @@ export async function tickAgent(agent, { dryRun = false, log = () => {} } = {}) 
   if (!campaign || campaign.status === "archived") {
     return stop(claimed, "done", "The campaign is gone", "Stopped — the campaign it sends from was archived");
   }
+  // A paused campaign is a condition, not a failure. The sender refuses to run
+  // for one — correctly — and the first version treated that as a pass that had
+  // gone wrong and retried it every four hours for ever.
+  //
+  // Waiting rather than stopping, deliberately: nothing in this app tells an
+  // agent that its campaign has been resumed, and a stopped agent is not read
+  // by the loop again. Waiting a day means resuming the campaign is all anyone
+  // has to do — the next tick simply finds it running and carries on.
+  if (campaign.status !== "active") {
+    return wait(
+      claimed,
+      NEXT_TICK_HOURS,
+      `Waiting — ${campaign.name} is ${campaign.status}. Resume the campaign and this carries on`,
+    );
+  }
 
   const progress = await agentProgress(claimed);
 
@@ -196,13 +211,20 @@ export async function tickAgent(agent, { dryRun = false, log = () => {} } = {}) 
   }
 
   const sent = Number(result?.sent || 0);
-  const spent = dryRun || holding ? 0 : sent;
+
+  // The budget is counted from this campaign's own sends, not from what the
+  // pass returned. fetchDueRows drains the TEAM's due follow-ups, so a pass can
+  // legitimately send for three other campaigns' sequences — adding that number
+  // here would spend this agent's budget on somebody else's work, and the error
+  // would compound every day. Re-reading is a query; getting it wrong is a
+  // budget that means nothing.
+  const after = dryRun || holding ? progress : await agentProgress(claimed);
 
   await supabase
     .from("outbound_agents")
     .update({
       status: "waiting",
-      prospects_used: claimed.prospects_used + spent,
+      prospects_used: after.contacted,
       next_action_at: hoursFromNow(sent > 0 ? NEXT_TICK_HOURS : SHORT_WAIT_HOURS),
       last_acted_at: new Date().toISOString(),
       stopped_reason: "",
@@ -217,7 +239,7 @@ export async function tickAgent(agent, { dryRun = false, log = () => {} } = {}) 
     claimed.id,
     holding ? "waiting" : "sent",
     summary,
-    `${progress.replied}/${claimed.goal_replies} replies · ${claimed.prospects_used + spent}/${claimed.max_prospects} contacted`,
+    `${after.replied}/${claimed.goal_replies} replies · ${after.contacted}/${claimed.max_prospects} contacted`,
   );
   return { agent: claimed.id, action: holding ? "prepared" : "sent", sent, summary };
 }

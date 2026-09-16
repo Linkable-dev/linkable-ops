@@ -111,13 +111,26 @@ export function outboundAgentsRoutes() {
       if (!body.email_campaign_id) {
         return res.status(400).json({ error: "Point it at a campaign to send from" });
       }
+      // The team, and the audience, come from the campaign it will send from.
+      // They are facts about that campaign, so asking the caller for them is
+      // asking it to repeat something already known — and the first version
+      // read TEAM_ID from the environment, which is how creating an agent
+      // failed everywhere the variable was not set.
+      const { data: campaign } = await supabase
+        .from("email_campaigns")
+        .select("id, team_id, audience_type")
+        .eq("id", body.email_campaign_id)
+        .maybeSingle();
+      if (!campaign) return res.status(400).json({ error: "No such campaign" });
+
       const { data, error } = await supabase
         .from("outbound_agents")
         .insert({
           ...body,
+          audience_type: body.audience_type || campaign.audience_type || "brand",
           mode: "off",
           status: "idle",
-          team_id: req.body?.team_id || process.env.TEAM_ID,
+          team_id: campaign.team_id,
         })
         .select()
         .single();
