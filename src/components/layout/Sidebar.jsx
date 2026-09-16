@@ -254,7 +254,6 @@ export default function Sidebar() {
             {navItem("/alerts", "Alerts", path.startsWith("/alerts"), alertsIcon)}
             {navItem("/health", "Brand health", path.startsWith("/health"), healthIcon)}
             {navItem("/ask", "Ask the data", path.startsWith("/ask"), askIcon)}
-            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
             {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), aiIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
@@ -273,9 +272,9 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {navItem("/ai/inbox", "Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
             {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), campaignsIcon)}
-            {navItem("/ai/campaigns", "Campaigns", path.startsWith("/ai/campaigns"), cmsIcon)}
+            {navItem("/ai/inbox", "Replies", path.startsWith("/ai/inbox"), inboxIcon)}
+            {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {navItem("/ai/test-lab", "Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
           </div>
         )}

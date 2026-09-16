@@ -26,7 +26,6 @@ const SetupPasswordPage = lazy(() => import("./pages/SetupPasswordPage"));
 const AcceptInvitePage = lazy(() => import("./pages/AcceptInvitePage"));
 const AiTestLabPage = lazy(() => import("./pages/AiTestLabPage"));
 const AiInboxPage = lazy(() => import("./pages/AiInboxPage"));
-const AiCampaignsPage = lazy(() => import("./pages/AiCampaignsPage"));
 const AiCampaignDetailPage = lazy(() => import("./pages/AiCampaignDetailPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const TrialsPage = lazy(() => import("./pages/TrialsPage"));
@@ -56,7 +55,6 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/ai/test-lab" element={<AiTestLabPage />} />
                     <Route path="/ai/inbox" element={<AiInboxPage />} />
                     <Route path="/ai/agents" element={<GtmAgentsPage />} />
-                    <Route path="/ai/campaigns" element={<AiCampaignsPage />} />
                     <Route path="/ai/campaigns/:id" element={<AiCampaignDetailPage />} />
                     <Route path="/users" element={<UsersPage />} />
                     <Route path="/trials" element={<TrialsPage />} />

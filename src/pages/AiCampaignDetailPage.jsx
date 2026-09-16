@@ -115,7 +115,7 @@ export default function AiCampaignDetailPage() {
     <div>
       <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <Link to="/ai/campaigns" style={{ color: theme.textMuted, fontSize: 12, textDecoration: "none" }}>← All campaigns</Link>
+          <Link to="/ai/agents" style={{ color: theme.textMuted, fontSize: 12, textDecoration: "none" }}>← All agents</Link>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: theme.text, margin: "4px 0 4px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {campaign.name}
             <Pill tint={STATUS_TINTS[campaign.status] || {}}>{campaign.status}</Pill>
@@ -1289,7 +1289,7 @@ function CampaignActions({ campaign, onChange, navigate }) {
   const resume = () => run("resume", async () => { await api.resumeOutboundCampaign(campaign.id); onChange(); });
   const archive = () => {
     if (!window.confirm(`Archive "${campaign.name}"? Already-scheduled touches will still go out unless you also pause.`)) return;
-    run("archive", async () => { await api.archiveOutboundCampaign(campaign.id); navigate("/ai/campaigns"); });
+    run("archive", async () => { await api.archiveOutboundCampaign(campaign.id); navigate("/ai/agents"); });
   };
 
   return (

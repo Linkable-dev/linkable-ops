@@ -16,7 +16,7 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/trials")) return { title: "Trials", subtitle: "Trial grants and subscription health" };
   if (pathname.startsWith("/team")) return { title: "Team", subtitle: "Admins of this panel" };
   if (pathname.startsWith("/ai/campaigns/")) return { title: "Outbound", subtitle: "Campaign detail" };
-  if (pathname.startsWith("/ai/campaigns")) return { title: "Outbound", subtitle: "Email outreach campaigns" };
+  if (pathname.startsWith("/ai/agents")) return { title: "Outbound", subtitle: "Agents with a goal and a budget" };
   if (pathname.startsWith("/ai/inbox")) return { title: "Inbox", subtitle: "Replies that need a human" };
   if (pathname.startsWith("/ai/test-lab")) return { title: "Test Lab", subtitle: "Try the reply agent" };
   if (pathname === "/blog") return { title: "Blog", subtitle: "Articles published on linkable.link" };

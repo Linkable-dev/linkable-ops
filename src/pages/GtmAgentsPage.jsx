@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -434,7 +435,18 @@ export default function GtmAgentsPage() {
                       <td style={{ ...td, fontWeight: 600, cursor: "pointer" }} onClick={() => openAgent(a.id)}>
                         {a.name}
                         <div style={{ color: theme.textMuted, fontWeight: 400, fontSize: 12 }}>
-                          {a.email_campaigns?.name || "no campaign"}
+                          {a.email_campaigns?.id ? (
+                            <Link
+                              to={`/ai/campaigns/${a.email_campaigns.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: theme.textMuted }}
+                              title="Templates, senders and slots"
+                            >
+                              {a.email_campaigns.name}
+                            </Link>
+                          ) : (
+                            "no campaign"
+                          )}
                         </div>
                       </td>
                       <td style={{ ...td, color: theme.textMuted }}>{a.audience_type}</td>

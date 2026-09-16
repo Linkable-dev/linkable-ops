@@ -8,7 +8,7 @@ import { api, friendlyName } from "../lib/api";
 // from the server. Header's search button dispatches "lk-open-palette".
 const PAGES = [
   ["Home", "/"], ["Alerts", "/alerts"], ["Ask the data", "/ask"], ["Blog", "/blog"], ["Campaigns", "/ops/campaigns"],
-  ["Impersonation", "/users"], ["Trials", "/trials"], ["Inbox", "/ai/inbox"], ["Outbound", "/ai/campaigns"],
+  ["Impersonation", "/users"], ["Trials", "/trials"], ["Inbox", "/ai/inbox"], ["Outbound", "/ai/agents"],
   ["Test Lab", "/ai/test-lab"], ["Dashboard", "/dashboard"], ["Team", "/team"],
 ];
 let tablesCache = null;
