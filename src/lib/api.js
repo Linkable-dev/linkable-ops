@@ -104,6 +104,14 @@ export const api = {
   getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters, quick } = {}) =>
     request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters, quick })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
+
+  // Autopilot: the recruiting machine. Read-only — starting and stopping an
+  // agent goes through the main app's console, which enforces the budget and
+  // the send guards this route deliberately cannot reach.
+  getAutopilotCampaigns: ({ limit = 50, offset = 0 } = {}) =>
+    request(`/autopilot/campaigns?${buildQs({ limit, offset })}`),
+  getAutopilotEvents: (id, { limit = 50 } = {}) =>
+    request(`/autopilot/campaigns/${id}/events?${buildQs({ limit })}`),
   // The creator base ranked against one campaign (read-only shortlist).
   getCreatorMatches: (id, { limit = 25 } = {}) => request(`/ops/campaigns/${id}/creator-matches?limit=${limit}`),
 

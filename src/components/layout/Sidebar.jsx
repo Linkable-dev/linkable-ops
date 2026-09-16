@@ -256,6 +256,7 @@ export default function Sidebar() {
             {navItem("/ask", "Ask the data", path.startsWith("/ask"), askIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
+            {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), aiIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
           </div>
