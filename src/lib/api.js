@@ -123,6 +123,8 @@ export const api = {
     request(`/outbound-agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   runOutboundAgent: (id, { dry = false } = {}) =>
     request(`/outbound-agents/${id}/run${dry ? "?dry=1" : ""}`, { method: "POST", body: "{}" }),
+  adoptOutboundCampaigns: () =>
+    request("/outbound-agents/adopt", { method: "POST", body: "{}" }),
   // The creator base ranked against one campaign (read-only shortlist).
   getCreatorMatches: (id, { limit = 25 } = {}) => request(`/ops/campaigns/${id}/creator-matches?limit=${limit}`),
 

@@ -58,19 +58,28 @@ export async function agentProgress(agent) {
 
   const { data, error } = await supabase
     .from("email_sends")
-    .select("contact_id, replied_at, sent_at")
+    .select("contact_id, to_email, replied_at, sent_at")
     .eq("campaign_id", agent.email_campaign_id)
     .limit(20000);
   if (error) {
     console.error("[outbound-agent] could not read progress:", error.message);
     return empty;
   }
-  // One person, however many touches they were sent.
+  // One person, however many touches they were sent — counted by the address,
+  // not by contact_id.
+  //
+  // contact_id is null on every brand send: that path identifies a recipient by
+  // email and never writes a contact row. Counting by it read zero against four
+  // hundred real sends, which meant prospects_used never moved and the budget
+  // ceiling — the thing that makes any of this safe — could never fire.
+  const who = (row) => (row.to_email || "").toLowerCase() || row.contact_id || "";
   const contacted = new Set();
   const replied = new Set();
   for (const row of data || []) {
-    if (row.sent_at && row.contact_id) contacted.add(row.contact_id);
-    if (row.replied_at && row.contact_id) replied.add(row.contact_id);
+    const key = who(row);
+    if (!key) continue;
+    if (row.sent_at) contacted.add(key);
+    if (row.replied_at) replied.add(key);
   }
   return { contacted: contacted.size, replied: replied.size };
 }
@@ -242,6 +251,63 @@ export async function tickAgent(agent, { dryRun = false, log = () => {} } = {}) 
     `${after.replied}/${claimed.goal_replies} replies · ${after.contacted}/${claimed.max_prospects} contacted`,
   );
   return { agent: claimed.id, action: holding ? "prepared" : "sent", sent, summary };
+}
+
+/**
+ * How the sending is landing, and who wrote back.
+ *
+ * The campaign detail page has had this for a year — delivered, opened,
+ * replied, bounced — as numbers a person went and looked at. Under an agent
+ * they belong next to what it did, because they are the answer to the only
+ * question anyone asks of it: is this working, and should it keep going.
+ *
+ * Read in one pass over the campaign's sends, like rollupCampaignMetrics does,
+ * because at a few hundred a day that is cheaper than four count queries.
+ */
+export async function agentOutcome(agent, { replyLimit = 8 } = {}) {
+  const empty = { metrics: null, replies: [] };
+  if (!agent.email_campaign_id) return empty;
+
+  const { data, error } = await supabase
+    .from("email_sends")
+    .select("contact_id, to_email, status, sent_at, delivered_at, opened_at, replied_at, bounced_at")
+    .eq("campaign_id", agent.email_campaign_id)
+    .limit(50000);
+  if (error) {
+    console.error("[outbound-agent] could not read outcome:", error.message);
+    return empty;
+  }
+
+  const rows = data || [];
+  const metrics = {
+    sent: 0,
+    delivered: 0,
+    opened: 0,
+    replied: 0,
+    bounced: 0,
+    // Scheduled but not yet gone: what the next passes already have queued.
+    pending: 0,
+  };
+  const replies = [];
+  for (const r of rows) {
+    if (r.sent_at) metrics.sent++;
+    if (r.delivered_at) metrics.delivered++;
+    if (r.opened_at) metrics.opened++;
+    if (r.bounced_at) metrics.bounced++;
+    if (r.status === "scheduled" || r.status === "pending") metrics.pending++;
+    if (r.replied_at) {
+      metrics.replied++;
+      replies.push({ email: r.to_email || r.contact_id, at: r.replied_at });
+    }
+  }
+  // Rates against delivered, the industry convention the campaign page already
+  // uses: a bounced email cannot be opened, so it should not drag the rate down.
+  const base = metrics.delivered || 0;
+  metrics.open_rate = base ? Math.round((metrics.opened / base) * 1000) / 10 : 0;
+  metrics.reply_rate = base ? Math.round((metrics.replied / base) * 1000) / 10 : 0;
+
+  replies.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return { metrics, replies: replies.slice(0, replyLimit) };
 }
 
 /** Every agent whose own clock says it is time — the loop's read. */

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import {
   AGENT_MODES,
+  agentOutcome,
   agentProgress,
   dueAgents,
   logAgentEvent,
@@ -95,7 +96,15 @@ export function outboundAgentsRoutes() {
         .order("created_at", { ascending: false })
         .limit(50);
 
-      res.json({ agent: { ...agent, ...(await agentProgress(agent)) }, events: events || [] });
+      // Everything the old campaign detail page was for, next to what the
+      // agent did with it: how the sending is landing, and who wrote back.
+      const outcome = await agentOutcome(agent);
+      res.json({
+        agent: { ...agent, ...(await agentProgress(agent)) },
+        events: events || [],
+        metrics: outcome.metrics,
+        replies: outcome.replies,
+      });
     } catch (e) {
       console.error("[outbound-agents/get]", e);
       res.status(500).json({ error: e.message });
@@ -208,6 +217,56 @@ export function outboundAgentsRoutes() {
       res.json({ result, log: lines.slice(-50) });
     } catch (e) {
       console.error("[outbound-agents/run]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/outbound-agents/adopt — give every campaign that predates agents
+  // one of its own.
+  //
+  // The alternative was asking somebody to retype six campaigns into a form.
+  // Archived ones are skipped, every agent is created OFF, and the unique index
+  // means running this twice changes nothing — so it is safe to press when you
+  // are not sure whether you already did.
+  router.post("/adopt", async (req, res) => {
+    try {
+      const { data: campaigns, error } = await supabase
+        .from("email_campaigns")
+        .select("id, team_id, name, audience_type, daily_cap, status")
+        .neq("status", "archived")
+        .limit(200);
+      if (error) throw error;
+
+      const { data: existing } = await supabase.from("outbound_agents").select("email_campaign_id");
+      const taken = new Set((existing || []).map((a) => a.email_campaign_id));
+
+      const adopted = [];
+      for (const c of campaigns || []) {
+        if (taken.has(c.id)) continue;
+        const { data, error: insertError } = await supabase
+          .from("outbound_agents")
+          .insert({
+            team_id: c.team_id,
+            name: c.name,
+            audience_type: c.audience_type || "brand",
+            email_campaign_id: c.id,
+            mode: "off",
+            status: "idle",
+            // The campaign's own cap, and defaults for the two numbers it never
+            // had: something to reach, and a ceiling to reach it within.
+            daily_cap: c.daily_cap || 40,
+            goal_replies: 20,
+            max_prospects: 500,
+          })
+          .select()
+          .single();
+        if (insertError) continue;
+        await logAgentEvent(data.id, "waiting", `Adopted ${c.name}, switched off`);
+        adopted.push(data);
+      }
+      res.json({ adopted: adopted.length, agents: adopted });
+    } catch (e) {
+      console.error("[outbound-agents/adopt]", e);
       res.status(500).json({ error: e.message });
     }
   });

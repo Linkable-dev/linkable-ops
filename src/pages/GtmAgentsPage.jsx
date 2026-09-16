@@ -77,7 +77,7 @@ export default function GtmAgentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState(null);
-  const [detail, setDetail] = useState({ events: [], loading: false });
+  const [detail, setDetail] = useState({ events: [], metrics: null, replies: [], loading: false });
   const [busy, setBusy] = useState("");
   const [runLog, setRunLog] = useState(null);
   // Creating one: an agent is a goal and a budget put in front of a campaign
@@ -135,6 +135,19 @@ export default function GtmAgentsPage() {
     };
   }, []);
 
+  async function adopt() {
+    setBusy("adopt");
+    try {
+      const d = await api.adoptOutboundCampaigns();
+      setRunLog({ summary: `Adopted ${d.adopted} campaign${d.adopted === 1 ? "" : "s"}`, log: [] });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function create() {
     if (!draft.name.trim() || !draft.email_campaign_id) return;
     setBusy("new");
@@ -155,11 +168,18 @@ export default function GtmAgentsPage() {
       return;
     }
     setOpenId(id);
-    setDetail({ events: [], loading: true });
+    setDetail({ events: [], metrics: null, replies: [], loading: true });
     api
       .getOutboundAgent(id)
-      .then((d) => setDetail({ events: d.events || [], loading: false }))
-      .catch(() => setDetail({ events: [], loading: false }));
+      .then((d) =>
+        setDetail({
+          events: d.events || [],
+          metrics: d.metrics || null,
+          replies: d.replies || [],
+          loading: false,
+        }),
+      )
+      .catch(() => setDetail({ events: [], metrics: null, replies: [], loading: false }));
   }
 
   async function setMode(id, next) {
@@ -353,6 +373,17 @@ export default function GtmAgentsPage() {
             >
               Create, switched off
             </button>
+            {/* The campaigns that predate agents. Safe to press twice: one
+                agent per campaign is a unique index, and adoption skips what
+                already has one. */}
+            <button
+              style={{ ...button, padding: "8px 14px" }}
+              disabled={busy === "adopt"}
+              onClick={adopt}
+              title="Give every live campaign an agent of its own, switched off"
+            >
+              {busy === "adopt" ? "Adopting…" : "Adopt existing campaigns"}
+            </button>
           </div>
           <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
             It starts off. Press Start when you want it running, or Dry run to watch one pass
@@ -481,6 +512,46 @@ export default function GtmAgentsPage() {
                           {detail.loading && (
                             <div style={{ color: theme.textMuted, fontSize: 13 }}>Loading…</div>
                           )}
+                          {!detail.loading && (
+                            <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 14 }}>
+                              {/* How it is landing. The numbers the campaign
+                                  page kept to itself, next to what produced
+                                  them. */}
+                              {detail.metrics && (
+                                <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                                  {[
+                                    ["Sent", detail.metrics.sent],
+                                    ["Delivered", detail.metrics.delivered],
+                                    ["Opened", `${detail.metrics.opened} (${detail.metrics.open_rate}%)`],
+                                    ["Replied", `${detail.metrics.replied} (${detail.metrics.reply_rate}%)`],
+                                    ["Bounced", detail.metrics.bounced],
+                                    ["Queued", detail.metrics.pending],
+                                  ].map(([label, value]) => (
+                                    <div key={label}>
+                                      <div style={{ fontSize: 11, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                                        {label}
+                                      </div>
+                                      <div style={{ fontSize: 15, fontWeight: 700 }}>{value}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {detail.replies.length > 0 && (
+                                <div style={{ minWidth: 220 }}>
+                                  <div style={{ fontSize: 11, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+                                    Who replied
+                                  </div>
+                                  {detail.replies.map((r, i) => (
+                                    <div key={i} style={{ fontSize: 12 }}>
+                                      {r.email}
+                                      <span style={{ color: theme.textMuted }}> · {ago(r.at)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {!detail.loading && detail.events.length === 0 && (
                             <div style={{ color: theme.textMuted, fontSize: 13 }}>
                               Nothing yet — it has not run.
