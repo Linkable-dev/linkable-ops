@@ -15,6 +15,7 @@ import { runDailyInfluencer } from "../automation/run-daily-influencer.js";
 import { processOneRunTick, autoTopUpDiscovery } from "../automation/lead-discovery.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { supabase } from "../lib/supabase.js";
+import { tickDueAgents } from "../lib/outbound-agent.js";
 import { generatePost, triggerSiteRebuild, edgeEnabled, generateViaEdge } from "../lib/blog-writer.js";
 import { refreshConversions } from "../lib/outbound-attribution.js";
 import { loadBrandFacts, scoreBrand, snapshotHealth } from "../lib/brand-health.js";
@@ -191,6 +192,25 @@ export function cronRoutes() {
   //   ?cap=30             — per-invocation cap (default 30)
   //   ?campaign=<uuid>    — explicit campaign id (else picks most-recent active daily-200)
   //   ?dry=1              — log only, no sends
+  // The GTM agents' own clock. Each one decides whether it acts today from its
+  // goal and its budget, so this fires often and usually does nothing — which
+  // is the point: the old daily job sent its two hundred whether or not the
+  // campaign had already done what it was for.
+  router.get("/outbound-agents", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const lines = [];
+      const results = await tickDueAgents({
+        dryRun: req.query.dry === "1",
+        log: (s) => lines.push(String(s)),
+      });
+      res.json({ ticked: results.length, results, log: lines.slice(-100) });
+    } catch (err) {
+      console.error("/cron/outbound-agents error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get("/run-daily-outbound", async (req, res) => {
     if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {

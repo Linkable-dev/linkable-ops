@@ -274,7 +274,8 @@ export default function Sidebar() {
             marginTop: 4, marginBottom: 6,
           }}>
             {navItem("/ai/inbox", "Inbox", path.startsWith("/ai/inbox"), inboxIcon)}
-            {navItem("/ai/campaigns", "Outbound", path.startsWith("/ai/campaigns"), campaignsIcon)}
+            {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), campaignsIcon)}
+            {navItem("/ai/campaigns", "Campaigns", path.startsWith("/ai/campaigns"), cmsIcon)}
             {navItem("/ai/test-lab", "Test Lab", path.startsWith("/ai/test-lab"), aiIcon)}
           </div>
         )}

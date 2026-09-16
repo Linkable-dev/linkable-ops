@@ -14,6 +14,7 @@ import { outboundRoutes } from "./routes/outbound.js";
 import { outboundCampaignsRoutes } from "./routes/outbound-campaigns.js";
 import { insightsRoutes } from "./routes/insights.js";
 import { autopilotRoutes } from "./routes/autopilot.js";
+import { outboundAgentsRoutes } from "./routes/outbound-agents.js";
 import { blogRoutes } from "./routes/blog.js";
 import { closeCloudSql } from "./lib/cloudsql.js";
 import { dbTargetMiddleware } from "./middleware/dbTarget.js";
@@ -51,6 +52,8 @@ app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
 app.use("/api/insights", dbTargetMiddleware, requireOpsAdmin, insightsRoutes());
 // Recruiting, watched from here now that the brand app no longer shows it.
 app.use("/api/autopilot", dbTargetMiddleware, requireOpsAdmin, autopilotRoutes());
+// GTM outreach as agents: a goal, a budget, and a clock — see lib/outbound-agent.js.
+app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());

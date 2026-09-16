@@ -112,6 +112,17 @@ export const api = {
     request(`/autopilot/campaigns?${buildQs({ limit, offset })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>
     request(`/autopilot/campaigns/${id}/events?${buildQs({ limit })}`),
+
+  // GTM outreach agents: a goal, a budget, a clock — and the two buttons that
+  // let an admin drive one by hand.
+  getOutboundAgents: () => request("/outbound-agents"),
+  getOutboundAgent: (id) => request(`/outbound-agents/${id}`),
+  createOutboundAgent: (data) =>
+    request("/outbound-agents", { method: "POST", body: JSON.stringify(data) }),
+  updateOutboundAgent: (id, data) =>
+    request(`/outbound-agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  runOutboundAgent: (id, { dry = false } = {}) =>
+    request(`/outbound-agents/${id}/run${dry ? "?dry=1" : ""}`, { method: "POST", body: "{}" }),
   // The creator base ranked against one campaign (read-only shortlist).
   getCreatorMatches: (id, { limit = 25 } = {}) => request(`/ops/campaigns/${id}/creator-matches?limit=${limit}`),
 
