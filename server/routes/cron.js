@@ -288,6 +288,18 @@ export function cronRoutes() {
         }
       }
 
+      // ...and the agents, on the back of the same run. They have their own
+      // clock and mostly decide to do nothing, so this costs a query — and it
+      // means the agents need no cron entry of their own, which is what broke
+      // the deployment when they had one.
+      let agents = [];
+      try {
+        agents = await tickDueAgents({ dryRun, log });
+      } catch (agentErr) {
+        log(`[agents] ${agentErr.message}`);
+      }
+      lines.push(`[agents] ticked ${agents.length}`);
+
       res.json({ tick: now.toISOString(), fired: results.length, results, deliverability, attribution, log: lines });
     } catch (err) {
       console.error("/cron/run-daily-outbound error:", err);
