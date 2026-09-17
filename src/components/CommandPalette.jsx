@@ -7,11 +7,12 @@ import { api, friendlyName } from "../lib/api";
 // Cmd/Ctrl+K palette: pages and tables locally, brands / creators / campaigns
 // from the server. Header's search button dispatches "lk-open-palette".
 // Every page the sidebar offers, under the name the sidebar gives it — a
-// palette that calls something else what the nav calls "Recruiting" is a
-// second vocabulary to learn.
+// palette that calls a page something the nav does not is a second vocabulary
+// to learn. The third entry is an alias: typed but never shown, for the word
+// somebody reaches for when the name is not the word.
 const PAGES = [
   ["Home", "/"], ["Alerts", "/alerts"], ["Brand health", "/health"], ["Campaigns", "/ops/campaigns"],
-  ["Recruiting", "/ops/autopilot"], ["Trials", "/trials"], ["Impersonation", "/users"],
+  ["Autopilot", "/ops/autopilot", "recruiting sourcing"], ["Trials", "/trials"], ["Impersonation", "/users"],
   ["Outbound", "/ai/agents"], ["Replies", "/ai/inbox"], ["Blog", "/blog"],
   ["Dashboard", "/dashboard"], ["Ask the data", "/ask"], ["Team", "/team"],
 ];
@@ -69,7 +70,7 @@ export default function CommandPalette() {
     const text = q.trim().toLowerCase();
     const match = (s) => !text || String(s || "").toLowerCase().includes(text);
     const out = [];
-    for (const [label, to] of PAGES) if (match(label)) out.push({ group: "Pages", label, hint: to, run: () => navigate(to) });
+    for (const [label, to, alias] of PAGES) if (match(label) || match(alias)) out.push({ group: "Pages", label, hint: to, run: () => navigate(to) });
     if (text) for (const t of tables) if (match(t) || match(friendlyName(t))) out.push({ group: "Tables", label: friendlyName(t), hint: `/tables/${t}`, run: () => navigate(`/tables/${t}`) });
     for (const b of remote?.brands || []) out.push({ group: "Brands", label: b.store_name || b.email, hint: [b.email, b.store_website].filter(Boolean).join(" · "), run: () => openBrand(b.user_id) });
     for (const c of remote?.creators || []) out.push({ group: "Creators", label: c.name || c.instagram_username || c.email, hint: [c.instagram_username && `@${c.instagram_username}`, c.email].filter(Boolean).join(" · "), run: () => navigate(`/users?tab=creators&q=${encodeURIComponent(c.instagram_username || c.email || c.name)}`) });

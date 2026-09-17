@@ -44,13 +44,13 @@ const campaignsIcon = icon(<>
   <path d="M3 11l18-5v12L3 14v-3z" />
   <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
 </>);
-// Recruiting is people arriving one at a time — a person with a plus, not the
-// speech bubble it used to wear.
-const recruitingIcon = icon(<>
-  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-  <circle cx="9" cy="7" r="4" />
-  <path d="M19 8v6M22 11h-6" />
-</>);
+// Autopilot wears the brand app's own SparklesIcon, path for path. The agent
+// is marked with it everywhere a brand sees it, and one symbol for one thing
+// across the two apps beats a second icon that means the same and looks like
+// something else.
+const autopilotIcon = icon(
+  <path d="M9.813 15.904 9.375 17.25l-.438-1.346a4.5 4.5 0 0 0-2.841-2.841L4.75 12.625l1.346-.438a4.5 4.5 0 0 0 2.841-2.841L9.375 8l.438 1.346a4.5 4.5 0 0 0 2.841 2.841l1.346.438-1.346.438a4.5 4.5 0 0 0-2.841 2.841ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />,
+);
 const trialsIcon = icon(<>
   <polyline points="20 12 20 22 4 22 4 12" />
   <rect x="2" y="7" width="20" height="5" />
@@ -248,9 +248,9 @@ export default function Sidebar() {
             {navItem("/alerts", "Alerts", path.startsWith("/alerts"), alertsIcon)}
             {navItem("/health", "Brand health", path.startsWith("/health"), healthIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
-            {/* "Autopilot" named three different things across this panel and
-                the brand app. Here it is one of them: creator recruiting. */}
-            {navItem("/ops/autopilot", "Recruiting", path.startsWith("/ops/autopilot"), recruitingIcon)}
+            {/* Autopilot, by the name it has everywhere it actually runs, and
+                under the mark the brand app gives it. */}
+            {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), autopilotIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
           </div>
