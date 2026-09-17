@@ -15,6 +15,7 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/ops/campaigns")) return { title: "Campaigns", subtitle: "Campaign operations" };
   if (pathname.startsWith("/ops/autopilot")) return { title: "Autopilot", subtitle: "The creator recruiting machine — read-only" };
   if (pathname.startsWith("/ops/ai-creators")) return { title: "AI creators", subtitle: "Invented people every brand generates with" };
+  if (pathname.startsWith("/ops/content")) return { title: "Campaign content", subtitle: "What creators delivered, and what the machine generated" };
   if (pathname.startsWith("/users")) return { title: "Impersonation", subtitle: "Open the main app as a brand or creator" };
   if (pathname.startsWith("/trials")) return { title: "Trials", subtitle: "Trial grants and subscription health" };
   if (pathname.startsWith("/team")) return { title: "Team", subtitle: "Admins of this panel" };

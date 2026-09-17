@@ -14,6 +14,7 @@ const PAGES = [
   ["Home", "/"], ["Alerts", "/alerts"], ["Brand health", "/health"], ["Campaigns", "/ops/campaigns"],
   ["Autopilot", "/ops/autopilot", "recruiting sourcing"],
   ["AI creators", "/ops/ai-creators", "avatars roster synthetic casting"],
+  ["Campaign content", "/ops/content", "creator content files deliverables uploads generated assets library"],
   ["Trials", "/trials"], ["Impersonation", "/users"],
   ["Outbound", "/ai/agents"], ["Replies", "/ai/inbox"], ["Blog", "/blog"],
   ["Dashboard", "/dashboard"], ["Ask the data", "/ask"], ["Team", "/team"],

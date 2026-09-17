@@ -73,6 +73,14 @@ const aiCreatorsIcon = icon(<>
   <circle cx="12" cy="13" r="3.2" />
 </>);
 
+// Delivered files: a picture with a corner turned, which is what the grid is
+// full of. Distinct from the camera, which is the roster we invent.
+const contentIcon = icon(<>
+  <rect x="3" y="3" width="18" height="18" rx="2" />
+  <circle cx="8.5" cy="8.5" r="1.6" />
+  <path d="M21 15l-5-5L5 21" />
+</>);
+
 // --- GTM -----------------------------------------------------------------
 // A rising line for the section, because what these three have in common is
 // growth, not messaging. The plane now belongs to Outbound alone.
@@ -262,6 +270,9 @@ export default function Sidebar() {
             {/* The roster every brand generates with — ours to cast, not any
                 one brand's. */}
             {navItem("/ops/ai-creators", "AI creators", path.startsWith("/ops/ai-creators"), aiCreatorsIcon)}
+            {/* What real creators sent back, which until now only the brand
+                that received it could see. */}
+            {navItem("/ops/content", "Campaign content", path.startsWith("/ops/content"), contentIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
           </div>

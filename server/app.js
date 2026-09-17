@@ -13,6 +13,7 @@ import { outboundAgentsRoutes } from "./routes/outbound-agents.js";
 import { insightsRoutes } from "./routes/insights.js";
 import { autopilotRoutes } from "./routes/autopilot.js";
 import { aiCreatorsRoutes } from "./routes/ai-creators.js";
+import { contentRoutes } from "./routes/content.js";
 import { blogRoutes } from "./routes/blog.js";
 import { dbTargetMiddleware } from "./middleware/dbTarget.js";
 
@@ -80,6 +81,8 @@ app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoute
 app.use("/api/autopilot", dbTargetMiddleware, requireOpsAdmin, autopilotRoutes());
 // Casting and rendering spend money, so admin-only like everything else here.
 app.use("/api/ai-creators", dbTargetMiddleware, requireOpsAdmin, aiCreatorsRoutes());
+// What creators delivered. Read-only, and signed per database target.
+app.use("/api/content", dbTargetMiddleware, requireOpsAdmin, contentRoutes());
 // GTM outreach as agents: a goal, a budget and a clock — see lib/outbound-agent.js.
 app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());

@@ -138,6 +138,16 @@ export const api = {
     }),
   renderAiCreatorPlates: (id) => request(`/ai-creators/${id}/plates`, { method: "POST" }),
 
+  // What creators delivered, across every brand. Each file comes back with an
+  // hour-long signed URL, so the grid can render it directly.
+  getContent: ({ q, type, days, brand, product, limit = 24, offset = 0 } = {}) =>
+    request(`/content?${buildQs({ q, type, days, brand, product, limit, offset })}`),
+  getContentFilters: () => request("/content/filters"),
+  // The other half: what the machine made for a campaign, with how the
+  // generating went — failures and cost included.
+  getGeneratedContent: ({ q, days, brand, product, limit = 24, offset = 0 } = {}) =>
+    request(`/content/generated?${buildQs({ q, days, brand, product, limit, offset })}`),
+
   // The monthly search limit, which IS ours to change: it is the number the
   // agent reads before it acts, not an action taken on a brand's behalf.
   // `scope` is "default" or a brand's user id.
