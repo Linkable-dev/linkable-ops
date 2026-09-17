@@ -212,6 +212,10 @@ export function contentRoutes() {
       const { rows } = await cloudSqlQuery(
         `SELECT a.id::text, a.created, a.modality, a.status, a.caption, a.gcs_path,
                 a.creator_review, a.moderation_status, a.moderation_reason, a.provider,
+                -- The same word the delivered half uses. Two names for "is
+                -- this a picture or a video" is how a tile ends up rendering
+                -- neither, which is exactly what happened.
+                CASE WHEN a.modality = 'video' THEN 'video' ELSE 'image' END AS kind,
                 r.id::text AS request_id, r.status AS request_status, r.quantity,
                 r.product_id::text AS product_id, p.title AS campaign_title,
                 r.brand_id::text AS brand_id, b.store_name AS brand_name,

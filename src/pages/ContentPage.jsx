@@ -398,7 +398,7 @@ export default function ContentPage() {
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
                 )}
-                {(f.kind === "video" || f.modality === "video") && f.url && (
+                {f.kind === "video" && f.url && (
                   // preload="metadata" so the grid shows a frame without
                   // pulling seventy megabytes per tile, and no controls: the
                   // tile is a thumbnail, and playing happens in the preview.
@@ -409,7 +409,10 @@ export default function ContentPage() {
                     style={{ width: "100%", height: "100%", objectFit: "cover", background: "#000" }}
                   />
                 )}
-                {(!f.url || (f.kind === "file" && f.modality !== "video")) && (
+                {/* Anything that is neither, and anything that would not sign:
+                    a tile with no branch of its own used to render as an empty
+                    grey box, which is indistinguishable from a broken page. */}
+                {(!f.url || !["image", "video"].includes(f.kind)) && (
                   <div style={{
                     height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
                     color: theme.textMuted, fontSize: 12, textAlign: "center", padding: 12,
@@ -494,7 +497,7 @@ export default function ContentPage() {
             onClick={(e) => e.stopPropagation()}
             style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxWidth: "100%" }}
           >
-            {preview.kind === "video" || preview.modality === "video" ? (
+            {preview.kind === "video" ? (
               <video
                 src={preview.url}
                 controls
