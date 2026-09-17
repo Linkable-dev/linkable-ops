@@ -493,6 +493,143 @@ export function autopilotRoutes() {
     }
   });
 
+  // --- Outreach settings ----------------------------------------------------
+  //
+  // The knobs that used to be environment variables and Go constants: which
+  // Lemlist sequence a campaign clones, whether copy is written per campaign,
+  // how many test sends a push makes, what a new campaign's agent aims for,
+  // and the house emails themselves. Every one was a deploy; none of them is a
+  // code change.
+  //
+  // Same rule as the allowance above, and the same reason it is allowed here:
+  // this sets numbers the agent reads before it acts, it does not act. Every
+  // guard still runs, on whatever is written here.
+
+  // The keys the panel offers, with the sentence that explains each one. Kept
+  // here as well as in Go so the page can show a key nobody has set yet — a
+  // settings screen that only lists rows that exist is a screen you cannot use
+  // to set anything.
+  const SETTING_KEYS = [
+    { key: "lemlist_template_campaign_id", kind: "text",
+      help: "The Lemlist sequence every campaign's own is cloned from. Empty means campaigns cannot send at all." },
+    { key: "outreach_writer", kind: "text",
+      help: "\"ai\" writes each campaign's emails from its brief; anything else uses the house sequence below." },
+    { key: "sandbox_max_leads", kind: "number",
+      help: "Outside production, how many leads one push hands to the test inboxes. The rest wait for the next push." },
+    { key: "agent_goal_applications", kind: "number",
+      help: "How many applications a newly launched campaign's agent aims for before it stops." },
+    { key: "agent_max_runs", kind: "number",
+      help: "How many searches that agent may run to get there." },
+    { key: "house_sequence", kind: "json",
+      help: "The default emails as JSON: {\"steps\":[{\"delay\":0,\"subject\":\"…\",\"message\":\"<p>…</p>\"}]}. Used when the writer is off, and whenever it produces nothing." },
+  ];
+
+  router.get("/settings", async (req, res) => {
+    try {
+      const { rows } = await cloudSqlQuery(
+        `SELECT key, value, note, updated, updated_by FROM sourcing_settings`,
+      );
+      const stored = new Map(rows.map((r) => [r.key, r]));
+      res.json({
+        available: true,
+        settings: SETTING_KEYS.map((k) => ({
+          ...k,
+          value: stored.get(k.key)?.value ?? "",
+          note: stored.get(k.key)?.note ?? "",
+          updated: stored.get(k.key)?.updated ?? null,
+          updated_by: stored.get(k.key)?.updated_by ?? "",
+          // An unset key is not an empty setting: the service falls back to the
+          // environment variable it replaced and then to the built-in value,
+          // and the page should say so rather than imply a blank.
+          set: stored.has(k.key),
+        })),
+      });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, settings: [] });
+      console.error("[autopilot/settings]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PUT /api/autopilot/settings/:key   { value, note }
+  router.put("/settings/:key", async (req, res) => {
+    try {
+      const key = String(req.params.key || "");
+      const known = SETTING_KEYS.find((k) => k.key === key);
+      if (!known) return res.status(400).json({ error: "Unknown setting" });
+
+      const value = String(req.body?.value ?? "").trim();
+      if (known.kind === "number" && value !== "") {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n <= 0 || n > 100000) {
+          return res.status(400).json({ error: "That has to be a whole number above zero" });
+        }
+      }
+      if (known.kind === "json" && value !== "") {
+        // Checked here as well as in Go, because the service's fallback is
+        // silent by design: a sequence saved broken would look saved and send
+        // the built-in emails, which is the confusing half of a safe failure.
+        let parsed;
+        try {
+          parsed = JSON.parse(value);
+        } catch {
+          return res.status(400).json({ error: "That is not valid JSON" });
+        }
+        const steps = parsed?.steps;
+        if (!Array.isArray(steps) || !steps.length) {
+          return res.status(400).json({ error: "Needs a non-empty \"steps\" array" });
+        }
+        for (const [i, step] of steps.entries()) {
+          if (!String(step?.subject || "").trim() || !String(step?.message || "").trim()) {
+            return res.status(400).json({ error: `Step ${i + 1} needs both a subject and a message` });
+          }
+          if (!Number.isInteger(step?.delay) || step.delay < 0) {
+            return res.status(400).json({ error: `Step ${i + 1} needs a whole-number delay in days` });
+          }
+        }
+      }
+
+      const note = String(req.body?.note || "").slice(0, 500);
+      const { rows } = await cloudSqlQuery(
+        `INSERT INTO sourcing_settings (key, value, note, updated_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (key) DO UPDATE
+            SET value      = excluded.value,
+                note       = excluded.note,
+                updated    = current_timestamp,
+                updated_by = excluded.updated_by
+         RETURNING key, value, note, updated, updated_by`,
+        [key, value, note, req.admin?.email || ""],
+      );
+      console.log(
+        `[sourcing-setting] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
+        `key=${key} value=${JSON.stringify(value).slice(0, 200)}`,
+      );
+      res.json({ setting: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/settings/put]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/autopilot/settings/:key — back to the built-in value.
+  router.delete("/settings/:key", async (req, res) => {
+    try {
+      const key = String(req.params.key || "");
+      await cloudSqlQuery(`DELETE FROM sourcing_settings WHERE key = $1`, [key]);
+      console.log(
+        `[sourcing-setting] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
+        `key=${key} CLEARED`,
+      );
+      res.json({ cleared: key });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/settings/delete]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // DELETE /api/autopilot/allowances/:userId — back to the default. Deleting
   // the default row itself is refused: nothing would be left to fall back to
   // but the number compiled into the binary.

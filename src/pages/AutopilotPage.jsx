@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
+import OutreachSettings from "../components/autopilot/OutreachSettings";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
@@ -336,6 +337,10 @@ export default function AutopilotPage() {
           </div>
         </Card>
       )}
+
+      {/* Everything else the sending obeys, in the same place as the limit and
+          for the same reason: it was all a deploy before. */}
+      {available && <OutreachSettings />}
 
       {/* What is currently being hidden, and the way back. A filter set in a
           header cell is invisible from anywhere else on the page, and the

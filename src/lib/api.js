@@ -168,6 +168,15 @@ export const api = {
   // agent reads before it acts, not an action taken on a brand's behalf.
   // `scope` is "default" or a brand's user id.
   getAutopilotAllowances: () => request("/autopilot/allowances"),
+  // The outreach knobs that used to be env vars and Go constants.
+  getOutreachSettings: () => request("/autopilot/settings"),
+  setOutreachSetting: (key, data) =>
+    request(`/autopilot/settings/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  clearOutreachSetting: (key) =>
+    request(`/autopilot/settings/${encodeURIComponent(key)}`, { method: "DELETE" }),
   setAutopilotAllowance: (scope, { monthly_searches, note = "" }) =>
     request(`/autopilot/allowances/${scope}`, {
       method: "PUT",
