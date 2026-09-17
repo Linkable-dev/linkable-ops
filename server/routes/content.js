@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
-import { signedGsUrl, signedUrls } from "../lib/gcs.js";
+import { signedGsUrl, signedUrl, signedUrls } from "../lib/gcs.js";
 
 // What creators actually delivered.
 //
@@ -20,6 +20,25 @@ const ND = "deleted = '-infinity'";
 // here what it means there.
 const VIDEO = String.raw`lower(f.file_name) ~ '\.(mp4|m4v|mov|qt|webm|mkv|avi|ogg|ogv|m4p|mpe?g|3gp)$'`;
 const IMAGE = String.raw`lower(f.file_name) ~ '\.(jpe?g|png|gif|webp|avif|heic|heif|bmp|tiff?)$'`;
+
+// Content-Disposition for a download, with the file name quoted and stripped
+// of anything that would break the header.
+function attachment(fileName) {
+  const safe = String(fileName || "file").replace(/["\\\r\n]/g, "").slice(0, 120);
+  return `attachment; filename="${safe}"`;
+}
+
+// A generated asset has no file name of its own — the object is a hash. Give
+// the download something a person can find again: the campaign, the creator
+// and the asset's own short id.
+function generatedName(row) {
+  const ext = (row.gcs_path || "").split(".").pop().split("?")[0].slice(0, 4) || "jpg";
+  const parts = [row.campaign_title, row.creator_label || row.creator_source, row.id?.slice(0, 8)]
+    .filter(Boolean)
+    .map((p) => String(p).trim().replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, ""))
+    .filter(Boolean);
+  return `${parts.join("_") || "asset"}.${ext}`;
+}
 
 export function contentRoutes() {
   const router = Router();
@@ -90,14 +109,16 @@ export function contentRoutes() {
         `SELECT count(*)::int AS total ${from} ${where}`, params,
       );
 
-      // One signed URL per file, for an hour. Local crypto, no network call,
-      // so a page of two dozen costs nothing worth measuring.
-      const urls = await signedUrls(
-        rows.map((r) => `link_content/${r.link_id}/${r.file_name}`),
-        3600,
-        req.dbTarget,
-      );
-      rows.forEach((r, i) => { r.url = urls[i]; });
+      // Two signed URLs per file, for an hour: one to look at and one that
+      // saves. Signing is local crypto, so the second costs nothing worth
+      // measuring and it is the only way a cross-origin link downloads.
+      const blobs = rows.map((r) => `link_content/${r.link_id}/${r.file_name}`);
+      const [urls, downloads] = await Promise.all([
+        signedUrls(blobs, 3600, req.dbTarget),
+        Promise.all(blobs.map((blob, i) => signedUrl(
+          blob, 3600, req.dbTarget, attachment(rows[i].file_name)))),
+      ]);
+      rows.forEach((r, i) => { r.url = urls[i]; r.download_url = downloads[i]; });
 
       res.json({
         files: rows,
@@ -186,8 +207,11 @@ export function contentRoutes() {
 
       // A gs:// URI is not fetchable. Signed here rather than shown as a path,
       // which is what a broken image with a working-looking link beside it is.
-      const urls = await Promise.all(rows.map((r) => signedGsUrl(r.gcs_path, 3600)));
-      rows.forEach((r, i) => { r.url = urls[i]; });
+      const [urls, downloads] = await Promise.all([
+        Promise.all(rows.map((r) => signedGsUrl(r.gcs_path, 3600))),
+        Promise.all(rows.map((r) => signedGsUrl(r.gcs_path, 3600, attachment(generatedName(r))))),
+      ]);
+      rows.forEach((r, i) => { r.url = urls[i]; r.download_url = downloads[i]; r.file_name = generatedName(r); });
 
       res.json({ files: rows, matched: matched[0]?.total || 0, totals: totals[0] || {} });
     } catch (e) {

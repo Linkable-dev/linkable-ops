@@ -44,6 +44,14 @@ const AGES = [
   [90, "Last 90 days"],
 ];
 
+const downloadIcon = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
 function size(bytes) {
   const n = Number(bytes);
   if (!Number.isFinite(n) || n <= 0) return "";
@@ -87,6 +95,9 @@ export default function ContentPage() {
   const [loading, setLoading] = useState(true);
 
   const [tab, setTab] = useState("delivered");
+  // The file being looked at properly. A 220px tile is a contact sheet; the
+  // question "is this any good" needs the actual picture.
+  const [preview, setPreview] = useState(null);
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
   const [days, setDays] = useState(0);
@@ -121,6 +132,14 @@ export default function ContentPage() {
   useEffect(() => {
     api.getContentFilters().then(setFilters).catch(() => {});
   }, []);
+
+  // Escape closes the preview, because every overlay a person has ever met does.
+  useEffect(() => {
+    if (!preview) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setPreview(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [preview]);
 
   // Any change of filter starts the list again from the top.
   const narrow = (set) => (value) => {
@@ -320,13 +339,13 @@ export default function ContentPage() {
                 background: theme.surface, overflow: "hidden",
               }}
             >
-              <a
-                href={f.url || undefined}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                onClick={() => f.url && setPreview(f)}
+                title={f.url ? "Open it big" : undefined}
                 style={{
-                  display: "block", height: 160, background: theme.surfaceAlt,
-                  textDecoration: "none", position: "relative",
+                  display: "block", width: "100%", height: 160, padding: 0, border: "none",
+                  background: theme.surfaceAlt, cursor: f.url ? "zoom-in" : "default",
+                  position: "relative",
                 }}
               >
                 {f.kind === "image" && f.url && (
@@ -337,17 +356,18 @@ export default function ContentPage() {
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
                 )}
-                {f.kind === "video" && f.url && (
+                {(f.kind === "video" || f.modality === "video") && f.url && (
                   // preload="metadata" so the grid shows a frame without
-                  // pulling seventy megabytes per tile.
+                  // pulling seventy megabytes per tile, and no controls: the
+                  // tile is a thumbnail, and playing happens in the preview.
                   <video
                     src={f.url}
                     preload="metadata"
-                    controls
+                    muted
                     style={{ width: "100%", height: "100%", objectFit: "cover", background: "#000" }}
                   />
                 )}
-                {(!f.url || f.kind === "file") && (
+                {(!f.url || (f.kind === "file" && f.modality !== "video")) && (
                   <div style={{
                     height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
                     color: theme.textMuted, fontSize: 12, textAlign: "center", padding: 12,
@@ -355,7 +375,7 @@ export default function ContentPage() {
                     {f.url ? f.file_name.split(".").pop().toUpperCase() : "Couldn't be signed"}
                   </div>
                 )}
-              </a>
+              </button>
               <div style={{ padding: "10px 12px" }}>
                 <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {f.campaign_title || "(untitled campaign)"}
@@ -363,11 +383,29 @@ export default function ContentPage() {
                 <div style={{ ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {creatorName(f)} · {f.brand_name?.trim() || "(unnamed brand)"}
                 </div>
-                <div style={{ ...muted, marginTop: 3 }}>
+                <div style={{ ...muted, marginTop: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {friendlyDate(f.created)}
                   {tab === "generated"
                     ? `${f.provider ? ` · ${f.provider}` : ""}${f.cost_cents ? ` · ${f.cost_cents}c` : ""}`
                     : size(f.size_bytes) ? ` · ${size(f.size_bytes)}` : ""}
+                  </span>
+                  {f.download_url && (
+                    <a
+                      href={f.download_url}
+                      title={`Download ${f.file_name || "this file"}`}
+                      aria-label="Download"
+                      style={{
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                        color: theme.textMuted, textDecoration: "none",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = theme.accentLight; e.currentTarget.style.color = theme.text; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}
+                    >
+                      {downloadIcon}
+                    </a>
+                  )}
                 </div>
                 {/* A generated asset has three verdicts on it and they answer
                     different questions: does the brand want it, is it safe,
@@ -396,6 +434,66 @@ export default function ContentPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* The file, big. On a dark ground because half of it is photography and
+          the rest is video, and both are judged against nothing. */}
+      {preview && (
+        <div
+          onClick={() => setPreview(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.82)",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            padding: 24, gap: 14,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxWidth: "100%" }}
+          >
+            {preview.kind === "video" || preview.modality === "video" ? (
+              <video
+                src={preview.url}
+                controls
+                autoPlay
+                style={{ maxWidth: "88vw", maxHeight: "76vh", borderRadius: 10, background: "#000" }}
+              />
+            ) : (
+              <img
+                src={preview.url}
+                alt={preview.file_name}
+                style={{ maxWidth: "88vw", maxHeight: "76vh", borderRadius: 10, objectFit: "contain" }}
+              />
+            )}
+
+            <div style={{
+              display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+              justifyContent: "center", color: "#fff",
+            }}>
+              <div style={{ fontSize: 13, textAlign: "center" }}>
+                <div style={{ fontWeight: 600 }}>
+                  {preview.campaign_title || "(untitled campaign)"}
+                </div>
+                <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>
+                  {creatorName(preview)} · {preview.brand_name?.trim() || "(unnamed brand)"} ·{" "}
+                  {friendlyDate(preview.created)}
+                  {size(preview.size_bytes) ? ` · ${size(preview.size_bytes)}` : ""}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {preview.download_url && (
+                  <Btn size="sm" href={preview.download_url}>Download</Btn>
+                )}
+                <Btn size="sm" variant="outline" href={preview.url} target="_blank">
+                  Open original
+                </Btn>
+                <Btn size="sm" variant="outline" onClick={() => setPreview(null)}>
+                  Close
+                </Btn>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

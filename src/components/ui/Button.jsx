@@ -2,7 +2,11 @@ import { useTheme } from "../../contexts/ThemeContext";
 
 // variant: solid (primary) | outline | secondary (quiet, surface background) | danger (red solid)
 // type defaults to "button" so a Cancel button inside a <form> never submits it.
-export function Btn({ children, onClick, disabled, loading, color, variant = "solid", size = "md", style = {}, type = "button", title }) {
+// `href` makes it an anchor wearing the same clothes. A download and an "open
+// in a new tab" are links — a button that fakes one with window.location loses
+// middle-click, cmd-click and the download attribute, and every one of those is
+// something a person expects from a thing that goes somewhere.
+export function Btn({ children, onClick, disabled, loading, color, variant = "solid", size = "md", style = {}, type = "button", title, href, target, download }) {
   const { theme, mode } = useTheme();
   const c = variant === "danger" ? "#DC2626" : (color || theme.accent);
   const pad = size === "sm" ? "7px 15px" : "10px 22px";
@@ -12,8 +16,7 @@ export function Btn({ children, onClick, disabled, loading, color, variant = "so
     : variant === "outline" ? c
     : variant === "secondary" ? theme.text
     : (mode === "dark" && c === theme.accent ? "#0A0A0A" : "#fff");
-  return (
-    <button onClick={onClick} disabled={isDisabled} type={type} title={title} className={`lk-btn lk-btn-${variant}`} style={{
+  const dressing = {
       padding: pad, borderRadius: 999, fontFamily: "inherit", fontSize: fs, fontWeight: 600, letterSpacing: -0.1,
       cursor: isDisabled ? "not-allowed" : "pointer", transition: "all 0.15s",
       display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0,
@@ -22,7 +25,28 @@ export function Btn({ children, onClick, disabled, loading, color, variant = "so
       color: fg,
       boxShadow: (!isDisabled && (variant === "solid" || variant === "danger")) ? `0 1px 4px ${c}20` : "none",
       ...style,
-    }}>
+  };
+
+  if (href && !isDisabled) {
+    return (
+      <a
+        href={href}
+        target={target}
+        rel={target === "_blank" ? "noreferrer" : undefined}
+        download={download}
+        title={title}
+        onClick={onClick}
+        className={`lk-btn lk-btn-${variant}`}
+        style={{ ...dressing, textDecoration: "none" }}
+      >
+        {loading && <Spinner size={fs - 2} color={fg} />}
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <button onClick={onClick} disabled={isDisabled} type={type} title={title} className={`lk-btn lk-btn-${variant}`} style={dressing}>
       {loading && <Spinner size={fs - 2} color={fg} />}
       {children}
     </button>

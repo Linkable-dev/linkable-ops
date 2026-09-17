@@ -42,7 +42,11 @@ function getBucket(target) {
   }
 }
 
-export async function signedUrl(blobName, expiresInSeconds = 3600, target) {
+// `disposition` asks GCS to send Content-Disposition with the object, which is
+// how a download becomes a download: the HTML `download` attribute is ignored
+// cross-origin, so a link to storage.googleapis.com opens the file in a tab
+// instead of saving it. The header has to come from the signature.
+export async function signedUrl(blobName, expiresInSeconds = 3600, target, disposition) {
   if (!blobName) return null;
   const b = getBucket(target);
   if (!b) return null;
@@ -51,6 +55,7 @@ export async function signedUrl(blobName, expiresInSeconds = 3600, target) {
       action: "read",
       expires: Date.now() + expiresInSeconds * 1000,
       version: "v4",
+      ...(disposition ? { responseDisposition: disposition } : {}),
     });
     return url;
   } catch (err) {
@@ -65,7 +70,7 @@ export async function signedUrl(blobName, expiresInSeconds = 3600, target) {
 // than a bare object name, and it is not always the target's default bucket —
 // so the bucket comes from the path, not from the switch. Anything already
 // https:// is passed through: it is fetchable as it stands.
-export async function signedGsUrl(gsPath, expiresInSeconds = 3600) {
+export async function signedGsUrl(gsPath, expiresInSeconds = 3600, disposition) {
   const path = String(gsPath || "");
   if (!path) return null;
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
@@ -81,6 +86,7 @@ export async function signedGsUrl(gsPath, expiresInSeconds = 3600) {
       action: "read",
       expires: Date.now() + expiresInSeconds * 1000,
       version: "v4",
+      ...(disposition ? { responseDisposition: disposition } : {}),
     });
     return url;
   } catch (err) {
