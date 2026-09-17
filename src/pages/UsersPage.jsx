@@ -33,11 +33,15 @@ const SKELETON_KIND = {
   user_deleted: "text", purge: "pill", subscription: "pill", actions: "actions",
 };
 
-// Two pill buttons side by side, sized for the widest pair the column ever
-// holds — "Ruled out" + "View ↗", either one wearing a loading spinner.
-// Too narrow and the labels wrap mid-phrase ("Rule / out"), so this is fixed
-// rather than resizable.
-const ACTIONS_WIDTH = 180;
+// Two pill buttons side by side. Sized for the widest the pair can ever get,
+// measured rather than guessed: "Ruled out" next to "View ↗" with BOTH wearing
+// a spinner — reachable, since ruling out and impersonating are separate
+// in-flight flags and neither button disables the other — and in the fallback
+// font, which is what renders during Satoshi's font-display: swap window. That
+// worst case is 198px. Too narrow and the labels wrapped mid-phrase ("Rule /
+// out"), so the column is fixed rather than resizable and the buttons
+// themselves never wrap or shrink (see Btn).
+const ACTIONS_WIDTH = 200;
 
 const BRAND_COLUMNS = [
   { key: "avatar",          label: "",             width: 44,  resizable: false },
