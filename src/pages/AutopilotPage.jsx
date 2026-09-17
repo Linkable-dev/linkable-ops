@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
+import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
 
 /**
@@ -66,6 +67,13 @@ export default function AutopilotPage() {
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState(null);
   const [detail, setDetail] = useState({ events: [], runs: [], loading: false });
+  // The monthly search limit, per brand and in general. Kept next to the rows
+  // rather than on a settings page of its own: the moment anybody wants to
+  // change it is the moment they are looking at an agent it has stopped.
+  const [limitDraft, setLimitDraft] = useState({});
+  const [savingLimit, setSavingLimit] = useState("");
+  const [defaultLimit, setDefaultLimit] = useState(null);
+  const [defaultDraft, setDefaultDraft] = useState("");
 
   // Loads once. `loading` starts true, so the effect has nothing to set on the
   // way in — only on the way out.
@@ -85,6 +93,90 @@ export default function AutopilotPage() {
       live = false;
     };
   }, []);
+
+  // The default row, read once so the page can say what a brand with no row of
+  // its own actually gets.
+  useEffect(() => {
+    let live = true;
+    api
+      .getAutopilotAllowances()
+      .then((d) => {
+        if (!live) return;
+        const fallback = (d.allowances || []).find((a) => a.scope === "default");
+        if (fallback) {
+          setDefaultLimit(fallback.monthly_searches);
+          setDefaultDraft(String(fallback.monthly_searches));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Writing a limit is not the same as driving an agent: it sets the number
+  // every guard then runs against. The agent picks it up on its next tick,
+  // which is why a brand parked "until the 1st" comes back within the hour.
+  async function saveLimit(row) {
+    const raw = limitDraft[row.brand_user_id];
+    const searches = Math.floor(Number(raw));
+    if (!Number.isFinite(searches) || searches < 0) return;
+    setSavingLimit(row.brand_user_id);
+    setError("");
+    try {
+      await api.setAutopilotAllowance(row.brand_user_id, { monthly_searches: searches });
+      setRows((all) =>
+        all.map((r) =>
+          r.brand_user_id === row.brand_user_id
+            ? { ...r, search_allowance: searches, allowance_is_override: true }
+            : r,
+        ),
+      );
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingLimit("");
+    }
+  }
+
+  async function revertToDefaultLimit(row) {
+    setSavingLimit(row.brand_user_id);
+    setError("");
+    try {
+      await api.clearAutopilotAllowance(row.brand_user_id);
+      setRows((all) =>
+        all.map((r) =>
+          r.brand_user_id === row.brand_user_id
+            ? { ...r, search_allowance: defaultLimit, allowance_is_override: false }
+            : r,
+        ),
+      );
+      setLimitDraft((d) => ({ ...d, [row.brand_user_id]: String(defaultLimit ?? "") }));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingLimit("");
+    }
+  }
+
+  async function saveDefault() {
+    const searches = Math.floor(Number(defaultDraft));
+    if (!Number.isFinite(searches) || searches < 0) return;
+    setSavingLimit("default");
+    setError("");
+    try {
+      await api.setAutopilotAllowance("default", { monthly_searches: searches });
+      setDefaultLimit(searches);
+      // Every brand without a row of its own just changed too.
+      setRows((all) =>
+        all.map((r) => (r.allowance_is_override ? r : { ...r, search_allowance: searches })),
+      );
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingLimit("");
+    }
+  }
 
   function toggle(productId) {
     if (openId === productId) {
@@ -162,6 +254,50 @@ export default function AutopilotPage() {
       {error && (
         <Card>
           <div style={{ color: "#B91C1C", fontSize: 13 }}>{error}</div>
+        </Card>
+      )}
+
+      {/* The limit itself, on the page where its effects are visible. It used
+          to be a constant in Go: a brand that had used its month was parked
+          until the 1st and the only lever was a deploy. */}
+      {available && defaultLimit != null && (
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Searches a brand gets each month</div>
+              <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                Every brand, unless one has a limit of its own — set that on the brand's row below.
+                Each search spends provider credits, which is the whole reason for a limit. Agents
+                read it on their next tick, so raising one un-parks it within the hour.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="number"
+                min="0"
+                value={defaultDraft}
+                onChange={(e) => setDefaultDraft(e.target.value)}
+                style={{
+                  width: 72,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.surface,
+                  color: theme.text,
+                  fontSize: 13,
+                  fontFamily: "inherit",
+                }}
+              />
+              <Btn
+                size="sm"
+                loading={savingLimit === "default"}
+                disabled={String(defaultLimit) === String(defaultDraft)}
+                onClick={saveDefault}
+              >
+                Save
+              </Btn>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -246,6 +382,26 @@ export default function AutopilotPage() {
                         </td>
                         <td style={num}>
                           {r.runs_used}/{r.max_runs}
+                          {/* The agent's own budget above; the brand's month
+                              below. An agent parked on the second while the
+                              first is untouched is the state that read as a
+                              stall — "searches: none yet" and "this month's
+                              searches are all used" are both true, about
+                              different things. */}
+                          {r.search_allowance != null && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 400,
+                                color:
+                                  r.searches_used >= r.search_allowance
+                                    ? "#B45309"
+                                    : theme.textMuted,
+                              }}
+                            >
+                              brand {r.searches_used}/{r.search_allowance}
+                            </div>
+                          )}
                         </td>
                         <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
                           {ago(r.last_event_at)}
@@ -309,6 +465,71 @@ export default function AutopilotPage() {
                                       </span>
                                     </div>
                                   ))}
+                                </div>
+
+                                <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
+                                    The brand's month
+                                  </div>
+                                  <div style={{ fontSize: 13, marginBottom: 6 }}>
+                                    {r.searches_used} of {r.search_allowance ?? "—"} searches used
+                                    {r.search_allowance != null &&
+                                      r.searches_used >= r.search_allowance && (
+                                      <div style={{ color: "#B45309", fontSize: 12, marginTop: 2 }}>
+                                        Spent. Its agent waits for the 1st unless this is raised.
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8 }}>
+                                    Counted across every campaign this brand runs, not this one.
+                                    {r.allowance_is_override
+                                      ? " This brand has a limit of its own."
+                                      : ` Default for every brand${defaultLimit != null ? ` (${defaultLimit})` : ""}.`}
+                                  </div>
+                                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={
+                                        limitDraft[r.brand_user_id] ??
+                                        String(r.search_allowance ?? "")
+                                      }
+                                      onChange={(e) =>
+                                        setLimitDraft((d) => ({
+                                          ...d,
+                                          [r.brand_user_id]: e.target.value,
+                                        }))
+                                      }
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{
+                                        width: 72,
+                                        padding: "6px 8px",
+                                        borderRadius: 6,
+                                        border: `1px solid ${theme.border}`,
+                                        background: theme.surface,
+                                        color: theme.text,
+                                        fontSize: 13,
+                                        fontFamily: "inherit",
+                                      }}
+                                    />
+                                    <Btn
+                                      size="sm"
+                                      loading={savingLimit === r.brand_user_id}
+                                      onClick={() => saveLimit(r)}
+                                    >
+                                      Set limit
+                                    </Btn>
+                                    {r.allowance_is_override && (
+                                      <Btn
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={savingLimit === r.brand_user_id}
+                                        onClick={() => revertToDefaultLimit(r)}
+                                      >
+                                        Use default
+                                      </Btn>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <div style={{ flex: "1 1 340px", minWidth: 0 }}>

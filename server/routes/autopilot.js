@@ -112,7 +112,17 @@ export function autopilotRoutes() {
           ev.action                                AS last_event_action,
           ev.summary                               AS last_event_summary,
           (SELECT COALESCE(SUM(sr.credits_spent), 0) FROM sourcing_runs sr
-            WHERE sr.product_id = a.product_id AND sr.${ND}) AS credits_spent
+            WHERE sr.product_id = a.product_id AND sr.${ND}) AS credits_spent,
+          -- The limit that actually stops an agent, and it is the BRAND's, not
+          -- this campaign's: "waiting — this month's searches are all used"
+          -- next to "searches: none yet" is the same row telling the truth
+          -- twice about two different things. Both numbers belong here.
+          p.user_id                                AS brand_user_id,
+          (SELECT count(*)::int FROM sourcing_runs sr
+             JOIN products sp ON sp.id = sr.product_id
+            WHERE sp.user_id = p.user_id AND sr.${ND}
+              AND sr.created >= date_trunc('month', current_timestamp)
+          )                                        AS searches_used
         FROM agent a
         JOIN products p ON p.id = a.product_id AND p.${ND}
         LEFT JOIN brands b ON b.user_id = p.user_id
@@ -137,6 +147,29 @@ export function autopilotRoutes() {
         `SELECT count(*)::int AS total FROM sourcing_agents WHERE ${ND}`,
       );
 
+      // The limits, read separately and allowed to fail on their own.
+      //
+      // sourcing_allowances arrives with a service-grpc migration, and this app
+      // deploys on its own schedule — so for one deploy window the table can be
+      // missing. Postgres resolves table names when it plans, not when it runs,
+      // so a subquery for it inside the query above would have taken the whole
+      // page down rather than one column of it.
+      const limits = new Map();
+      try {
+        const { rows: allowances } = await cloudSqlQuery(
+          `SELECT scope, monthly_searches FROM sourcing_allowances`,
+        );
+        for (const a of allowances) limits.set(a.scope, a.monthly_searches);
+      } catch (limitErr) {
+        if (!notPromoted(limitErr)) console.error("[autopilot/allowances-read]", limitErr);
+      }
+      const fallback = limits.get("default");
+      for (const row of rows) {
+        const own = limits.get(String(row.brand_user_id));
+        row.allowance_is_override = own !== undefined;
+        row.search_allowance = own !== undefined ? own : (fallback ?? null);
+      }
+
       res.json({ available: true, campaigns: rows, total: totals[0]?.total || 0 });
     } catch (e) {
       if (notPromoted(e)) {
@@ -144,6 +177,105 @@ export function autopilotRoutes() {
         return res.json({ available: false, campaigns: [], total: 0 });
       }
       console.error("[autopilot/campaigns]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/autopilot/allowances
+  // The default, and every brand that has been given a number of its own.
+  router.get("/allowances", async (req, res) => {
+    try {
+      const { rows } = await cloudSqlQuery(
+        `SELECT sa.scope, sa.monthly_searches, sa.note, sa.updated, sa.updated_by,
+                b.store_name, u.email,
+                (SELECT count(*)::int FROM sourcing_runs sr
+                   JOIN products p ON p.id = sr.product_id
+                  WHERE p.user_id::text = sa.scope AND sr.${ND}
+                    AND sr.created >= date_trunc('month', current_timestamp)) AS searches_used
+           FROM sourcing_allowances sa
+           LEFT JOIN users u ON u.id::text = sa.scope
+           LEFT JOIN brands b ON b.user_id::text = sa.scope
+          ORDER BY (sa.scope = 'default') DESC, sa.updated DESC`,
+      );
+      res.json({ available: true, allowances: rows });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, allowances: [] });
+      console.error("[autopilot/allowances]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PUT /api/autopilot/allowances/:scope   { monthly_searches, note }
+  //
+  // The one write on this page, and the reason it is allowed where starting an
+  // agent is not: this does not act for a brand, it sets the number the agent
+  // reads before it acts. Every guard still runs, on the value written here.
+  // Starting, stopping and re-planning still belong to gRPC, which enforces
+  // the budget and the send guards an UPDATE from here would walk past.
+  //
+  // `scope` is 'default' or a brand's users.id. Raising it un-parks an agent
+  // on its next tick — no deploy, and no waiting for the 1st.
+  router.put("/allowances/:scope", async (req, res) => {
+    try {
+      const scope = String(req.params.scope || "");
+      if (scope !== "default" && !/^[0-9a-f-]{36}$/i.test(scope)) {
+        return res.status(400).json({ error: "Scope must be 'default' or a brand user id" });
+      }
+      const searches = Math.floor(Number(req.body?.monthly_searches));
+      if (!Number.isFinite(searches) || searches < 0 || searches > 1000) {
+        return res.status(400).json({ error: "Searches must be a whole number between 0 and 1000" });
+      }
+      const note = String(req.body?.note || "").slice(0, 500);
+
+      // A brand scope has to be a brand. A typo'd uuid would otherwise sit
+      // there as a row that looks like a limit and applies to nobody.
+      if (scope !== "default") {
+        const { rows } = await cloudSqlQuery(
+          `SELECT 1 FROM users WHERE id = $1 AND role = 2`, [scope],
+        );
+        if (!rows.length) return res.status(404).json({ error: "No brand with that id" });
+      }
+
+      const { rows } = await cloudSqlQuery(
+        `INSERT INTO sourcing_allowances (scope, monthly_searches, note, updated_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (scope) DO UPDATE
+            SET monthly_searches = excluded.monthly_searches,
+                note             = excluded.note,
+                updated          = current_timestamp,
+                updated_by       = excluded.updated_by
+         RETURNING scope, monthly_searches, note, updated, updated_by`,
+        [scope, searches, note, req.admin?.email || ""],
+      );
+      console.log(
+        `[sourcing-allowance] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
+        `scope=${scope} searches=${searches} note=${JSON.stringify(note)}`,
+      );
+      res.json({ allowance: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/allowances/put]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/autopilot/allowances/:userId — back to the default. Deleting
+  // the default row itself is refused: nothing would be left to fall back to
+  // but the number compiled into the binary.
+  router.delete("/allowances/:scope", async (req, res) => {
+    try {
+      const scope = String(req.params.scope || "");
+      if (!/^[0-9a-f-]{36}$/i.test(scope)) {
+        return res.status(400).json({ error: "Only a brand's own limit can be removed" });
+      }
+      await cloudSqlQuery(`DELETE FROM sourcing_allowances WHERE scope = $1`, [scope]);
+      console.log(
+        `[sourcing-allowance] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
+        `scope=${scope} removed`,
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("[autopilot/allowances/delete]", e);
       res.status(500).json({ error: e.message });
     }
   });

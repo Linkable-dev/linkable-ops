@@ -105,13 +105,25 @@ export const api = {
     request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters, quick })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
 
-  // Autopilot: the recruiting machine. Read-only — starting and stopping an
-  // agent goes through the main app's console, which enforces the budget and
-  // the send guards this route deliberately cannot reach.
+  // Autopilot: the recruiting machine. Read-only about the AGENT — starting and
+  // stopping one goes through the main app's console, which enforces the budget
+  // and the send guards this route deliberately cannot reach.
   getAutopilotCampaigns: ({ limit = 50, offset = 0 } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>
     request(`/autopilot/campaigns/${id}/events?${buildQs({ limit })}`),
+
+  // The monthly search limit, which IS ours to change: it is the number the
+  // agent reads before it acts, not an action taken on a brand's behalf.
+  // `scope` is "default" or a brand's user id.
+  getAutopilotAllowances: () => request("/autopilot/allowances"),
+  setAutopilotAllowance: (scope, { monthly_searches, note = "" }) =>
+    request(`/autopilot/allowances/${scope}`, {
+      method: "PUT",
+      body: JSON.stringify({ monthly_searches, note }),
+    }),
+  clearAutopilotAllowance: (userId) =>
+    request(`/autopilot/allowances/${userId}`, { method: "DELETE" }),
 
   // GTM outreach agents: a goal, a budget, a clock — and the two buttons that
   // let an admin drive one by hand.
