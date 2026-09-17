@@ -510,18 +510,50 @@ export function autopilotRoutes() {
   // settings screen that only lists rows that exist is a screen you cannot use
   // to set anything.
   const SETTING_KEYS = [
-    { key: "lemlist_template_campaign_id", kind: "text",
-      help: "The Lemlist sequence every campaign's own is cloned from. Empty means campaigns cannot send at all." },
-    { key: "outreach_writer", kind: "text",
-      help: "\"ai\" writes each campaign's emails from its brief; anything else uses the house sequence below." },
-    { key: "sandbox_max_leads", kind: "number",
-      help: "Outside production, how many leads one push hands to the test inboxes. The rest wait for the next push." },
-    { key: "agent_goal_applications", kind: "number",
-      help: "How many applications a newly launched campaign's agent aims for before it stops." },
-    { key: "agent_max_runs", kind: "number",
-      help: "How many searches that agent may run to get there." },
-    { key: "house_sequence", kind: "json",
-      help: "The default emails as JSON: {\"steps\":[{\"delay\":0,\"subject\":\"…\",\"message\":\"<p>…</p>\"}]}. Used when the writer is off, and whenever it produces nothing." },
+    {
+      key: "lemlist_template_campaign_id",
+      label: "Lemlist template sequence",
+      kind: "text",
+      placeholder: "cam_…",
+      help: "The sequence every campaign's own emails are cloned from. Without it, campaigns have nothing to send.",
+    },
+    {
+      key: "outreach_writer",
+      label: "Who writes the emails",
+      kind: "choice",
+      options: [
+        { value: "ai", label: "Written for each campaign" },
+        { value: "house", label: "The same default emails for everyone" },
+      ],
+      help: "Written per campaign uses the brand, the product and what the campaign is trying to achieve. If that ever produces nothing, the default emails are sent instead.",
+    },
+    {
+      key: "sandbox_max_leads",
+      label: "Test sends per push",
+      kind: "number",
+      placeholder: "10",
+      help: "Outside production nothing reaches a real creator — mail goes to the test inboxes. This is how many per push; the rest wait for the next one.",
+    },
+    {
+      key: "agent_goal_applications",
+      label: "Applications to aim for",
+      kind: "number",
+      placeholder: "25",
+      help: "What a newly launched campaign's agent works towards. It stops when it gets there.",
+    },
+    {
+      key: "agent_max_runs",
+      label: "Searches allowed per campaign",
+      kind: "number",
+      placeholder: "2",
+      help: "How many searches that agent may run to reach the goal. Each one spends credits.",
+    },
+    {
+      key: "house_sequence",
+      label: "Default emails",
+      kind: "steps",
+      help: "Sent when the writer is off, and whenever it produces nothing. {{brandName}}, {{campaignName}}, {{firstName}}, {{offerSummary}} and {{applyUrl}} are filled in per creator.",
+    },
   ];
 
   router.get("/settings", async (req, res) => {
@@ -565,7 +597,12 @@ export function autopilotRoutes() {
           return res.status(400).json({ error: "That has to be a whole number above zero" });
         }
       }
-      if (known.kind === "json" && value !== "") {
+      if (known.kind === "choice" && value !== "") {
+        if (!known.options.some((o) => o.value === value)) {
+          return res.status(400).json({ error: "Pick one of the offered options" });
+        }
+      }
+      if (known.kind === "steps" && value !== "") {
         // Checked here as well as in Go, because the service's fallback is
         // silent by design: a sequence saved broken would look saved and send
         // the built-in emails, which is the confusing half of a safe failure.

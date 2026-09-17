@@ -105,31 +105,35 @@ export default function AutopilotPage() {
   const [sort, setSort] = useState({ sortBy: "", sortDir: "" });
   const [total, setTotal] = useState(null);
   const [totalAll, setTotalAll] = useState(null);
-  // The monthly search limit, per brand and in general. Kept next to the rows
-  // rather than on a settings page of its own: the moment anybody wants to
-  // change it is the moment they are looking at an agent it has stopped.
-  const [savingLimit, setSavingLimit] = useState("");
+  // The default monthly search limit. Read here so the rows can show what a
+  // brand without a row of its own actually gets; edited in the settings
+  // drawer, which is where the rest of the knobs live.
   const [defaultLimit, setDefaultLimit] = useState(null);
-  const [defaultDraft, setDefaultDraft] = useState("");
 
   // Re-reads whenever a filter changes. The popover commits after a pause, so
   // there is nothing to debounce here — every change that arrives is one the
   // operator finished making.
   useEffect(() => {
     let live = true;
-    setLoading(true);
-    api
-      .getAutopilotCampaigns({ limit: 100, filters, ...sort })
-      .then((d) => {
-        if (!live) return;
-        setRows(d.campaigns || []);
-        setTotal(d.total ?? null);
-        setTotalAll(d.total_all ?? null);
-        setAvailable(d.available !== false);
-        setError("");
-      })
-      .catch((e) => live && setError(e.message))
-      .finally(() => live && setLoading(false));
+    // The fetch is a function rather than the effect's body so the skeleton
+    // can be turned on with it: setState called straight from an effect body
+    // is a cascading render, and the rule that says so is right.
+    const run = () => {
+      setLoading(true);
+      return api
+        .getAutopilotCampaigns({ limit: 100, filters, ...sort })
+        .then((d) => {
+          if (!live) return;
+          setRows(d.campaigns || []);
+          setTotal(d.total ?? null);
+          setTotalAll(d.total_all ?? null);
+          setAvailable(d.available !== false);
+          setError("");
+        })
+        .catch((e) => live && setError(e.message))
+        .finally(() => live && setLoading(false));
+    };
+    run();
     return () => {
       live = false;
     };
@@ -144,35 +148,13 @@ export default function AutopilotPage() {
       .then((d) => {
         if (!live) return;
         const fallback = (d.allowances || []).find((a) => a.scope === "default");
-        if (fallback) {
-          setDefaultLimit(fallback.monthly_searches);
-          setDefaultDraft(String(fallback.monthly_searches));
-        }
+        if (fallback) setDefaultLimit(fallback.monthly_searches);
       })
       .catch(() => {});
     return () => {
       live = false;
     };
   }, []);
-
-  async function saveDefault() {
-    const searches = Math.floor(Number(defaultDraft));
-    if (!Number.isFinite(searches) || searches < 0) return;
-    setSavingLimit("default");
-    setError("");
-    try {
-      await api.setAutopilotAllowance("default", { monthly_searches: searches });
-      setDefaultLimit(searches);
-      // Every brand without a row of its own just changed too.
-      setRows((all) =>
-        all.map((r) => (r.allowance_is_override ? r : { ...r, search_allowance: searches })),
-      );
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSavingLimit("");
-    }
-  }
 
   // One filter at a time, and an empty value removes the key rather than
   // sitting in the object as "": the chip row and the endpoint both read
@@ -272,7 +254,23 @@ export default function AutopilotPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>Autopilot</h1>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px", flex: 1 }}>Autopilot</h1>
+        {/* Everything the sending obeys, behind one cog. This page is the
+            machine's state; a column of form fields above the table buried it. */}
+        {available && (
+          <OutreachSettings
+            defaultLimit={defaultLimit}
+            onDefaultLimitChange={(searches) => {
+              setDefaultLimit(searches);
+              // Every brand without a row of its own just changed too.
+              setRows((all) =>
+                all.map((r) => (r.allowance_is_override ? r : { ...r, search_allowance: searches })),
+              );
+            }}
+          />
+        )}
+      </div>
       <p style={{ color: theme.textMuted, fontSize: 13, margin: "0 0 20px" }}>
         Recruiting runs in the backend and brands never see it. This is where it is watched: what
         each campaign's agent is doing, what it found, and what came back.
@@ -294,53 +292,6 @@ export default function AutopilotPage() {
         </Card>
       )}
 
-      {/* The limit itself, on the page where its effects are visible. It used
-          to be a constant in Go: a brand that had used its month was parked
-          until the 1st and the only lever was a deploy. */}
-      {available && defaultLimit != null && (
-        <Card>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>Searches a brand gets each month</div>
-              <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
-                Every brand, unless one has a limit of its own — set that on the brand's row below.
-                Each search spends provider credits, which is the whole reason for a limit. Agents
-                read it on their next tick, so raising one un-parks it within the hour.
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="number"
-                min="0"
-                value={defaultDraft}
-                onChange={(e) => setDefaultDraft(e.target.value)}
-                style={{
-                  width: 72,
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  border: `1px solid ${theme.border}`,
-                  background: theme.surface,
-                  color: theme.text,
-                  fontSize: 13,
-                  fontFamily: "inherit",
-                }}
-              />
-              <Btn
-                size="sm"
-                loading={savingLimit === "default"}
-                disabled={String(defaultLimit) === String(defaultDraft)}
-                onClick={saveDefault}
-              >
-                Save
-              </Btn>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Everything else the sending obeys, in the same place as the limit and
-          for the same reason: it was all a deploy before. */}
-      {available && <OutreachSettings />}
 
       {/* What is currently being hidden, and the way back. A filter set in a
           header cell is invisible from anywhere else on the page, and the

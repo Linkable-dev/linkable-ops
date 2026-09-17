@@ -1,32 +1,50 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "../../contexts/ThemeContext";
-import { Card } from "../ui/Card";
+import { Btn } from "../ui/Button";
 import { Skeleton } from "../ui/Skeleton";
 import { api } from "../../lib/api";
 
 /**
- * The outreach knobs, on the page where their effects are visible.
+ * Everything the sending obeys, behind one cog.
  *
- * All of these were environment variables or Go constants, so every one of
- * them — which Lemlist sequence a campaign clones, whether copy is written per
- * campaign, how many test sends a push makes, what a new agent aims for, the
- * house emails themselves — was a pull request and a deploy. None is a code
- * change, and the ones you most want to change are the ones you want to change
- * while outreach is misbehaving.
+ * These were environment variables and Go constants, so each was a pull
+ * request and a deploy — which is the wrong shape for the settings you most
+ * want to move while outreach is misbehaving. They are editable now, but they
+ * are not what this page is FOR: the page is the machine's state, and a column
+ * of form fields above the table buries it. So they live in a drawer, the same
+ * one the brand panel uses, opened from a cog and closed with Escape.
  *
- * Unset is shown as "built-in", not as blank: the service falls back to the
- * variable it replaced and then to the value compiled in, so an empty field
- * here means "whatever shipped", not "nothing".
+ * Unset reads "built-in" rather than as a blank field. The service falls back
+ * to the variable each one replaced and then to the value compiled in, so an
+ * empty field means "whatever shipped", not "nothing".
  */
-export default function OutreachSettings() {
+const cog = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+
+export default function OutreachSettings({ defaultLimit, onDefaultLimitChange }) {
   const { theme } = useTheme();
+  const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState([]);
   const [drafts, setDrafts] = useState({});
+  const [limitDraft, setLimitDraft] = useState(String(defaultLimit ?? ""));
   const [loading, setLoading] = useState(true);
   const [available, setAvailable] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState("");
+
+  useEffect(() => setLimitDraft(String(defaultLimit ?? "")), [defaultLimit]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const load = () =>
     api
@@ -39,17 +57,17 @@ export default function OutreachSettings() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
 
+  // Loaded when it is opened, not on mount: the page behind it is the point,
+  // and a settings read on every visit is a query nobody asked for.
   useEffect(() => {
-    load();
-  }, []);
+    if (open) load();
+  }, [open]);
 
   async function save(key) {
     setBusy(key);
     setError("");
-    setSaved("");
     try {
       await api.setOutreachSetting(key, { value: drafts[key] ?? "" });
-      setSaved(key);
       await load();
     } catch (e) {
       setError(e.message);
@@ -71,123 +89,402 @@ export default function OutreachSettings() {
     }
   }
 
-  if (!available && !loading) return null;
+  async function saveLimit() {
+    const searches = Math.floor(Number(limitDraft));
+    if (!Number.isFinite(searches) || searches < 0) return;
+    setBusy("__limit");
+    setError("");
+    try {
+      await api.setAutopilotAllowance("default", { monthly_searches: searches });
+      onDefaultLimitChange?.(searches);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  }
 
-  const input = {
+  const field = {
     width: "100%",
-    padding: "6px 8px",
-    borderRadius: 6,
+    padding: "7px 9px",
+    borderRadius: 7,
     border: `1px solid ${theme.border}`,
     background: theme.surface,
     color: theme.text,
     fontSize: 13,
     fontFamily: "inherit",
   };
+  const label = {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: theme.textMuted,
+    marginBottom: 8,
+  };
+  const section = {
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  };
 
   return (
-    <Card>
-      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Outreach settings</div>
-      <div style={{ color: theme.textMuted, fontSize: 12, marginBottom: 12 }}>
-        Read on every send, so a change is live within the minute — no deploy. Leave one empty and
-        the service uses what it shipped with.
-      </div>
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title="Outreach settings"
+        aria-label="Outreach settings"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          height: 32,
+          padding: "0 12px",
+          borderRadius: 8,
+          border: `1px solid ${theme.border}`,
+          background: theme.surface,
+          color: theme.textMid,
+          fontSize: 12.5,
+          fontWeight: 500,
+          fontFamily: "inherit",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = theme.accentLight)}
+        onMouseLeave={(e) => (e.currentTarget.style.background = theme.surface)}
+      >
+        {cog}
+        Settings
+      </button>
 
-      {loading && <Skeleton height={120} />}
-
-      {!loading &&
-        settings.map((s) => {
-          const changed = (drafts[s.key] ?? "") !== s.value;
-          const big = s.kind === "json";
-          return (
+      {open && (
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 900,
+              background: "rgba(18,20,25,0.35)",
+              backdropFilter: "blur(2px)",
+            }}
+          />
+          <aside
+            role="dialog"
+            aria-label="Outreach settings"
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 901,
+              width: "min(560px, 100vw)",
+              background: theme.bg,
+              borderLeft: `1px solid ${theme.border}`,
+              boxShadow: theme.shadowMd,
+              display: "flex",
+              flexDirection: "column",
+              animation: "lkSlideIn 0.18s ease-out",
+            }}
+          >
             <div
-              key={s.key}
               style={{
+                padding: "16px 20px 12px",
+                borderBottom: `1px solid ${theme.border}`,
+                background: theme.surface,
                 display: "flex",
+                alignItems: "flex-start",
                 gap: 12,
-                alignItems: big ? "flex-start" : "center",
-                flexWrap: "wrap",
-                padding: "10px 0",
-                borderTop: `1px solid ${theme.border}`,
               }}
             >
-              <div style={{ flex: "1 1 280px", minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {s.key}{" "}
-                  {!s.set && (
-                    <span style={{ color: theme.textMuted, fontWeight: 400, fontSize: 11 }}>
-                      · built-in
-                    </span>
-                  )}
-                </div>
-                <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{s.help}</div>
-                {s.updated_by && (
-                  <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
-                    last set by {s.updated_by}
-                  </div>
-                )}
-              </div>
-              <div style={{ flex: big ? "1 1 100%" : "0 1 280px", display: "flex", gap: 6 }}>
-                {big ? (
-                  <textarea
-                    rows={8}
-                    value={drafts[s.key] ?? ""}
-                    onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })}
-                    placeholder='{"steps":[{"delay":0,"subject":"…","message":"<p>…</p>"}]}'
-                    style={{ ...input, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-                  />
-                ) : (
-                  <input
-                    type={s.kind === "number" ? "number" : "text"}
-                    value={drafts[s.key] ?? ""}
-                    onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })}
-                    style={input}
-                  />
-                )}
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <button
-                    onClick={() => save(s.key)}
-                    disabled={!changed || busy === s.key}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: `1px solid ${theme.border}`,
-                      background: changed ? theme.accentLight : theme.surface,
-                      color: theme.text,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: changed ? "pointer" : "default",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {busy === s.key ? "…" : saved === s.key && !changed ? "Saved" : "Save"}
-                  </button>
-                  {s.set && (
-                    <button
-                      onClick={() => clear(s.key)}
-                      disabled={busy === s.key}
-                      style={{
-                        padding: "4px 10px",
-                        borderRadius: 6,
-                        border: "none",
-                        background: "none",
-                        color: theme.textMuted,
-                        fontSize: 11,
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      reset
-                    </button>
-                  )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>Outreach settings</div>
+                <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                  Read on every send, so a change is live within the minute — no deploy. Leave one
+                  empty and the service uses what it shipped with.
                 </div>
               </div>
+              <button
+                onClick={() => setOpen(false)}
+                title="Close"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 999,
+                  border: `1px solid ${theme.border}`,
+                  background: "transparent",
+                  color: theme.textMid,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
             </div>
-          );
-        })}
 
-      {error && (
-        <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 10 }}>{error}</div>
+            <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+              {/* The limit lives here too now. It is a setting, and it was
+                  taking a card's worth of the page above the machine's state. */}
+              <div style={section}>
+                <div style={label}>Credits</div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Searches a brand gets each month</div>
+                <div style={{ color: theme.textMuted, fontSize: 12, margin: "2px 0 10px" }}>
+                  Every brand, unless one has a limit of its own — set that on the brand's row.
+                  Each search spends provider credits, which is the whole reason for a limit.
+                  Agents read it on their next tick, so raising one un-parks it within the hour.
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    type="number"
+                    min="0"
+                    value={limitDraft}
+                    onChange={(e) => setLimitDraft(e.target.value)}
+                    style={{ ...field, width: 110 }}
+                  />
+                  <Btn
+                    size="sm"
+                    loading={busy === "__limit"}
+                    disabled={String(defaultLimit ?? "") === String(limitDraft)}
+                    onClick={saveLimit}
+                  >
+                    Save
+                  </Btn>
+                </div>
+              </div>
+
+              {loading && <Skeleton height={200} />}
+
+              {!loading && !available && (
+                <div style={{ ...section, color: theme.textMuted, fontSize: 13 }}>
+                  The settings table is not on this database yet. It is created at boot by the
+                  gRPC service, so it appears after the next deploy — or switch the database
+                  target to one that has it.
+                </div>
+              )}
+
+              {!loading &&
+                available &&
+                settings.map((s) => {
+                  const changed = (drafts[s.key] ?? "") !== s.value;
+                  return (
+                    <div key={s.key} style={section}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ fontSize: 13, fontWeight: 600 }} title={s.key}>
+                          {s.label || s.key}
+                        </div>
+                        {!s.set && (
+                          <span style={{ color: theme.textMuted, fontSize: 11 }}>· built-in</span>
+                        )}
+                        {s.updated_by && (
+                          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                            · last set by {s.updated_by}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ color: theme.textMuted, fontSize: 12, margin: "2px 0 10px" }}>
+                        {s.help}
+                      </div>
+                      {s.kind === "steps" ? (
+                        <StepsEditor
+                          theme={theme}
+                          field={field}
+                          value={drafts[s.key] ?? ""}
+                          onChange={(v) => setDrafts({ ...drafts, [s.key]: v })}
+                        />
+                      ) : s.kind === "choice" ? (
+                        <select
+                          value={drafts[s.key] ?? ""}
+                          onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })}
+                          style={field}
+                        >
+                          <option value="">Use the built-in setting</option>
+                          {(s.options || []).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={s.kind === "number" ? "number" : "text"}
+                          value={drafts[s.key] ?? ""}
+                          placeholder={s.placeholder || ""}
+                          onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })}
+                          style={field}
+                        />
+                      )}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                        <Btn
+                          size="sm"
+                          loading={busy === s.key}
+                          disabled={!changed}
+                          onClick={() => save(s.key)}
+                        >
+                          Save
+                        </Btn>
+                        {s.set && (
+                          <button
+                            onClick={() => clear(s.key)}
+                            disabled={busy === s.key}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              padding: 0,
+                              color: theme.textMuted,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            reset to built-in
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {error && (
+                <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 4 }}>{error}</div>
+              )}
+            </div>
+          </aside>
+        </>
       )}
-    </Card>
+    </>
+  );
+}
+
+/**
+ * The default emails, as emails.
+ *
+ * They are stored as JSON because that is what the service reads, but nobody
+ * should have to write JSON to change a subject line — and a stray comma there
+ * saves as invalid and silently falls back to the built-in copy, which looks
+ * exactly like a save that worked. So the JSON stays underneath and this edits
+ * the steps: a delay in days, a subject, and the body.
+ */
+function StepsEditor({ theme, field, value, onChange }) {
+  let steps = [];
+  let broken = false;
+  try {
+    const parsed = value ? JSON.parse(value) : { steps: [] };
+    steps = Array.isArray(parsed?.steps) ? parsed.steps : [];
+  } catch {
+    broken = true;
+  }
+
+  const write = (next) => onChange(JSON.stringify({ steps: next }));
+  const patch = (i, key, v) => write(steps.map((s, n) => (n === i ? { ...s, [key]: v } : s)));
+
+  if (broken) {
+    return (
+      <>
+        <div style={{ color: "#B91C1C", fontSize: 12, marginBottom: 6 }}>
+          This is not valid JSON, so it cannot be shown as steps. Fix it here or clear it.
+        </div>
+        <textarea
+          rows={8}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...field, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+        />
+      </>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {steps.length === 0 && (
+        <div style={{ color: theme.textMuted, fontSize: 12 }}>
+          Nothing set, so the emails that ship with the service are used. Add a step to write your
+          own.
+        </div>
+      )}
+      {steps.map((step, i) => (
+        <div
+          key={i}
+          style={{
+            border: `1px solid ${theme.border}`,
+            borderRadius: 10,
+            padding: 12,
+            background: theme.bg,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>
+              {i === 0 ? "First email" : `Follow-up ${i}`}
+            </span>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {i === 0 ? "sent straight away" : "sent"}
+            </span>
+            {i > 0 && (
+              <>
+                <input
+                  type="number"
+                  min="0"
+                  value={step.delay ?? 0}
+                  onChange={(e) => patch(i, "delay", Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                  style={{ ...field, width: 64, padding: "4px 6px" }}
+                />
+                <span style={{ color: theme.textMuted, fontSize: 12 }}>days later</span>
+              </>
+            )}
+            <button
+              onClick={() => write(steps.filter((_, n) => n !== i))}
+              title="Remove this email"
+              style={{
+                marginLeft: "auto",
+                background: "none",
+                border: "none",
+                color: theme.textMuted,
+                fontSize: 12,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              remove
+            </button>
+          </div>
+          <input
+            value={step.subject ?? ""}
+            placeholder="Subject"
+            onChange={(e) => patch(i, "subject", e.target.value)}
+            style={{ ...field, marginBottom: 6 }}
+          />
+          <textarea
+            rows={5}
+            value={step.message ?? ""}
+            placeholder="<p>Hi {{firstName}},</p>"
+            onChange={(e) => patch(i, "message", e.target.value)}
+            style={{ ...field, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          />
+        </div>
+      ))}
+      <button
+        onClick={() => write([...steps, { delay: steps.length ? 3 : 0, subject: "", message: "" }])}
+        style={{
+          alignSelf: "flex-start",
+          padding: "5px 10px",
+          borderRadius: 7,
+          border: `1px dashed ${theme.border}`,
+          background: "none",
+          color: theme.textMid,
+          fontSize: 12,
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        + Add a follow-up
+      </button>
+    </div>
   );
 }
