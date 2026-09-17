@@ -108,8 +108,8 @@ export const api = {
   // Autopilot: the recruiting machine. Read-only about the AGENT — starting and
   // stopping one goes through the main app's console, which enforces the budget
   // and the send guards this route deliberately cannot reach.
-  getAutopilotCampaigns: ({ limit = 50, offset = 0 } = {}) =>
-    request(`/autopilot/campaigns?${buildQs({ limit, offset })}`),
+  getAutopilotCampaigns: ({ limit = 50, offset = 0, filters } = {}) =>
+    request(`/autopilot/campaigns?${buildQs({ limit, offset, filters })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>
     request(`/autopilot/campaigns/${id}/events?${buildQs({ limit })}`),
 

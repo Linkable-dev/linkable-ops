@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { parseColumnFilters, filterConditions, textFilter, enumFilter } from "../lib/tableQuery.js";
 
 // Autopilot: the recruiting machine, watched from here.
 //
@@ -30,6 +31,44 @@ function notPromoted(e) {
   return e?.code === UNDEFINED_TABLE;
 }
 
+// Per-column filters (filter[col]=value), server-side like every other table
+// in this panel — the count under the table and the empty state stay true,
+// which they would not if the rows were sieved in the browser after the fact.
+//
+// Four, and only four: the page is a list of agents, and the questions an
+// operator actually arrives with are "which ones are stuck", "which are
+// actually running", and "what is this brand's doing". Text for the two names,
+// a fixed choice for the two states, because nobody types "autonomous".
+const AGENT_FILTERS = {
+  campaign_name: textFilter("p.title"),
+  brand_name: textFilter("b.store_name"),
+  mode: enumFilter({
+    off: "a.mode = 'off'",
+    assisted: "a.mode = 'assisted'",
+    autonomous: "a.mode = 'autonomous'",
+  }),
+  status: enumFilter({
+    idle: "a.status = 'idle'",
+    working: "a.status = 'working'",
+    waiting: "a.status = 'waiting'",
+    done: "a.status = 'done'",
+    paused: "a.status = 'paused'",
+    failed: "a.status = 'failed'",
+    // Not a column: the two shapes of "supposed to be running, is not".
+    //
+    // 'paused' is deliberately NOT in here — it means the campaign itself is
+    // paused, which is somebody's decision rather than a fault, and on dev it
+    // is most of the table. What is left is an agent that fell over, and one
+    // that is switched on but has put itself to sleep for days: the shape of
+    // an agent parked on a spent search allowance until the 1st.
+    stuck: `(
+      a.status = 'failed'
+      OR (a.mode <> 'off' AND a.status = 'waiting'
+          AND a.next_action_at > current_timestamp + interval '3 days')
+    )`,
+  }),
+};
+
 export function autopilotRoutes() {
   const router = Router();
 
@@ -41,6 +80,17 @@ export function autopilotRoutes() {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
       const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+
+      // Conditions embed positional placeholders as they are built, so the
+      // filter params go in first and limit/offset take the numbers after
+      // them. Each query gets its own array and its own pass.
+      const columnFilters = parseColumnFilters(req.query);
+      const params = [];
+      const conds = filterConditions(columnFilters, AGENT_FILTERS, params);
+      const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+      params.push(limit, offset);
+      const limitAt = `$${params.length - 1}`;
+      const offsetAt = `$${params.length}`;
 
       const { rows } = await cloudSqlQuery(
         `
@@ -137,14 +187,27 @@ export function autopilotRoutes() {
         ) ev ON true
         -- Whatever is moving first: an agent mid-run, then the most recently
         -- active, then the ones that have never done anything.
+        ${where}
         ORDER BY a.status = 'working' DESC, ev.created DESC NULLS LAST, a.created DESC
-        LIMIT $1 OFFSET $2
+        LIMIT ${limitAt} OFFSET ${offsetAt}
         `,
-        [limit, offset],
+        params,
       );
 
+      // Two counts, because the footer answers two things: how many matched,
+      // and how many there are. One number alone leaves "12" next to a set
+      // filter meaning either.
+      const countParams = [];
+      const countConds = filterConditions(columnFilters, AGENT_FILTERS, countParams);
       const { rows: totals } = await cloudSqlQuery(
-        `SELECT count(*)::int AS total FROM sourcing_agents WHERE ${ND}`,
+        `SELECT
+           count(*) FILTER (WHERE true${countConds.map((c) => ` AND ${c}`).join("")})::int AS total,
+           count(*)::int                                                                  AS total_all
+         FROM sourcing_agents a
+         JOIN products p ON p.id = a.product_id AND p.${ND}
+         LEFT JOIN brands b ON b.user_id = p.user_id
+         WHERE a.${ND}`,
+        countParams,
       );
 
       // The limits, read separately and allowed to fail on their own.
@@ -170,7 +233,12 @@ export function autopilotRoutes() {
         row.search_allowance = own !== undefined ? own : (fallback ?? null);
       }
 
-      res.json({ available: true, campaigns: rows, total: totals[0]?.total || 0 });
+      res.json({
+        available: true,
+        campaigns: rows,
+        total: totals[0]?.total || 0,
+        total_all: totals[0]?.total_all || 0,
+      });
     } catch (e) {
       if (notPromoted(e)) {
         // Not an error: this database has never had sourcing deployed to it.

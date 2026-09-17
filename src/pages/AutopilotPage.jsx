@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
+import { ColumnFilter, describeFilter } from "../components/table/tableTools";
 
 /**
  * Autopilot — the recruiting machine, watched from here.
@@ -57,6 +58,41 @@ function whenNext(raw) {
   return `in ${Math.round(hours / 24)}d`;
 }
 
+// The filterable columns, declared once so the header, the chips and the
+// endpoint cannot drift apart. `key` must exist in AGENT_FILTERS on the server
+// (routes/autopilot.js) — filtering is server-side, so the count under the
+// table and the empty state stay true.
+const FILTERS = [
+  { key: "campaign_name", label: "Campaign", type: "text", placeholder: "Campaign name…" },
+  { key: "brand_name", label: "Brand", type: "text", placeholder: "Brand…" },
+  {
+    key: "mode",
+    label: "Mode",
+    type: "select",
+    options: [
+      { value: "autonomous", label: "Autonomous" },
+      { value: "assisted", label: "Assisted" },
+      { value: "off", label: "Off" },
+    ],
+  },
+  {
+    key: "status",
+    label: "State",
+    type: "select",
+    options: [
+      // First, because it is the reason anybody filters this page at all:
+      // an agent that is switched on and going nowhere.
+      { value: "stuck", label: "Stuck or parked" },
+      { value: "working", label: "Working" },
+      { value: "waiting", label: "Waiting" },
+      { value: "idle", label: "Idle" },
+      { value: "done", label: "Done" },
+      { value: "paused", label: "Paused" },
+      { value: "failed", label: "Failed" },
+    ],
+  },
+];
+
 export default function AutopilotPage() {
   const { theme, mode } = useTheme();
   const dark = mode === "dark";
@@ -67,6 +103,9 @@ export default function AutopilotPage() {
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState(null);
   const [detail, setDetail] = useState({ events: [], runs: [], loading: false });
+  const [filters, setFilters] = useState({});
+  const [total, setTotal] = useState(null);
+  const [totalAll, setTotalAll] = useState(null);
   // The monthly search limit, per brand and in general. Kept next to the rows
   // rather than on a settings page of its own: the moment anybody wants to
   // change it is the moment they are looking at an agent it has stopped.
@@ -75,15 +114,19 @@ export default function AutopilotPage() {
   const [defaultLimit, setDefaultLimit] = useState(null);
   const [defaultDraft, setDefaultDraft] = useState("");
 
-  // Loads once. `loading` starts true, so the effect has nothing to set on the
-  // way in — only on the way out.
+  // Re-reads whenever a filter changes. The popover commits after a pause, so
+  // there is nothing to debounce here — every change that arrives is one the
+  // operator finished making.
   useEffect(() => {
     let live = true;
+    setLoading(true);
     api
-      .getAutopilotCampaigns({ limit: 100 })
+      .getAutopilotCampaigns({ limit: 100, filters })
       .then((d) => {
         if (!live) return;
         setRows(d.campaigns || []);
+        setTotal(d.total ?? null);
+        setTotalAll(d.total_all ?? null);
         setAvailable(d.available !== false);
         setError("");
       })
@@ -92,7 +135,7 @@ export default function AutopilotPage() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [filters]);
 
   // The default row, read once so the page can say what a brand with no row of
   // its own actually gets.
@@ -177,6 +220,23 @@ export default function AutopilotPage() {
       setSavingLimit("");
     }
   }
+
+  // One filter at a time, and an empty value removes the key rather than
+  // sitting in the object as "": the chip row and the endpoint both read
+  // "is this key here" as "is this narrowed".
+  function setFilter(key, value) {
+    setFilters((f) => {
+      const next = { ...f };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+    // A row opened under the old list is about a campaign that may not be in
+    // the new one.
+    setOpenId(null);
+  }
+
+  const activeFilters = FILTERS.filter((f) => filters[f.key]);
 
   function toggle(productId) {
     if (openId === productId) {
@@ -298,6 +358,80 @@ export default function AutopilotPage() {
         </Card>
       )}
 
+      {/* What is currently being hidden, and the way back. A filter set in a
+          header cell is invisible from anywhere else on the page, and the
+          funnel icon alone does not say WHAT it is narrowed to. */}
+      {available && activeFilters.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            margin: "0 0 12px",
+            fontSize: 12,
+            color: theme.textMuted,
+          }}
+        >
+          {activeFilters.map((f) => (
+            <span
+              key={f.key}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 6px 3px 10px",
+                borderRadius: 999,
+                background: theme.surfaceAlt,
+                border: `1px solid ${theme.border}`,
+                color: theme.text,
+              }}
+            >
+              {f.label} {describeFilter(f.type, filters[f.key], f.options)}
+              <button
+                onClick={() => setFilter(f.key, "")}
+                aria-label={`Remove the ${f.label} filter`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 16,
+                  height: 16,
+                  border: "none",
+                  borderRadius: "50%",
+                  background: "transparent",
+                  color: theme.textMuted,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  lineHeight: 1,
+                  padding: 0,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = theme.text)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = theme.textMuted)}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          {activeFilters.length > 1 && (
+            <button
+              onClick={() => setFilters({})}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                font: "inherit",
+                color: theme.textMid,
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+      )}
+
       {available && (
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
@@ -305,10 +439,25 @@ export default function AutopilotPage() {
               <thead>
                 <tr>
                   <th style={{ ...th, width: 28 }} />
-                  <th style={th}>Campaign</th>
-                  <th style={th}>Brand</th>
-                  <th style={th}>Mode</th>
-                  <th style={th}>State</th>
+                  {/* The funnel sits in the header cell, the way it does on
+                      every other table here — a filter bar above the table
+                      would be a second place to look for the same thing. */}
+                  {FILTERS.map((f) => (
+                    <th key={f.key} style={th}>
+                      <span style={{ display: "inline-flex", alignItems: "center" }}>
+                        {f.label}
+                        <ColumnFilter
+                          theme={theme}
+                          label={f.label}
+                          type={f.type}
+                          options={f.options}
+                          placeholder={f.placeholder}
+                          value={filters[f.key] || ""}
+                          onCommit={(v) => setFilter(f.key, v)}
+                        />
+                      </span>
+                    </th>
+                  ))}
                   <th style={{ ...th, textAlign: "right" }}>Found</th>
                   <th style={{ ...th, textAlign: "right" }}>Contactable</th>
                   <th style={{ ...th, textAlign: "right" }}>Emailed</th>
@@ -325,8 +474,31 @@ export default function AutopilotPage() {
                 {!loading && rows.length === 0 && (
                   <tr>
                     <td style={{ ...td, color: theme.textMuted }} colSpan={13}>
-                      No campaign has an agent yet. One is created when a campaign launches — an
-                      already-live campaign was never enrolled.
+                      {activeFilters.length ? (
+                        <>
+                          No agent matches these filters.{" "}
+                          <button
+                            onClick={() => setFilters({})}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              padding: 0,
+                              font: "inherit",
+                              color: theme.text,
+                              cursor: "pointer",
+                              textDecoration: "underline",
+                            }}
+                          >
+                            Clear them
+                          </button>
+                          .
+                        </>
+                      ) : (
+                        <>
+                          No campaign has an agent yet. One is created when a campaign launches —
+                          an already-live campaign was never enrolled.
+                        </>
+                      )}
                     </td>
                   </tr>
                 )}
@@ -582,6 +754,17 @@ export default function AutopilotPage() {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* The count belongs under the table because the filters are real: with
+          one set, "12" on its own would be the answer to a question nobody
+          asked. */}
+      {available && !loading && rows.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
+          {activeFilters.length
+            ? `${total ?? rows.length} of ${totalAll ?? rows.length} agents match`
+            : `${totalAll ?? rows.length} ${totalAll === 1 ? "agent" : "agents"}`}
+        </div>
       )}
     </div>
   );
