@@ -549,6 +549,27 @@ export function autopilotRoutes() {
       help: "How many searches that agent may run to reach the goal. Each one spends credits.",
     },
     {
+      key: "agent_patience_hours",
+      label: "Wait before checking for replies",
+      kind: "number",
+      placeholder: "48",
+      help: "Hours an agent waits after emailing before it looks at whether anyone replied. A sequence takes days to send, so a short wait is the agent watching an empty inbox.",
+    },
+    {
+      key: "agents_per_tick",
+      label: "Agents thinking per tick",
+      kind: "number",
+      placeholder: "5",
+      help: "Each one can start a search, so this is the ceiling on what the platform spends in a single pass.",
+    },
+    {
+      key: "test_recipients",
+      label: "Test inboxes",
+      kind: "text",
+      placeholder: "luca@linkable.link;federico@linkable.link",
+      help: "Outside production every outreach email goes here instead of to the creator, one address per creator. Semicolon-separated. This can never turn real sending on in production.",
+    },
+    {
       key: "house_sequence",
       label: "Default emails",
       kind: "steps",
