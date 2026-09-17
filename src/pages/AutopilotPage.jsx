@@ -5,6 +5,8 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
 import { ColumnFilter, describeFilter, SortLabel, nextSort } from "../components/table/tableTools";
+import AgentDetail from "../components/autopilot/AgentDetail";
+import { ago, whenNext } from "../lib/relativeTime";
 
 /**
  * Autopilot — the recruiting machine, watched from here.
@@ -32,31 +34,6 @@ const STATUS_COLORS = {
   failed:  { bg: "#FEE2E2", fg: "#991B1B", bgDark: "#3F1313", fgDark: "#FCA5A5" },
   off:     { bg: "#F3F4F6", fg: "#4B5563", bgDark: "#1F2937", fgDark: "#9CA3AF" },
 };
-
-function ago(raw) {
-  if (!raw) return "—";
-  const at = new Date(raw);
-  if (Number.isNaN(at.getTime())) return "—";
-  const mins = Math.floor((Date.now() - at.getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return days === 1 ? "yesterday" : `${days}d ago`;
-}
-
-function whenNext(raw) {
-  if (!raw) return "—";
-  const at = new Date(raw);
-  if (Number.isNaN(at.getTime())) return "—";
-  const mins = Math.round((at.getTime() - Date.now()) / 60000);
-  if (mins <= 0) return "due now";
-  if (mins < 60) return `in ${mins}m`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `in ${hours}h`;
-  return `in ${Math.round(hours / 24)}d`;
-}
 
 // The header, declared once so it cannot drift from the endpoint. `key` must
 // exist in AGENT_SORTS / AGENT_FILTERS in routes/autopilot.js — both sorting
@@ -123,7 +100,6 @@ export default function AutopilotPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState(null);
-  const [detail, setDetail] = useState({ events: [], runs: [], loading: false });
   const [filters, setFilters] = useState({});
   const [sort, setSort] = useState({ sortBy: "", sortDir: "" });
   const [total, setTotal] = useState(null);
@@ -131,7 +107,6 @@ export default function AutopilotPage() {
   // The monthly search limit, per brand and in general. Kept next to the rows
   // rather than on a settings page of its own: the moment anybody wants to
   // change it is the moment they are looking at an agent it has stopped.
-  const [limitDraft, setLimitDraft] = useState({});
   const [savingLimit, setSavingLimit] = useState("");
   const [defaultLimit, setDefaultLimit] = useState(null);
   const [defaultDraft, setDefaultDraft] = useState("");
@@ -179,51 +154,6 @@ export default function AutopilotPage() {
     };
   }, []);
 
-  // Writing a limit is not the same as driving an agent: it sets the number
-  // every guard then runs against. The agent picks it up on its next tick,
-  // which is why a brand parked "until the 1st" comes back within the hour.
-  async function saveLimit(row) {
-    const raw = limitDraft[row.brand_user_id];
-    const searches = Math.floor(Number(raw));
-    if (!Number.isFinite(searches) || searches < 0) return;
-    setSavingLimit(row.brand_user_id);
-    setError("");
-    try {
-      await api.setAutopilotAllowance(row.brand_user_id, { monthly_searches: searches });
-      setRows((all) =>
-        all.map((r) =>
-          r.brand_user_id === row.brand_user_id
-            ? { ...r, search_allowance: searches, allowance_is_override: true }
-            : r,
-        ),
-      );
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSavingLimit("");
-    }
-  }
-
-  async function revertToDefaultLimit(row) {
-    setSavingLimit(row.brand_user_id);
-    setError("");
-    try {
-      await api.clearAutopilotAllowance(row.brand_user_id);
-      setRows((all) =>
-        all.map((r) =>
-          r.brand_user_id === row.brand_user_id
-            ? { ...r, search_allowance: defaultLimit, allowance_is_override: false }
-            : r,
-        ),
-      );
-      setLimitDraft((d) => ({ ...d, [row.brand_user_id]: String(defaultLimit ?? "") }));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSavingLimit("");
-    }
-  }
-
   async function saveDefault() {
     const searches = Math.floor(Number(defaultDraft));
     if (!Number.isFinite(searches) || searches < 0) return;
@@ -264,17 +194,40 @@ export default function AutopilotPage() {
   // Click the active column to flip it, another to switch to it.
   const handleSort = (key, defaultDir) => setSort((s2) => nextSort(s2, key, defaultDir));
 
-  function toggle(productId) {
-    if (openId === productId) {
-      setOpenId(null);
-      return;
-    }
-    setOpenId(productId);
-    setDetail({ events: [], runs: [], loading: true });
-    api
-      .getAutopilotEvents(productId)
-      .then((d) => setDetail({ events: d.events || [], runs: d.runs || [], loading: false }))
-      .catch(() => setDetail({ events: [], runs: [], loading: false }));
+  const toggle = (productId) => setOpenId((open) => (open === productId ? null : productId));
+
+  // The row and the panel are one thing: a mode changed in the panel has to
+  // show in the row behind it, or the table is describing the agent as it was
+  // before the click.
+  function patchAgent(productId, agent) {
+    if (!agent) return;
+    setRows((all) =>
+      all.map((r) =>
+        r.product_id === productId
+          ? {
+              ...r,
+              mode: agent.mode ?? r.mode,
+              status: agent.status ?? r.status,
+              goal_applications: agent.goal_applications ?? r.goal_applications,
+              max_runs: agent.max_runs ?? r.max_runs,
+              next_action_at: agent.next_action_at ?? r.next_action_at,
+              stopped_reason: agent.mode === "off" ? r.stopped_reason : "",
+            }
+          : r,
+      ),
+    );
+  }
+
+  // An allowance belongs to the brand, so every one of its campaigns on this
+  // page changes at once.
+  function patchAllowance(brandUserId, searches, isOverride) {
+    setRows((all) =>
+      all.map((r) =>
+        r.brand_user_id === brandUserId
+          ? { ...r, search_allowance: searches, allowance_is_override: isOverride }
+          : r,
+      ),
+    );
   }
 
   const pill = (value, palette) => {
@@ -617,166 +570,13 @@ export default function AutopilotPage() {
                       {openId === r.product_id && (
                         <tr>
                           <td style={{ ...td, background: theme.bg }} colSpan={13}>
-                            {detail.loading && (
-                              <div style={{ color: theme.textMuted, fontSize: 13 }}>Loading…</div>
-                            )}
-
-                            {!detail.loading && (
-                              <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-                                <div style={{ flex: "1 1 420px", minWidth: 0 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
-                                    What it did
-                                  </div>
-                                  {detail.events.length === 0 && (
-                                    <div style={{ color: theme.textMuted, fontSize: 13 }}>
-                                      Nothing yet.
-                                    </div>
-                                  )}
-                                  {detail.events.map((e, i) => (
-                                    <div
-                                      key={i}
-                                      style={{
-                                        display: "flex",
-                                        gap: 10,
-                                        padding: "6px 0",
-                                        borderBottom:
-                                          i < detail.events.length - 1
-                                            ? `1px solid ${theme.border}`
-                                            : "none",
-                                      }}
-                                    >
-                                      <span
-                                        style={{
-                                          color: theme.textMuted,
-                                          fontSize: 12,
-                                          minWidth: 76,
-                                          whiteSpace: "nowrap",
-                                        }}
-                                      >
-                                        {ago(e.created)}
-                                      </span>
-                                      <span style={{ fontSize: 13 }}>
-                                        {e.summary || e.action}
-                                        {e.detail && (
-                                          <span style={{ color: theme.textMuted }}>
-                                            {" "}
-                                            — {e.detail}
-                                          </span>
-                                        )}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
-                                    The brand's month
-                                  </div>
-                                  <div style={{ fontSize: 13, marginBottom: 6 }}>
-                                    {r.searches_used} of {r.search_allowance ?? "—"} searches used
-                                    {r.search_allowance != null &&
-                                      r.searches_used >= r.search_allowance && (
-                                      <div style={{ color: "#B45309", fontSize: 12, marginTop: 2 }}>
-                                        Spent. Its agent waits for the 1st unless this is raised.
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8 }}>
-                                    Counted across every campaign this brand runs, not this one.
-                                    {r.allowance_is_override
-                                      ? " This brand has a limit of its own."
-                                      : ` Default for every brand${defaultLimit != null ? ` (${defaultLimit})` : ""}.`}
-                                  </div>
-                                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      value={
-                                        limitDraft[r.brand_user_id] ??
-                                        String(r.search_allowance ?? "")
-                                      }
-                                      onChange={(e) =>
-                                        setLimitDraft((d) => ({
-                                          ...d,
-                                          [r.brand_user_id]: e.target.value,
-                                        }))
-                                      }
-                                      onClick={(e) => e.stopPropagation()}
-                                      style={{
-                                        width: 72,
-                                        padding: "6px 8px",
-                                        borderRadius: 6,
-                                        border: `1px solid ${theme.border}`,
-                                        background: theme.surface,
-                                        color: theme.text,
-                                        fontSize: 13,
-                                        fontFamily: "inherit",
-                                      }}
-                                    />
-                                    <Btn
-                                      size="sm"
-                                      loading={savingLimit === r.brand_user_id}
-                                      onClick={() => saveLimit(r)}
-                                    >
-                                      Set limit
-                                    </Btn>
-                                    {r.allowance_is_override && (
-                                      <Btn
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={savingLimit === r.brand_user_id}
-                                        onClick={() => revertToDefaultLimit(r)}
-                                      >
-                                        Use default
-                                      </Btn>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div style={{ flex: "1 1 340px", minWidth: 0 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
-                                    Searches
-                                  </div>
-                                  {detail.runs.length === 0 && (
-                                    <div style={{ color: theme.textMuted, fontSize: 13 }}>
-                                      None yet.
-                                    </div>
-                                  )}
-                                  {detail.runs.map((run) => (
-                                    <div
-                                      key={run.id}
-                                      style={{
-                                        padding: "6px 0",
-                                        borderBottom: `1px solid ${theme.border}`,
-                                        fontSize: 13,
-                                      }}
-                                    >
-                                      <div
-                                        style={{ display: "flex", gap: 8, alignItems: "baseline" }}
-                                      >
-                                        <span style={{ fontWeight: 600 }}>{run.status}</span>
-                                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                                          {ago(run.created)}
-                                        </span>
-                                      </div>
-                                      <div style={{ color: theme.textMuted, fontSize: 12 }}>
-                                        {/* Enriched well under discovered on a run that is
-                                            still going is what a stall looks like — a deploy
-                                            takes the executor with it. */}
-                                        {run.discovered_count} found · {run.enriched_count} checked
-                                        · {run.contactable} contactable ·{" "}
-                                        {Number(run.credits_spent || 0).toFixed(1)} credits
-                                      </div>
-                                      {run.error && (
-                                        <div style={{ color: "#B91C1C", fontSize: 12 }}>
-                                          {run.error}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                            <AgentDetail
+                              row={r}
+                              defaultLimit={defaultLimit}
+                              onAgentChanged={patchAgent}
+                              onAllowanceChanged={patchAllowance}
+                              onError={setError}
+                            />
                           </td>
                         </tr>
                       )}

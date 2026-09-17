@@ -11,10 +11,20 @@ import {
 // applicants, not a view of the machine that finds them. The machine still
 // needs watching, and this is where that happens now.
 //
-// Everything here is READ-ONLY. Starting, stopping and re-planning an agent
-// happen in the main app's own console (it writes through gRPC, which enforces
-// the budget and the send guards); an UPDATE issued straight at the database
-// from here would walk straight past both.
+// What this may write, and what it may not.
+//
+// Writable: the settings the agent READS before it acts — its mode, its goal,
+// its search budget, the brand's monthly allowance, and its clock. Each is a
+// column the agent consults on its next tick, so every guard still runs, on
+// the values set here. The agent-settings write is the same statement gRPC
+// issues (UpdateAgentSettings in repository/postgres/sourcing_agent.go), with
+// the same clamps, so the two cannot disagree.
+//
+// Not writable, ever: anything that spends or sends — starting a search,
+// pushing a list into a sequence, sending a reply. Those go through gRPC,
+// which owns the provider credits and the send guards, and a direct UPDATE
+// would walk straight past both. The line is "what it is allowed to do" vs
+// "do it now, on the brand's money".
 //
 // The counts deliberately mirror SourcingRepository.ProgressForAgent in
 // service-grpc, because those are the numbers the agent itself acts on. If this
@@ -31,6 +41,32 @@ const UNDEFINED_TABLE = "42P01";
 
 function notPromoted(e) {
   return e?.code === UNDEFINED_TABLE;
+}
+
+const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ""));
+
+// A whole number inside bounds, or null for something that was never a number.
+function clamp(raw, min, max) {
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n)) return null;
+  return Math.min(Math.max(n, min), max);
+}
+
+// The agent's own log, written the way service-grpc writes it. An admin's
+// change belongs in the same timeline as the agent's decisions — a mode that
+// changed with no line saying who changed it reads as the agent's own doing.
+async function logAgentEvent(agentId, productId, action, summary, detail) {
+  try {
+    await cloudSqlQuery(
+      `INSERT INTO sourcing_agent_events (sourcing_agent_id, product_id, action, summary, detail)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
+      [agentId, productId, action, summary, detail],
+    );
+  } catch (e) {
+    // The change itself succeeded; failing the request over its footnote
+    // would be worse than the missing line.
+    console.error("[autopilot/log]", e);
+  }
 }
 
 // Per-column filters (filter[col]=value), server-side like every other table
@@ -282,6 +318,103 @@ export function autopilotRoutes() {
     }
   });
 
+  // PUT /api/autopilot/campaigns/:id/agent   { mode, goal_applications, max_runs }
+  //
+  // How far the agent may go. The same UPDATE gRPC issues, clamps included,
+  // because two statements meaning to do the same thing eventually do not: an
+  // agent switched off here must land in exactly the state the brand's own
+  // console would have left it in, or its next tick reads a row nothing wrote.
+  //
+  // This does not make it act. It sets what it is allowed to do; the tick
+  // still checks the campaign, the allowance and the budget before it spends.
+  router.put("/campaigns/:id/agent", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const mode = String(req.body?.mode || "");
+      if (!["off", "assisted", "autonomous"].includes(mode)) {
+        return res.status(400).json({ error: "Mode must be off, assisted or autonomous" });
+      }
+      // Clamped, not rejected — the same ceilings as MaxAgentGoal/MaxAgentRuns
+      // in services/sourcing_agent_service.go.
+      const goal = clamp(req.body?.goal_applications, 1, 500);
+      const maxRuns = clamp(req.body?.max_runs, 1, 10);
+      if (goal === null || maxRuns === null) {
+        return res.status(400).json({ error: "Goal and budget must be whole numbers" });
+      }
+
+      const { rows } = await cloudSqlQuery(
+        `UPDATE sourcing_agents
+            SET mode = $2,
+                goal_applications = $3,
+                max_runs = $4,
+                -- Turning it on, or widening its budget, makes it due again:
+                -- an agent given more rope should get back to work rather than
+                -- sit finished until somebody notices.
+                status = CASE
+                    WHEN $2 = 'off' THEN 'paused'
+                    WHEN status IN ('done', 'paused', 'failed') THEN 'idle'
+                    ELSE status
+                END,
+                next_action_at = CASE WHEN $2 = 'off' THEN NULL ELSE current_timestamp END,
+                stopped_reason = CASE WHEN $2 = 'off' THEN stopped_reason ELSE '' END,
+                updated = current_timestamp
+          WHERE product_id = $1::uuid AND ${ND}
+          RETURNING id, mode, status, goal_applications, max_runs, runs_used, next_action_at`,
+        [req.params.id, mode, goal, maxRuns],
+      );
+      if (!rows.length) return res.status(404).json({ error: "This campaign has no agent" });
+
+      // Into the agent's own log, because that is where anybody looking at
+      // this campaign in a month will be reading — including the brand.
+      await logAgentEvent(rows[0].id, req.params.id, "settings",
+        `An admin set it to ${mode} — goal ${goal}, budget ${maxRuns} ${maxRuns === 1 ? "search" : "searches"}`,
+        req.admin?.email || "");
+      console.log(
+        `[autopilot-agent] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
+        `product=${req.params.id} mode=${mode} goal=${goal} runs=${maxRuns}`,
+      );
+      res.json({ agent: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/agent]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/autopilot/campaigns/:id/wake
+  //
+  // Bring its next tick forward to now. The agent decides for itself what to
+  // do when it wakes — this only stops it sleeping until the date it picked,
+  // which is what you want after raising a limit it is parked on.
+  router.post("/campaigns/:id/wake", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const { rows } = await cloudSqlQuery(
+        `UPDATE sourcing_agents
+            SET next_action_at = current_timestamp, updated = current_timestamp
+          WHERE product_id = $1::uuid AND ${ND} AND mode <> 'off'
+            AND status IN ('idle', 'waiting')
+          RETURNING id, status, next_action_at`,
+        [req.params.id],
+      );
+      // Nothing updated means it is off, or working, or stopped — all states
+      // where "wake up" is either meaningless or somebody else's business.
+      if (!rows.length) {
+        return res.status(409).json({ error: "Only a switched-on agent that is idle or waiting can be woken" });
+      }
+      await logAgentEvent(rows[0].id, req.params.id, "settings",
+        "An admin brought its next check forward to now", req.admin?.email || "");
+      console.log(
+        `[autopilot-wake] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} product=${req.params.id}`,
+      );
+      res.json({ agent: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/wake]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/autopilot/allowances
   // The default, and every brand that has been given a number of its own.
   router.get("/allowances", async (req, res) => {
@@ -381,6 +514,90 @@ export function autopilotRoutes() {
     }
   });
 
+  // GET /api/autopilot/campaigns/:id/creators
+  // What the searches actually turned up — the results, one row per creator,
+  // with the state each one reached. Paged: a single run finds five hundred.
+  router.get("/campaigns/:id/creators", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+      const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+      // The funnel in one dimension: where a creator stopped. Reachable means
+      // an email was found, which is the difference between a name and a lead.
+      const STATES = {
+        applied: "c.applied_at IS NOT NULL",
+        emailed: "c.push_status IN ('pushed', 'invited')",
+        reachable: "c.email <> '' AND c.push_status NOT IN ('pushed', 'invited')",
+        unreachable: "c.email = ''",
+        filtered: "c.status = 'filtered_out'",
+      };
+      const state = STATES[req.query.state] ? STATES[req.query.state] : null;
+      const where = `c.product_id = $1 AND c.${ND}${state ? ` AND ${state}` : ""}`;
+
+      const { rows } = await cloudSqlQuery(
+        `SELECT c.id, c.created, c.instagram_username, c.full_name, c.followers, c.engagement,
+                c.country, c.email <> '' AS reachable, c.status, c.filter_reason,
+                c.push_status, c.pushed_at, c.applied_at, c.decision, c.fit_score, c.fit_verdict,
+                c.dm_status, c.query_label
+           FROM sourcing_candidates c
+          WHERE ${where}
+          ORDER BY c.applied_at DESC NULLS LAST, c.followers DESC NULLS LAST, c.created DESC
+          LIMIT $2 OFFSET $3`,
+        [req.params.id, limit, offset],
+      );
+
+      // The breakdown is of the WHOLE campaign, not the filtered page: it is
+      // the map you choose a state from, so it cannot itself be narrowed.
+      const { rows: counts } = await cloudSqlQuery(
+        `SELECT
+           count(*)::int                                                          AS total,
+           count(*) FILTER (WHERE c.email <> '')::int                             AS reachable,
+           count(*) FILTER (WHERE c.push_status IN ('pushed', 'invited'))::int    AS emailed,
+           count(*) FILTER (WHERE c.applied_at IS NOT NULL)::int                  AS applied,
+           count(*) FILTER (WHERE c.status = 'filtered_out')::int                 AS filtered
+         FROM sourcing_candidates c
+         WHERE c.product_id = $1 AND c.${ND}`,
+        [req.params.id],
+      );
+
+      res.json({ available: true, creators: rows, counts: counts[0] || {} });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, creators: [], counts: {} });
+      console.error("[autopilot/creators]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/autopilot/campaigns/:id/replies
+  // What came back, and whether a person still has to answer it.
+  router.get("/campaigns/:id/replies", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+
+      const { rows } = await cloudSqlQuery(
+        `SELECT r.id, r.created, r.received_at, r.lead_email, r.intent, r.status, r.needs_human,
+                r.escalation_reason, r.channel, r.sent_at, r.error,
+                -- The reply and the answer, trimmed: this is a list to scan,
+                -- and the whole thread lives in the main app.
+                left(r.body, 400)  AS body,
+                left(r.draft, 400) AS draft,
+                c.instagram_username
+           FROM sourcing_replies r
+           LEFT JOIN sourcing_candidates c ON c.id = r.sourcing_candidate_id
+          WHERE r.product_id = $1
+          ORDER BY COALESCE(r.received_at, r.created) DESC
+          LIMIT $2`,
+        [req.params.id, limit],
+      );
+      res.json({ available: true, replies: rows });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, replies: [] });
+      console.error("[autopilot/replies]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/autopilot/campaigns/:id/events
   // What the agent did, in its own words — the log it writes for the brand,
   // which is the same log that explains a stall to us.
@@ -409,6 +626,13 @@ export function autopilotRoutes() {
            r.id, r.created, r.status, r.error,
            r.target_creators, r.discovered_count, r.filtered_count, r.enriched_count,
            r.credits_spent,
+           -- What it went looking for, and why. Without these a run is a row
+           -- of counts and "why did it find forty" has no answer on the page.
+           -- The plan is the model's own searches — a handful of labelled
+           -- queries with a sentence each — so it travels whole rather than
+           -- as columns that would have to be guessed at from its shape.
+           r.plan_rationale,
+           r.plan,
            (SELECT count(*) FROM sourcing_candidates c
              WHERE c.sourcing_run_id = r.id AND c.${ND} AND c.email <> '') AS contactable
          FROM sourcing_runs r

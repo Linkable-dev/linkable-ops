@@ -112,6 +112,20 @@ export const api = {
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>
     request(`/autopilot/campaigns/${id}/events?${buildQs({ limit })}`),
+  // The results: who the searches found, and what came back from them.
+  getAutopilotCreators: (id, { limit = 25, offset = 0, state } = {}) =>
+    request(`/autopilot/campaigns/${id}/creators?${buildQs({ limit, offset, state })}`),
+  getAutopilotReplies: (id, { limit = 25 } = {}) =>
+    request(`/autopilot/campaigns/${id}/replies?${buildQs({ limit })}`),
+  // How far the agent may go, and bringing its next check forward. Neither
+  // makes it act — the tick still checks the campaign, the allowance and the
+  // budget before it spends anything.
+  setAutopilotAgent: (id, { mode, goal_applications, max_runs }) =>
+    request(`/autopilot/campaigns/${id}/agent`, {
+      method: "PUT",
+      body: JSON.stringify({ mode, goal_applications, max_runs }),
+    }),
+  wakeAutopilotAgent: (id) => request(`/autopilot/campaigns/${id}/wake`, { method: "POST" }),
 
   // The monthly search limit, which IS ours to change: it is the number the
   // agent reads before it acts, not an action taken on a brand's behalf.
