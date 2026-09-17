@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
+import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/Skeleton";
 
 /**
