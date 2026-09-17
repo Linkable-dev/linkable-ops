@@ -5,6 +5,7 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import { GenerateModal, UploadModal } from "../components/content/AddContentModals";
+import { Select } from "../components/ui/Select";
 
 /**
  * Campaign content, both kinds.
@@ -306,23 +307,36 @@ export default function ContentPage() {
               );
             })}
           </div>
-          <select style={field} value={brand} onChange={(e) => narrow(setBrand)(e.target.value)}>
-            <option value="">Every brand</option>
-            {filters.brands.map((b) => (
-              <option key={b.id} value={b.id}>{b.label.trim()} ({b.files})</option>
-            ))}
-          </select>
-          <select style={field} value={product} onChange={(e) => narrow(setProduct)(e.target.value)}>
-            <option value="">Every campaign</option>
-            {filters.campaigns.map((c) => (
-              <option key={c.id} value={c.id}>{c.label} ({c.files})</option>
-            ))}
-          </select>
-          <select style={field} value={days} onChange={(e) => narrow(setDays)(Number(e.target.value))}>
-            {AGES.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
+          <div style={{ width: 190 }}>
+            <Select
+              value={brand}
+              onChange={narrow(setBrand)}
+              ariaLabel="Brand"
+              placeholder="Every brand"
+              options={[{ value: "", label: "Every brand" },
+                ...filters.brands.map((b) => ({ value: b.id, label: b.label.trim(), hint: `${b.files} files` }))]}
+              searchPlaceholder="Brand name…"
+            />
+          </div>
+          <div style={{ width: 190 }}>
+            <Select
+              value={product}
+              onChange={narrow(setProduct)}
+              ariaLabel="Campaign"
+              placeholder="Every campaign"
+              options={[{ value: "", label: "Every campaign" },
+                ...filters.campaigns.map((c) => ({ value: c.id, label: c.label, hint: `${c.files} files` }))]}
+              searchPlaceholder="Campaign name…"
+            />
+          </div>
+          <div style={{ width: 150 }}>
+            <Select
+              value={days}
+              onChange={(v) => narrow(setDays)(Number(v))}
+              ariaLabel="How recent"
+              options={AGES.map(([value, label]) => ({ value, label }))}
+            />
+          </div>
         </div>
       </Card>
 
@@ -496,8 +510,8 @@ export default function ContentPage() {
             )}
 
             <div style={{
-              display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
-              justifyContent: "center", color: "#fff",
+              display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
+              justifyContent: "center", color: "#fff", marginTop: 4,
             }}>
               <div style={{ fontSize: 13, textAlign: "center" }}>
                 <div style={{ fontWeight: 600 }}>
@@ -509,14 +523,33 @@ export default function ContentPage() {
                   {size(preview.size_bytes) ? ` · ${size(preview.size_bytes)}` : ""}
                 </div>
               </div>
+              {/* Dressed for the dark ground they sit on. The app's own
+                  variants are drawn for a white page — on this backdrop the
+                  outline ones were dark ink on near-black, which is to say
+                  invisible. */}
               <div style={{ display: "flex", gap: 8 }}>
                 {preview.download_url && (
-                  <Btn size="sm" href={preview.download_url}>Download</Btn>
+                  <Btn
+                    size="sm"
+                    href={preview.download_url}
+                    style={{ background: "#fff", color: "#141414", border: "1.5px solid #fff", boxShadow: "none" }}
+                  >
+                    Download
+                  </Btn>
                 )}
-                <Btn size="sm" variant="outline" href={preview.url} target="_blank">
+                <Btn
+                  size="sm"
+                  href={preview.url}
+                  target="_blank"
+                  style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.6)", boxShadow: "none" }}
+                >
                   Open original
                 </Btn>
-                <Btn size="sm" variant="outline" onClick={() => setPreview(null)}>
+                <Btn
+                  size="sm"
+                  onClick={() => setPreview(null)}
+                  style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.6)", boxShadow: "none" }}
+                >
                   Close
                 </Btn>
               </div>
