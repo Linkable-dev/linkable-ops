@@ -17,7 +17,7 @@ import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { cancelPendingTouches } from "../automation/sequencer.js";
 import { normalizeInboundPayload, extractReplyBody } from "../automation/inbound-parser.js";
 import { attributionSummary, refreshConversions } from "../lib/outbound-attribution.js";
-import { inboxHealth, enforceInboxHealth, THRESHOLDS } from "../lib/deliverability.js";
+import { inboxHealth, THRESHOLDS } from "../lib/deliverability.js";
 
 // Shared scope-window builder. Returns null when scope/run_date imply lifetime.
 // Callers apply the returned .or(...) clause to a Supabase query.

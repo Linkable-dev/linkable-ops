@@ -9,7 +9,6 @@ import { generateObservation, renderTemplate, validateRenderedEmail } from "./pe
 import { sendEmail } from "./send.js";
 import { scrapeBrand } from "./scrape-brand.js";
 import { SEED_DOMAINS } from "../scraper/seeds.js";
-import { isShopifyStore } from "../scraper/shopify.js";
 
 const TEAM_ID = "a0000000-0000-0000-0000-000000000001";
 const MAX_EMAILS = 1000;

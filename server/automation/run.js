@@ -48,6 +48,7 @@ function parseArgs() {
       case "--help":
         printHelp();
         process.exit(0);
+        break;
       default:
         console.error(`Unknown argument: ${args[i]}`);
         printHelp();

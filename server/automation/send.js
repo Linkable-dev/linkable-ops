@@ -67,7 +67,7 @@ function bodyToHtml(text) {
   return `<div style="font-family:-apple-system,system-ui,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.6;">${html}</div>`;
 }
 
-export async function sendEmail({ to, toName, subject, body, from, replyTo, resendApiKey }) {
+export async function sendEmail({ to, subject, body, from, replyTo, resendApiKey }) {
   // Rate limit check
   const limit = checkRateLimit();
   if (!limit.allowed) {

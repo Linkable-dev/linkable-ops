@@ -16,7 +16,7 @@
 // job (the whole point of warmup is conversational signal from real people).
 
 import { supabase } from "../lib/supabase.js";
-import { sendEmail, delaySend } from "./send.js";
+import { sendEmail } from "./send.js";
 import { generateWarmupEmail } from "./warmup-content.js";
 
 // Daily send target per inbox, indexed by days since warming_started_at.

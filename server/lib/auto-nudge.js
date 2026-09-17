@@ -72,7 +72,7 @@ export async function setRule({ kind, auto, minAgeHours, by }) {
 }
 
 // Brands the robot has written to recently, so it does not write again.
-async function recentlyNudged() {
+async function _recentlyNudged() {
   const { rows } = await cloudSqlQuery(`
     SELECT DISTINCT user_id FROM ops_brand_nudges
     WHERE user_id IS NOT NULL AND created >= NOW() - ($1 || ' days')::interval`,

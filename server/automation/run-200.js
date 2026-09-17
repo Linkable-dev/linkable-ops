@@ -231,7 +231,7 @@ async function processBrand(domain, contactData, index) {
         country: contactData?.country,
         brandInfo: brandData?.brandInfo || {},
       }, keys.anthropicApiKey);
-    } catch (e) {
+    } catch {
       observation = `I came across ${brandName} and really liked what you've built — seems like a great fit for creator partnerships.`;
     }
   } else if (template.variant === "D") {
@@ -318,7 +318,7 @@ async function main() {
     console.error("RESEND_API_KEY not set"); process.exit(1);
   }
 
-  const existingDomains = await init();
+  await init();
   let index = 0;
 
   // Phase 1: CRM contacts with domains

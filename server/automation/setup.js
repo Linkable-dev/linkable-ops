@@ -39,7 +39,7 @@ if (dbPassword) {
   try {
     execSync(`psql "${connStr}" -f "${migrationPath}"`, { stdio: "inherit" });
     console.log("\nMigration complete!");
-  } catch (err) {
+  } catch {
     console.error("\nFailed to run migration. Try pasting the SQL into Supabase Dashboard instead.");
     process.exit(1);
   }

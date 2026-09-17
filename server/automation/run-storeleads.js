@@ -345,7 +345,6 @@ async function processBrand(domainData, index) {
   // STRICT: Only send if we KNOW it's a real person (from Apollo/Hunter with name)
   // or the email is clearly first.last@ / first_last@ pattern
   if (!email) { skipped++; console.log(`  SKIP: no email found`); return "skip"; }
-  const localPart = email.split("@")[0].toLowerCase();
 
   // If email came from Apollo or Hunter with a verified first name — trust it
   const fromPersonFinder = (emailSource === "apollo" || emailSource === "hunter") && contactFirstName;

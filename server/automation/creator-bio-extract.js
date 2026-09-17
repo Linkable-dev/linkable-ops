@@ -89,7 +89,7 @@ function extractTitle(html) {
   const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
   if (!m) return null;
   return m[1]
-    .replace(/\s*[\|·•—-]\s*(linktr\.ee|beacons|carrd|bio\.link|lnk\.bio).*$/i, "")
+    .replace(/\s*[|·•—-]\s*(linktr\.ee|beacons|carrd|bio\.link|lnk\.bio).*$/i, "")
     .trim() || null;
 }
 

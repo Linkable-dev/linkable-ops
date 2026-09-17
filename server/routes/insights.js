@@ -332,7 +332,7 @@ export async function loadNudges(target = "prod") {
 // to say what an alert contains: those strings become the prompt and the
 // recipient, so a forged "detail" would be a way to send arbitrary mail from
 // a linkable.link address.
-async function findAlert(key) {
+async function _findAlert(key) {
   const alerts = await buildAlerts();
   return alerts.find((a) => a.key === key) || null;
 }

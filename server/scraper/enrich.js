@@ -73,7 +73,6 @@ export async function findContactEmails(domain) {
   } catch {}
 
   // 3. Try common email patterns
-  const brandName = cleanDomain.split(".")[0];
   const guessedEmails = [
     `hello@${cleanDomain}`, `info@${cleanDomain}`, `contact@${cleanDomain}`,
     `hi@${cleanDomain}`, `marketing@${cleanDomain}`, `press@${cleanDomain}`,

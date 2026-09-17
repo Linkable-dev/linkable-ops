@@ -373,7 +373,7 @@ export function analyticsRoutes() {
             (SELECT COUNT(DISTINCT link_id) FROM orders WHERE deleted = '-infinity'::timestamptz) AS links_with_orders,
             -- Money that actually left the account: pending, failed and reversed payouts excluded.
             -- amount_value is text, so only numeric-looking rows are summed.
-            (SELECT COALESCE(SUM(CASE WHEN amount_value ~ '^[0-9]+(\.[0-9]+)?$' THEN amount_value::numeric ELSE 0 END), 0)
+            (SELECT COALESCE(SUM(CASE WHEN amount_value ~ '^[0-9]+(\\.[0-9]+)?$' THEN amount_value::numeric ELSE 0 END), 0)
                FROM payouts WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
                 AND LOWER(status) IN ('paid', 'succeeded', 'completed')) AS paid_out,
             (SELECT COUNT(*) FROM payouts WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
