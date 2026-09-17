@@ -16,7 +16,7 @@ export function Btn({ children, onClick, disabled, loading, color, variant = "so
     <button onClick={onClick} disabled={isDisabled} type={type} title={title} className={`lk-btn lk-btn-${variant}`} style={{
       padding: pad, borderRadius: 999, fontFamily: "inherit", fontSize: fs, fontWeight: 600, letterSpacing: -0.1,
       cursor: isDisabled ? "not-allowed" : "pointer", transition: "all 0.15s",
-      display: "inline-flex", alignItems: "center", gap: 6,
+      display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0,
       border: variant === "outline" ? `1.5px solid ${isDisabled ? theme.border : c}` : variant === "secondary" ? `1px solid ${theme.border}` : "none",
       background: variant === "outline" ? "transparent" : variant === "secondary" ? theme.surface : (isDisabled ? theme.surfaceAlt : c),
       color: fg,

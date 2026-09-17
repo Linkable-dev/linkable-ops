@@ -24,20 +24,34 @@ function loadStoredWidths(tableId) {
   }
 }
 
+const EMPTY_KEYS = [];
+
+function applyFixed(widths, defaultWidths, fixedKeys) {
+  if (!fixedKeys.length) return widths;
+  const out = { ...widths };
+  for (const key of fixedKeys) out[key] = defaultWidths[key];
+  return out;
+}
+
 // Column widths in px, initialized from defaults overridden by whatever the
 // user dragged last time. `startResize` is a mousedown handler for a header
 // drag handle; double-clicking a handle resets that column to its default.
-export function useColumnWidths(tableId, defaultWidths) {
-  const [widths, setWidths] = useState(() => ({
-    ...defaultWidths,
-    ...loadStoredWidths(tableId),
-  }));
+// `fixedKeys` names columns the user can't drag (no handle): their stored width
+// is ignored, so changing such a default in code takes effect even for someone
+// whose localStorage still holds a snapshot taken with the old one.
+export function useColumnWidths(tableId, defaultWidths, fixedKeys = EMPTY_KEYS) {
+  const seed = useCallback(
+    () => applyFixed({ ...defaultWidths, ...loadStoredWidths(tableId) }, defaultWidths, fixedKeys),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tableId, fixedKeys],
+  );
+  const [widths, setWidths] = useState(seed);
   const dragRef = useRef(null);
 
   // Switching tabs re-mounts with a different tableId (e.g. brands↔creators
   // share the page) — re-seed from that table's stored widths.
   useEffect(() => {
-    setWidths({ ...defaultWidths, ...loadStoredWidths(tableId) });
+    setWidths(seed());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId]);
 

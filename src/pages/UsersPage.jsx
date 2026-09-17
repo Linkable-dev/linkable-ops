@@ -33,6 +33,12 @@ const SKELETON_KIND = {
   user_deleted: "text", purge: "pill", subscription: "pill", actions: "actions",
 };
 
+// Two pill buttons side by side, sized for the widest pair the column ever
+// holds — "Ruled out" + "View ↗", either one wearing a loading spinner.
+// Too narrow and the labels wrap mid-phrase ("Rule / out"), so this is fixed
+// rather than resizable.
+const ACTIONS_WIDTH = 180;
+
 const BRAND_COLUMNS = [
   { key: "avatar",          label: "",             width: 44,  resizable: false },
   { key: "store_name",      label: "Store",        width: 160, fill: true, sortable: true, defaultDir: "asc",
@@ -53,7 +59,7 @@ const BRAND_COLUMNS = [
       { value: "offered",  label: "Trial offered" },
       { value: "no_plan",  label: "No plan" },
     ] } },
-  { key: "actions",         label: "",             width: 165 },
+  { key: "actions",         label: "",             width: ACTIONS_WIDTH, resizable: false },
 ];
 
 // Soft-deleted brands awaiting the nightly purge. No sort/filter (the endpoint
@@ -65,7 +71,7 @@ const DELETED_COLUMNS = [
   { key: "owner_name",   label: "Owner",    width: 120 },
   { key: "user_deleted", label: "Deleted",  width: 100 },
   { key: "purge",        label: "Purge in", width: 140 },
-  { key: "actions",      label: "",         width: 120 },
+  { key: "actions",      label: "",         width: 120, resizable: false },
 ];
 
 const CREATOR_COLUMNS = [
@@ -80,7 +86,7 @@ const CREATOR_COLUMNS = [
     filter: { type: "number" } },
   { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
     filter: { type: "date" } },
-  { key: "actions",                   label: "",             width: 95 },
+  { key: "actions",                   label: "",             width: ACTIONS_WIDTH, resizable: false },
 ];
 
 function avatarFor(row, kind) {
@@ -131,10 +137,11 @@ export default function UsersPage() {
   // "deleted" is a list of brands, but labelled distinctly in empty/footer copy.
   const tabLabel = tab === "deleted" ? "deleted brands" : tab;
   const showFilterRow = columns.some((c) => c.filter);
-  const { widths, startResize, resetWidth } = useColumnWidths(`admin-${tab}`, useMemo(
-    () => Object.fromEntries(columns.map((c) => [c.key, c.width])),
-    [columns],
-  ));
+  const { widths, startResize, resetWidth } = useColumnWidths(
+    `admin-${tab}`,
+    useMemo(() => Object.fromEntries(columns.map((c) => [c.key, c.width])), [columns]),
+    useMemo(() => columns.filter((c) => c.resizable === false).map((c) => c.key), [columns]),
+  );
   const template = gridTemplate(columns, widths);
   // Grid rows are plain divs, so horizontal overflow needs an explicit
   // min-width on a shared scroll body: sum of column widths + gaps + padding.
