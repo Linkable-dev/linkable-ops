@@ -140,9 +140,12 @@ export default function AutopilotPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>Autopilot</h1>
+      {/* "Recruiting", to match the nav — Autopilot is named in the line
+          underneath, because that is what the agent is called everywhere it
+          actually runs. */}
+      <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>Recruiting</h1>
       <p style={{ color: theme.textMuted, fontSize: 13, margin: "0 0 20px" }}>
-        Recruiting runs in the backend and brands never see it. This is where it is watched: what
+        Autopilot runs in the backend and brands never see it. This is where it is watched: what
         each campaign's agent is doing, what it found, and what came back.
       </p>
 

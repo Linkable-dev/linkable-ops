@@ -6,10 +6,14 @@ import { api, friendlyName } from "../lib/api";
 
 // Cmd/Ctrl+K palette: pages and tables locally, brands / creators / campaigns
 // from the server. Header's search button dispatches "lk-open-palette".
+// Every page the sidebar offers, under the name the sidebar gives it — a
+// palette that calls something else what the nav calls "Recruiting" is a
+// second vocabulary to learn.
 const PAGES = [
-  ["Home", "/"], ["Alerts", "/alerts"], ["Ask the data", "/ask"], ["Blog", "/blog"], ["Campaigns", "/ops/campaigns"],
-  ["Impersonation", "/users"], ["Trials", "/trials"], ["Inbox", "/ai/inbox"], ["Outbound", "/ai/agents"],
-  ["Dashboard", "/dashboard"], ["Team", "/team"],
+  ["Home", "/"], ["Alerts", "/alerts"], ["Brand health", "/health"], ["Campaigns", "/ops/campaigns"],
+  ["Recruiting", "/ops/autopilot"], ["Trials", "/trials"], ["Impersonation", "/users"],
+  ["Outbound", "/ai/agents"], ["Replies", "/ai/inbox"], ["Blog", "/blog"],
+  ["Dashboard", "/dashboard"], ["Ask the data", "/ask"], ["Team", "/team"],
 ];
 let tablesCache = null;
 

@@ -11,13 +11,15 @@ function getPageInfo(pathname) {
   if (pathname === "/alerts") return { title: "Alerts", subtitle: "Brands that need a nudge" };
   if (pathname === "/ask") return { title: "Ask the data", subtitle: "Questions answered with a read-only query" };
   if (pathname === "/dashboard") return { title: "Dashboard", subtitle: "Database overview and analytics" };
+  if (pathname.startsWith("/health")) return { title: "Brand health", subtitle: "One score per brand, and who is sliding" };
   if (pathname.startsWith("/ops/campaigns")) return { title: "Campaigns", subtitle: "Campaign operations" };
+  if (pathname.startsWith("/ops/autopilot")) return { title: "Recruiting", subtitle: "Autopilot, the creator recruiting machine — read-only" };
   if (pathname.startsWith("/users")) return { title: "Impersonation", subtitle: "Open the main app as a brand or creator" };
   if (pathname.startsWith("/trials")) return { title: "Trials", subtitle: "Trial grants and subscription health" };
   if (pathname.startsWith("/team")) return { title: "Team", subtitle: "Admins of this panel" };
   if (pathname.startsWith("/ai/campaigns/")) return { title: "Outbound", subtitle: "Campaign detail" };
   if (pathname.startsWith("/ai/agents")) return { title: "Outbound", subtitle: "Agents with a goal and a budget" };
-  if (pathname.startsWith("/ai/inbox")) return { title: "Inbox", subtitle: "Replies that need a human" };
+  if (pathname.startsWith("/ai/inbox")) return { title: "Replies", subtitle: "Replies that need a human" };
   if (pathname === "/blog") return { title: "Blog", subtitle: "Articles published on linkable.link" };
   if (pathname === "/blog/new") return { title: "Blog", subtitle: "New article" };
   if (pathname.startsWith("/blog/")) return { title: "Blog", subtitle: "Edit article" };

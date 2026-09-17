@@ -9,26 +9,112 @@ import logoWhite from "../../assets/logo-white.svg";
 import iconDark from "../../assets/icon-dark.svg";
 import iconWhite from "../../assets/icon-white.svg";
 
-const homeIcon = (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5z" />
+// Icons, all in one place and all the same family: 24-grid, stroked, no fills.
+//
+// One meaning per icon, which is the rule that was being broken: the paper
+// plane was on both "Campaigns" and "Outbound", and the speech bubble was on
+// "Ask the data", on "Autopilot" and on the GTM header — three things that
+// have nothing to do with each other and one of which sends no messages at
+// all. An icon that appears twice stops being a signal, and in the collapsed
+// sidebar it is the ONLY signal.
+const icon = (paths, width = 16) => (
+  <svg width={width} height={width} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    {paths}
   </svg>
 );
 
-const dashboardIcon = (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="7" height="7" rx="1" />
-    <rect x="14" y="3" width="7" height="7" rx="1" />
-    <rect x="3" y="14" width="7" height="7" rx="1" />
-    <rect x="14" y="14" width="7" height="7" rx="1" />
-  </svg>
-);
+const homeIcon = icon(<path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5z" />, 18);
 
-const tableIcon = (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18" />
-  </svg>
-);
+// --- Marketplace ---------------------------------------------------------
+// A shopping bag for the section: this is the product brands and creators are
+// inside, as opposed to how they got here.
+const marketIcon = icon(<>
+  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+  <path d="M3 6h18" />
+  <path d="M16 10a4 4 0 0 1-8 0" />
+</>);
+const alertsIcon = icon(<>
+  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+</>);
+const healthIcon = icon(<path d="M3 12h4l2.5-6 4 12L16 12h5" />);
+// A megaphone, not a paper plane: a campaign is a brand promoting something,
+// and nothing on this page sends anything.
+const campaignsIcon = icon(<>
+  <path d="M3 11l18-5v12L3 14v-3z" />
+  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+</>);
+// Recruiting is people arriving one at a time — a person with a plus, not the
+// speech bubble it used to wear.
+const recruitingIcon = icon(<>
+  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+  <circle cx="9" cy="7" r="4" />
+  <path d="M19 8v6M22 11h-6" />
+</>);
+const trialsIcon = icon(<>
+  <polyline points="20 12 20 22 4 22 4 12" />
+  <rect x="2" y="7" width="20" height="5" />
+  <line x1="12" y1="22" x2="12" y2="7" />
+  <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+  <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+</>);
+const usersIcon = icon(<>
+  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+  <circle cx="9" cy="7" r="4" />
+  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+</>);
+
+// --- GTM -----------------------------------------------------------------
+// A rising line for the section, because what these three have in common is
+// growth, not messaging. The plane now belongs to Outbound alone.
+const gtmIcon = icon(<>
+  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+  <polyline points="17 6 23 6 23 12" />
+</>);
+const sendIcon = icon(<path d="M3 11l18-8-5 18-4-7-9-3z" />);
+const inboxIcon = icon(<>
+  <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+  <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+</>);
+const blogIcon = icon(<>
+  <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+  <polyline points="14 3 14 9 20 9" />
+  <path d="M8 13h8M8 17h5" />
+</>);
+
+// --- Data ----------------------------------------------------------------
+// A database cylinder for the section that IS the database. The stacked
+// layers it used to wear said "assets" more than "rows".
+const dataIcon = icon(<>
+  <ellipse cx="12" cy="5" rx="9" ry="3" />
+  <path d="M21 5v14c0 1.66-4 3-9 3s-9-1.34-9-3V5" />
+  <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+</>);
+const dashboardIcon = icon(<>
+  <rect x="3" y="3" width="7" height="7" rx="1" />
+  <rect x="14" y="3" width="7" height="7" rx="1" />
+  <rect x="3" y="14" width="7" height="7" rx="1" />
+  <rect x="14" y="14" width="7" height="7" rx="1" />
+</>, 18);
+const askIcon = icon(<>
+  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4" />
+  <line x1="12" y1="17" x2="12" y2="17" />
+</>);
+const tableIcon = icon(<path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18" />, 18);
+
+/** A section's open/closed state, remembered per section in localStorage. */
+function useRememberedSection(key, initiallyOpen) {
+  const [open, setOpen] = useState(() => {
+    const saved = localStorage.getItem(`sidebar:${key}`);
+    return saved === null ? initiallyOpen : saved === "1";
+  });
+  useEffect(() => {
+    localStorage.setItem(`sidebar:${key}`, open ? "1" : "0");
+  }, [key, open]);
+  return [open, setOpen];
+}
 
 export default function Sidebar() {
   const location = useLocation();
@@ -42,30 +128,11 @@ export default function Sidebar() {
   const icon = mode === "dark" ? iconWhite : iconDark;
   const W = sidebarOpen ? 240 : 64;
 
-  // Database section is collapsed unless the user opened it before.
-  const [cmsOpen, setCmsOpen] = useState(() => {
-    const saved = localStorage.getItem("sidebar:cmsOpen");
-    return saved === null ? false : saved === "1";
-  });
-  useEffect(() => {
-    localStorage.setItem("sidebar:cmsOpen", cmsOpen ? "1" : "0");
-  }, [cmsOpen]);
-
-  const [opsOpen, setOpsOpen] = useState(() => {
-    const saved = localStorage.getItem("sidebar:opsOpen");
-    return saved === null ? true : saved === "1";
-  });
-  useEffect(() => {
-    localStorage.setItem("sidebar:opsOpen", opsOpen ? "1" : "0");
-  }, [opsOpen]);
-
-  const [aiOpen, setAiOpen] = useState(() => {
-    const saved = localStorage.getItem("sidebar:aiOpen");
-    return saved === null ? true : saved === "1";
-  });
-  useEffect(() => {
-    localStorage.setItem("sidebar:aiOpen", aiOpen ? "1" : "0");
-  }, [aiOpen]);
+  // Three sections, each remembering whether it was left open. Data starts
+  // closed: it is the longest list and the one you go to on purpose.
+  const [marketOpen, setMarketOpen] = useRememberedSection("marketplaceOpen", true);
+  const [gtmOpen, setGtmOpen] = useRememberedSection("gtmOpen", true);
+  const [dataOpen, setDataOpen] = useRememberedSection("dataOpen", false);
 
   useEffect(() => {
     api.getTables()
@@ -123,83 +190,6 @@ export default function Sidebar() {
     </div>
   );
 
-  const blogIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 4h16v16H4z"/>
-      <path d="M8 9h8M8 13h8M8 17h5"/>
-    </svg>
-  );
-
-  const cmsIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-      <path d="M2 17l10 5 10-5"/>
-      <path d="M2 12l10 5 10-5"/>
-    </svg>
-  );
-
-  const opsIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-    </svg>
-  );
-
-  const campaignsIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 11l18-8-5 18-4-7-9-3z"/>
-    </svg>
-  );
-
-  const aiIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-    </svg>
-  );
-
-  const inboxIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 12h-6l-2 3h-4l-2-3H2"/>
-      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
-    </svg>
-  );
-
-  const usersIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-      <circle cx="9" cy="7" r="4"/>
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-    </svg>
-  );
-
-  const alertsIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-    </svg>
-  );
-  const askIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4" />
-      <line x1="12" y1="17" x2="12" y2="17" />
-    </svg>
-  );
-  const healthIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 12h4l2.5-6 4 12L16 12h5" />
-    </svg>
-  );
-  const trialsIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 12 20 22 4 22 4 12" />
-      <rect x="2" y="7" width="20" height="5" />
-      <line x1="12" y1="22" x2="12" y2="7" />
-      <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-      <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-    </svg>
-  );
-
   return (
     <aside style={{
       position: "fixed", top: 0, left: 0, width: W, height: "100vh",
@@ -240,10 +230,12 @@ export default function Sidebar() {
         <div style={{ paddingTop: 8 }}>
           {navItem("/", "Home", path === "/", homeIcon)}
         </div>
+        {/* Marketplace — the product itself: who is in it, what they are
+            running, and whether it is going well. */}
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("Operations", opsIcon, opsOpen, () => setOpsOpen(!opsOpen))}
+          {moduleHeader("Marketplace", marketIcon, marketOpen, () => setMarketOpen(!marketOpen))}
         </div>
-        {(opsOpen || !sidebarOpen) && (
+        {(marketOpen || !sidebarOpen) && (
           <div style={{
             display: "flex", flexDirection: "column", gap: 1,
             marginLeft: sidebarOpen ? 14 : 0,
@@ -251,20 +243,24 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
+            {/* Ordered the way an operator's morning goes: what needs
+                attention, then the machine, then the account actions. */}
             {navItem("/alerts", "Alerts", path.startsWith("/alerts"), alertsIcon)}
             {navItem("/health", "Brand health", path.startsWith("/health"), healthIcon)}
-            {navItem("/ask", "Ask the data", path.startsWith("/ask"), askIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
-            {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), aiIcon)}
-            {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
+            {/* "Autopilot" named three different things across this panel and
+                the brand app. Here it is one of them: creator recruiting. */}
+            {navItem("/ops/autopilot", "Recruiting", path.startsWith("/ops/autopilot"), recruitingIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
+            {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
           </div>
         )}
 
+        {/* GTM — how brands and creators arrive in the first place. */}
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("GTM", aiIcon, aiOpen, () => setAiOpen(!aiOpen))}
+          {moduleHeader("GTM", gtmIcon, gtmOpen, () => setGtmOpen(!gtmOpen))}
         </div>
-        {(aiOpen || !sidebarOpen) && (
+        {(gtmOpen || !sidebarOpen) && (
           <div style={{
             display: "flex", flexDirection: "column", gap: 1,
             marginLeft: sidebarOpen ? 14 : 0,
@@ -272,16 +268,19 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), campaignsIcon)}
+            {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), sendIcon)}
             {navItem("/ai/inbox", "Replies", path.startsWith("/ai/inbox"), inboxIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
           </div>
         )}
 
+        {/* Data — the rows underneath all of it, and the two ways of reading
+            them. "Ask the data" moved here from Operations: it is a query
+            over these tables, not something an operator does to a brand. */}
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("Database", cmsIcon, cmsOpen, () => setCmsOpen(!cmsOpen))}
+          {moduleHeader("Data", dataIcon, dataOpen, () => setDataOpen(!dataOpen))}
         </div>
-        {(cmsOpen || !sidebarOpen) && (
+        {(dataOpen || !sidebarOpen) && (
           <div style={{
             display: "flex", flexDirection: "column", gap: 1,
             marginLeft: sidebarOpen ? 14 : 0,
@@ -290,6 +289,7 @@ export default function Sidebar() {
             marginTop: 4,
           }}>
             {navItem("/dashboard", "Dashboard", path === "/dashboard", dashboardIcon)}
+            {navItem("/ask", "Ask the data", path.startsWith("/ask"), askIcon)}
             {subHeader("Tables")}
             {loading ? (
               <SkeletonNavItems count={8} indent showLabel={sidebarOpen} />
