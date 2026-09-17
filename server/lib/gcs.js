@@ -95,6 +95,29 @@ export async function signedGsUrl(gsPath, expiresInSeconds = 3600, disposition) 
   }
 }
 
+// A short-lived URL the browser PUTs one file straight to.
+//
+// The bytes never pass through this server, which matters twice: a serverless
+// function has a request-body ceiling far below a creator's video, and the
+// signature pins the object path AND the content type, so whoever holds the
+// URL can write that one object as that one type and nothing else.
+//
+// Mirrors SignedUploadURL in service-grpc/utils/utils_storage.go, including
+// the half hour: long enough to upload a large video on a bad connection,
+// short enough that a leaked URL is not a standing grant.
+export async function signedUploadUrl(blobName, contentType, target, expiresInSeconds = 1800) {
+  if (!blobName) return null;
+  const b = getBucket(target);
+  if (!b) return null;
+  const [url] = await b.file(blobName).getSignedUrl({
+    action: "write",
+    contentType: contentType || "application/octet-stream",
+    expires: Date.now() + expiresInSeconds * 1000,
+    version: "v4",
+  });
+  return url;
+}
+
 // Sign many in parallel. Returns the same array length, with nulls for failures.
 export async function signedUrls(blobNames, expiresInSeconds = 3600, target) {
   // Resolved once, here: signing happens inside a Promise.all, and the async

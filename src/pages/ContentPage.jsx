@@ -4,6 +4,7 @@ import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
+import { GenerateModal, UploadModal } from "../components/content/AddContentModals";
 
 /**
  * Campaign content, both kinds.
@@ -98,6 +99,9 @@ export default function ContentPage() {
   // The file being looked at properly. A 220px tile is a contact sheet; the
   // question "is this any good" needs the actual picture.
   const [preview, setPreview] = useState(null);
+  // Mounted only while open, so each one opens clean rather than remembering
+  // the last campaign somebody picked.
+  const [adding, setAdding] = useState("");
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
   const [days, setDays] = useState(0);
@@ -181,7 +185,7 @@ export default function ContentPage() {
         )}
       </p>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, alignItems: "center" }}>
         {TABS.map(([key, label]) => {
           const on = tab === key;
           return (
@@ -199,7 +203,31 @@ export default function ContentPage() {
             </button>
           );
         })}
+        <div style={{ marginLeft: "auto" }}>
+          {tab === "delivered" ? (
+            <Btn size="sm" variant="outline" onClick={() => setAdding("upload")}>
+              Upload a file
+            </Btn>
+          ) : (
+            <Btn size="sm" variant="outline" onClick={() => setAdding("generate")}>
+              Generate
+            </Btn>
+          )}
+        </div>
       </div>
+
+      {adding === "upload" && (
+        <UploadModal
+          onClose={() => setAdding("")}
+          onUploaded={() => { setOffset(0); fetchPage(); }}
+        />
+      )}
+      {adding === "generate" && (
+        <GenerateModal
+          onClose={() => setAdding("")}
+          onQueued={() => { setOffset(0); fetchPage(); }}
+        />
+      )}
 
       {/* How generation is going, over everything — the half a grid cannot
           show. Only on the tab it describes. */}

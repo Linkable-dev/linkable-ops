@@ -148,6 +148,22 @@ export const api = {
   getGeneratedContent: ({ q, days, brand, product, limit = 24, offset = 0 } = {}) =>
     request(`/content/generated?${buildQs({ q, days, brand, product, limit, offset })}`),
 
+  // Putting content in, on a brand's behalf. The upload is two steps because
+  // the bytes go straight to storage — this server never sees them.
+  getContentLinks: ({ product, q } = {}) => request(`/content/links?${buildQs({ product, q })}`),
+  getContentUploadUrl: ({ link_id, file_name, content_type }) =>
+    request("/content/upload-url", {
+      method: "POST",
+      body: JSON.stringify({ link_id, file_name, content_type }),
+    }),
+  recordContentUpload: ({ link_id, file_name, size_bytes }) =>
+    request("/content/record", {
+      method: "POST",
+      body: JSON.stringify({ link_id, file_name, size_bytes }),
+    }),
+  generateContent: (body) =>
+    request("/content/generate", { method: "POST", body: JSON.stringify(body) }),
+
   // The monthly search limit, which IS ours to change: it is the number the
   // agent reads before it acts, not an action taken on a brand's behalf.
   // `scope` is "default" or a brand's user id.
