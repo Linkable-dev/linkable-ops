@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Select } from "../../components/ui/Select";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
@@ -211,7 +212,6 @@ function NewArticleModal({ open, onClose, onManual, onDone, onStarted }) {
     finally { setRunning(false); }
   };
 
-  const sel = { width: "100%", boxSizing: "border-box", background: t.bg, border: `1.5px solid ${t.border}`, borderRadius: 8, color: t.text, fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none" };
   const option = (title, desc, onClick) => (
     <button onClick={onClick} style={{ flex: 1, textAlign: "left", padding: 18, borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.bg, cursor: "pointer", fontFamily: "inherit", color: t.text }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{title}</div>
@@ -238,10 +238,15 @@ function NewArticleModal({ open, onClose, onManual, onDone, onStarted }) {
               <Label>Topic from the backlog ({queued.length} queued)</Label>
               <button onClick={() => setStep("topics")} style={{ background: "none", border: "none", color: t.textMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline", padding: 0 }}>Manage backlog</button>
             </div>
-            <select style={sel} value={topicId} onChange={(e) => setTopicId(e.target.value)}>
-              <option value="">Custom keyword (below)</option>
-              {queued.map((x) => <option key={x.id} value={x.id}>{x.keyword}{x.category ? ` · ${x.category}` : ""}</option>)}
-            </select>
+            <Select
+              value={topicId}
+              onChange={setTopicId}
+              ariaLabel="Topic from the backlog"
+              placeholder="Custom keyword (below)"
+              options={[{ value: "", label: "Custom keyword (below)" },
+                ...queued.map((x) => ({ value: x.id, label: x.keyword, hint: x.category }))]}
+              searchPlaceholder="A keyword…"
+            />
           </div>
           {!topicId && (
             <>

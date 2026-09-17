@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { Select } from "../../components/ui/Select";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api } from "../../lib/api";
@@ -93,7 +94,6 @@ export default function BlogEditorPage() {
     setPost((p) => ({ ...p, hero_image: { ...hero, thumb }, hero_image_alt: ph.alt || p.hero_image_alt }));
   };
 
-  const sel = { width: "100%", boxSizing: "border-box", background: t.bg, border: `1.5px solid ${t.border}`, borderRadius: 8, color: t.text, fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none" };
   const hint = (ok, text) => <span style={{ fontSize: 11, color: ok ? t.textMuted : "#B45309", marginLeft: 8, fontWeight: 400 }}>{text}</span>;
 
   if (loading) return (
@@ -189,9 +189,9 @@ export default function BlogEditorPage() {
           <Col><Label>Excerpt (blog card and under the title)</Label><Input multiline rows={2} value={post.excerpt} onChange={set("excerpt")} disabled={readOnly} /></Col>
         </Row>
         <Row>
-          <Col><Label>Category</Label><select style={sel} value={post.category} onChange={set("category")} disabled={readOnly}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></Col>
+          <Col><Label>Category</Label><Select value={post.category} onChange={(v) => set("category")({ target: { value: v } })} disabled={readOnly} ariaLabel="Category" options={CATEGORIES} /></Col>
           <Col><Label>Author</Label><Input value={post.author_name} onChange={set("author_name")} disabled={readOnly} /></Col>
-          <Col><Label>Status</Label><select style={sel} value={post.status} onChange={set("status")} disabled={readOnly}><option value="draft">draft</option><option value="published">published</option><option value="archived">archived</option></select></Col>
+          <Col><Label>Status</Label><Select value={post.status} onChange={(v) => set("status")({ target: { value: v } })} disabled={readOnly} ariaLabel="Status" options={["draft", "published", "archived"]} /></Col>
           <Col><Label>Publish date</Label><Input type="date" value={post.published_at} onChange={set("published_at")} disabled={readOnly} /></Col>
         </Row>
       </Card>

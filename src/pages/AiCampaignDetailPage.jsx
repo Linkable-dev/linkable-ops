@@ -7,6 +7,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
+import { Select } from "../components/ui/Select";
 import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonStat, SkeletonStatGrid, SkeletonTableRows, SkeletonPills, SkeletonKeyValue } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
@@ -582,19 +583,20 @@ function SendsTab({ campaign, theme }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>
             Metrics · {sendRunLabel(runSel)}
           </div>
-          <select
-            value={runSel}
-            onChange={(e) => setRunSel(e.target.value)}
-            style={sendSelectStyle(theme)}
-            title="Filter by daily run. Days are counted in UTC, which can differ from the campaign's own sending timezone around midnight."
-          >
-            <option value="today">Today (UTC)</option>
-            <option value="all">All runs (aggregated)</option>
-            {runs.length > 0 && <option disabled>──────────</option>}
-            {runs.map((r) => (
-              <option key={r.date} value={r.date}>{r.date} · {r.count} enrolled</option>
-            ))}
-          </select>
+          <div style={{ width: 230 }} title="Filter by daily run. Days are counted in UTC, which can differ from the campaign's own sending timezone around midnight.">
+            <Select
+              size="sm"
+              value={runSel}
+              onChange={setRunSel}
+              ariaLabel="Which run"
+              options={[
+                { value: "today", label: "Today (UTC)" },
+                { value: "all", label: "All runs (aggregated)" },
+                ...runs.map((r) => ({ value: r.date, label: r.date, hint: `${r.count} enrolled` })),
+              ]}
+              searchPlaceholder="A date…"
+            />
+          </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
           {!stats ? (
@@ -630,12 +632,15 @@ function SendsTab({ campaign, theme }) {
           }}
         />
         <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <select value={stopReason} onChange={(e) => setStopReason(e.target.value)} style={sendSelectStyle(theme)}>
-            <option value="replied">replied</option>
-            <option value="opted_out">opted_out</option>
-            <option value="bounced">bounced</option>
-            <option value="manual">manual</option>
-          </select>
+          <div style={{ width: 150 }}>
+            <Select
+              size="sm"
+              value={stopReason}
+              onChange={setStopReason}
+              ariaLabel="Why they are being stopped"
+              options={["replied", "opted_out", "bounced", "manual"]}
+            />
+          </div>
           <Btn onClick={() => runStop(stopEmails, stopReason)} loading={stopBusy} disabled={stopEmails.length === 0}>
             {`Stop ${stopEmails.length} address${stopEmails.length === 1 ? "" : "es"}`}
           </Btn>
@@ -652,15 +657,39 @@ function SendsTab({ campaign, theme }) {
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <select value={group} onChange={(e) => setGroup(e.target.value)} style={sendSelectStyle(theme)}>
-          {["all", ...groupsFor(campaign)].map((g) => <option key={g} value={g}>{g === "all" ? "Any group" : g}</option>)}
-        </select>
-        <select value={touch} onChange={(e) => setTouch(e.target.value)} style={sendSelectStyle(theme)}>
-          {SEND_TOUCH_FILTERS.map((t) => <option key={t} value={t}>{t === "all" ? "Any touch" : `T+${TOUCH_OFFSET[t]}`}</option>)}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={sendSelectStyle(theme)}>
-          {SEND_STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "all" ? "Any status" : s}</option>)}
-        </select>
+        <div style={{ width: 150 }}>
+          <Select
+            size="sm"
+            value={group}
+            onChange={setGroup}
+            ariaLabel="Group"
+            options={["all", ...groupsFor(campaign)].map((g) => ({
+              value: g, label: g === "all" ? "Any group" : g,
+            }))}
+          />
+        </div>
+        <div style={{ width: 140 }}>
+          <Select
+            size="sm"
+            value={touch}
+            onChange={setTouch}
+            ariaLabel="Touch"
+            options={SEND_TOUCH_FILTERS.map((t) => ({
+              value: t, label: t === "all" ? "Any touch" : `T+${TOUCH_OFFSET[t]}`,
+            }))}
+          />
+        </div>
+        <div style={{ width: 150 }}>
+          <Select
+            size="sm"
+            value={status}
+            onChange={setStatus}
+            ariaLabel="Status"
+            options={SEND_STATUS_FILTERS.map((st) => ({
+              value: st, label: st === "all" ? "Any status" : st,
+            }))}
+          />
+        </div>
         <input
           type="search"
           value={search}
@@ -979,13 +1008,6 @@ function SendStatCard({ label, value, sub, theme, tint = {} }) {
 
 const sendTh = { padding: "8px 12px", textAlign: "left", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 };
 const sendTd = { padding: "8px 12px", verticalAlign: "top" };
-function sendSelectStyle(theme) {
-  return {
-    padding: "8px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit",
-    border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text,
-    minWidth: 140,
-  };
-}
 
 // ---------- SETTINGS ----------
 
@@ -1219,37 +1241,60 @@ function ScheduleEditor({ form, setForm, theme }) {
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <label style={{ fontSize: 12, color: theme.textMid }}>
+        <div style={{ fontSize: 12, color: theme.textMid }}>
           Cadence
-          <select value={form.schedule_cadence} onChange={(e) => set("schedule_cadence", e.target.value)}
-            style={selStyle(theme)}>
-            <option value="off">Off — manual only</option>
-            <option value="daily">Once a day</option>
-            <option value="hourly_business">Hourly during business hours</option>
-          </select>
-        </label>
-        <label style={{ fontSize: 12, color: theme.textMid }}>
+          <div style={{ marginTop: 4 }}>
+            <Select
+              value={form.schedule_cadence}
+              onChange={(v) => set("schedule_cadence", v)}
+              ariaLabel="Cadence"
+              options={[
+                { value: "off", label: "Off — manual only" },
+                { value: "daily", label: "Once a day" },
+                { value: "hourly_business", label: "Hourly during business hours" },
+              ]}
+            />
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: theme.textMid }}>
           Timezone
-          <select value={form.schedule_timezone} onChange={(e) => set("schedule_timezone", e.target.value)}
-            disabled={form.schedule_cadence === "off"} style={selStyle(theme)}>
-            {tzOptions.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-          </select>
-        </label>
-        <label style={{ fontSize: 12, color: theme.textMid }}>
+          <div style={{ marginTop: 4 }}>
+            {/* The one list on this page nobody could ever have scrolled: a
+                few hundred zones, and you know the name of the one you want. */}
+            <Select
+              value={form.schedule_timezone}
+              onChange={(v) => set("schedule_timezone", v)}
+              disabled={form.schedule_cadence === "off"}
+              ariaLabel="Timezone"
+              options={tzOptions}
+              searchPlaceholder="London, New York, UTC…"
+            />
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: theme.textMid }}>
           {form.schedule_cadence === "hourly_business" ? "Window start (hour)" : "Send at (hour)"}
-          <select value={form.schedule_start_hour} onChange={(e) => set("schedule_start_hour", Number(e.target.value))}
-            disabled={form.schedule_cadence === "off"} style={selStyle(theme)}>
-            {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
-          </select>
-        </label>
+          <div style={{ marginTop: 4 }}>
+            <Select
+              value={form.schedule_start_hour}
+              onChange={(v) => set("schedule_start_hour", Number(v))}
+              disabled={form.schedule_cadence === "off"}
+              ariaLabel="Start hour"
+              options={hours.map((h) => ({ value: h, label: `${String(h).padStart(2, "0")}:00` }))}
+            />
+          </div>
+        </div>
         {form.schedule_cadence === "hourly_business" && (
-          <label style={{ fontSize: 12, color: theme.textMid }}>
+          <div style={{ fontSize: 12, color: theme.textMid }}>
             Window end (hour, inclusive)
-            <select value={form.schedule_end_hour} onChange={(e) => set("schedule_end_hour", Number(e.target.value))}
-              style={selStyle(theme)}>
-              {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
-            </select>
-          </label>
+            <div style={{ marginTop: 4 }}>
+              <Select
+                value={form.schedule_end_hour}
+                onChange={(v) => set("schedule_end_hour", Number(v))}
+                ariaLabel="End hour"
+                options={hours.map((h) => ({ value: h, label: `${String(h).padStart(2, "0")}:00` }))}
+              />
+            </div>
+          </div>
         )}
       </div>
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.text, marginTop: 10 }}>
@@ -1265,13 +1310,6 @@ function ScheduleEditor({ form, setForm, theme }) {
   );
 }
 
-function selStyle(theme) {
-  return {
-    display: "block", width: "100%", marginTop: 4, padding: "8px 10px",
-    border: `1.5px solid ${theme.border}`, borderRadius: 8, fontSize: 13,
-    background: theme.bg, color: theme.text, fontFamily: "inherit",
-  };
-}
 
 // ---------- ACTIONS ----------
 

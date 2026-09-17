@@ -3,6 +3,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { api } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { Btn } from "../ui/Button";
+import { Select } from "../ui/Select";
 
 /**
  * Putting content into a campaign, for a brand.
@@ -102,16 +103,18 @@ export function UploadModal({ onClose, onUploaded }) {
 
         <div>
           <span style={label(theme)}>Campaign and creator</span>
-          <select style={field(theme)} value={linkId} onChange={(e) => setLinkId(e.target.value)}>
-            <option value="">Pick one…</option>
-            {links.map((l) => (
-              <option key={l.link_id} value={l.link_id}>
-                {l.campaign_title || "(untitled)"} — {creatorOf(l)}
-                {l.brand_name ? ` · ${l.brand_name.trim()}` : ""}
-                {l.files ? ` · ${l.files} already` : ""}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={linkId}
+            onChange={setLinkId}
+            ariaLabel="Campaign and creator"
+            options={links.map((l) => ({
+              value: l.link_id,
+              label: `${l.campaign_title || "(untitled)"} — ${creatorOf(l)}`,
+              hint: [l.brand_name?.trim(), l.files ? `${l.files} already delivered` : ""]
+                .filter(Boolean).join(" · "),
+            }))}
+            searchPlaceholder="Campaign, creator or brand…"
+          />
         </div>
 
         <div>
@@ -228,12 +231,13 @@ export function GenerateModal({ onClose, onQueued }) {
 
         <div>
           <span style={label(theme)}>Campaign</span>
-          <select style={field(theme)} value={productId} onChange={(e) => setProductId(e.target.value)}>
-            <option value="">Pick one…</option>
-            {campaigns.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </select>
+          <Select
+            value={productId}
+            onChange={setProductId}
+            ariaLabel="Campaign"
+            options={campaigns.map((c) => ({ value: c.id, label: c.label }))}
+            searchPlaceholder="Campaign name…"
+          />
           {campaigns.length === 0 && (
             <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 6 }}>
               The list holds campaigns that already have content. Any campaign can be generated
@@ -266,12 +270,12 @@ export function GenerateModal({ onClose, onQueued }) {
         {subject === "avatar" && (
           <div>
             <span style={label(theme)}>Which AI creator</span>
-            <select style={field(theme)} value={avatarId} onChange={(e) => setAvatarId(e.target.value)}>
-              <option value="">Pick one…</option>
-              {avatars.map((a) => (
-                <option key={a.id} value={a.id}>{a.name} · {a.archetype}</option>
-              ))}
-            </select>
+            <Select
+              value={avatarId}
+              onChange={setAvatarId}
+              ariaLabel="Which AI creator"
+              options={avatars.map((a) => ({ value: a.id, label: a.name, hint: a.archetype }))}
+            />
             {avatars.length === 0 && (
               <div style={{ color: "#B45309", fontSize: 12, marginTop: 6 }}>
                 Nobody on the roster has rendered plates yet — cast and render one under AI
@@ -284,12 +288,12 @@ export function GenerateModal({ onClose, onQueued }) {
         {subject === "creator" && (
           <div>
             <span style={label(theme)}>Which creator</span>
-            <select style={field(theme)} value={creatorId} onChange={(e) => setCreatorId(e.target.value)}>
-              <option value="">Pick one…</option>
-              {links.map((l) => (
-                <option key={l.link_id} value={l.creator_user_id}>{creatorOf(l)}</option>
-              ))}
-            </select>
+            <Select
+              value={creatorId}
+              onChange={setCreatorId}
+              ariaLabel="Which creator"
+              options={links.map((l) => ({ value: l.creator_user_id, label: creatorOf(l) }))}
+            />
             <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 6 }}>
               Their consent is checked by the service, not here: without it the request is refused
               and nothing is spent.
@@ -300,9 +304,12 @@ export function GenerateModal({ onClose, onQueued }) {
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ width: 110 }}>
             <span style={label(theme)}>How many</span>
-            <select style={field(theme)} value={quantity} onChange={(e) => setQuantity(Number(e.target.value))}>
-              {[1, 2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+            <Select
+              value={quantity}
+              onChange={(v) => setQuantity(Number(v))}
+              ariaLabel="How many"
+              options={[1, 2, 3, 4, 6, 8]}
+            />
           </div>
           <div style={{ flex: 1 }}>
             <span style={label(theme)}>Anything to say about it</span>

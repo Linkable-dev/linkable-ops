@@ -1,4 +1,5 @@
 import { useTheme } from "../../contexts/ThemeContext";
+import { Select } from "./Select";
 
 export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange }) {
   const { theme } = useTheme();
@@ -17,10 +18,15 @@ export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChan
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", flexWrap: "wrap", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textMuted }}>
         <span>Showing {from}-{to} of {total}</span>
-        <select value={pageSize} onChange={e => onPageSizeChange(Number(e.target.value))}
-          style={{ padding: "4px 28px 4px 8px", borderRadius: 6, border: `1px solid ${theme.border}`, background: theme.bg, fontSize: 12, color: theme.text }}>
-          {[25, 50, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
-        </select>
+        <div style={{ width: 104 }}>
+          <Select
+            size="sm"
+            value={pageSize}
+            onChange={(v) => onPageSizeChange(Number(v))}
+            ariaLabel="Rows per page"
+            options={[25, 50, 100].map((n) => ({ value: n, label: `${n} / page` }))}
+          />
+        </div>
       </div>
       <div style={{ display: "flex", gap: 4 }}>
         <button style={btnStyle(page <= 1)} disabled={page <= 1} onClick={() => onPageChange(1)}>

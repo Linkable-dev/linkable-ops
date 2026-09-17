@@ -24,6 +24,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { Btn } from "../ui/Button";
+import { Select } from "../ui/Select";
 import { Input } from "../ui/Input";
 import {
   TRIAL_PLANS, DEFAULT_PLAN, DEFAULT_DAYS, DEFAULT_INTERVAL,
@@ -182,11 +183,6 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
     display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase",
     letterSpacing: 0.4, color: theme.textMuted, marginBottom: 6,
   };
-  const selectStyle = {
-    width: "100%", boxSizing: "border-box", background: theme.bg,
-    border: `1.5px solid ${theme.border}`, borderRadius: 8, color: theme.text,
-    fontFamily: "inherit", fontSize: 14, padding: "10px 13px", outline: "none",
-  };
 
   // ---------- STEP 2: CONFIRM ----------
   if (step === "confirm") {
@@ -319,13 +315,14 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
             }}>
               <div>
                 <label style={labelStyle}>Plan</label>
-                <select value={plan} onChange={(e) => setPlan(e.target.value)} style={selectStyle}>
-                  {TRIAL_PLANS.map(p => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}{p.description ? ` — ${p.description}` : ""}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={plan}
+                  onChange={setPlan}
+                  ariaLabel="Plan"
+                  options={TRIAL_PLANS.map((p) => ({
+                    value: p.value, label: p.label, hint: p.description,
+                  }))}
+                />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -336,10 +333,12 @@ export default function GrantTrialModal({ row, isDev, onClose, onGranted }) {
                 </div>
                 <div>
                   <label style={labelStyle}>Billing interval</label>
-                  <select value={billingInterval} onChange={(e) => setBillingInterval(e.target.value)} style={selectStyle}>
-                    <option value="monthly">Monthly</option>
-                    <option value="annual">Annual</option>
-                  </select>
+                  <Select
+                    value={billingInterval}
+                    onChange={setBillingInterval}
+                    ariaLabel="Billing interval"
+                    options={[["monthly", "Monthly"], ["annual", "Annual"]]}
+                  />
                 </div>
               </div>
 

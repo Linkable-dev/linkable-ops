@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Select } from "../components/ui/Select";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyName } from "../lib/api";
 import { Btn } from "../components/ui/Button";
@@ -225,21 +226,16 @@ function FieldInput({ col, value, onChange, disabled, theme, mode, fkData }) {
   if (col.fk && fkData?.options) {
     return (
       <div>
-        <select
+        <Select
           value={value ?? ""}
-          onChange={(e) => onChange(e.target.value === "" ? null : (isNumber ? Number(e.target.value) : e.target.value))}
+          onChange={(v) => onChange(v === "" ? null : (isNumber ? Number(v) : v))}
           disabled={disabled}
-          style={{
-            ...inputStyle, paddingRight: 36, appearance: "none", WebkitAppearance: "none",
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='${encodeURIComponent(theme.textMuted)}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-            backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center",
-          }}
-        >
-          <option value="">— Select —</option>
-          {fkData.options.map((opt) => (
-            <option key={opt.id} value={opt.id}>{opt.label || `#${opt.id}`}</option>
-          ))}
-        </select>
+          ariaLabel={col.name}
+          placeholder="— Select —"
+          options={[{ value: "", label: "— Select —" },
+            ...fkData.options.map((opt) => ({ value: opt.id, label: opt.label || `#${opt.id}` }))]}
+          searchPlaceholder="Type to find a row…"
+        />
         {value && (
           <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 3, fontFamily: "monospace" }}>ID: {value}</div>
         )}

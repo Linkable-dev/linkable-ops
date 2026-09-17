@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
+import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 
 /**
@@ -94,11 +95,6 @@ export default function AiCreatorsPage() {
     padding: "10px", fontSize: 13, borderBottom: `1px solid ${theme.border}`,
     verticalAlign: "middle",
   };
-  const field = {
-    height: 34, padding: "0 10px", borderRadius: 8, border: `1px solid ${theme.border}`,
-    background: theme.surface, color: theme.text, fontSize: 13, fontFamily: "inherit",
-  };
-
   const pill = (text, tone) => {
     const tones = {
       good: { bg: dark ? "#0E2E22" : "#D1FAE5", fg: dark ? "#6EE7B7" : "#065F46" },
@@ -172,24 +168,33 @@ export default function AiCreatorsPage() {
               <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
                 Archetype
               </span>
-              <select style={{ ...field, minWidth: 260 }} value={archetype} onChange={(e) => setArchetype(e.target.value)}>
-                <option value="">Pick for me</option>
-                {(data.archetypes || []).map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}{a.verticals?.length ? ` — ${a.verticals.join(", ")}` : ""}
-                  </option>
-                ))}
-              </select>
+              <div style={{ minWidth: 260 }}>
+                <Select
+                  value={archetype}
+                  onChange={setArchetype}
+                  ariaLabel="Archetype"
+                  placeholder="Pick for me"
+                  options={[{ value: "", label: "Pick for me" },
+                    ...(data.archetypes || []).map((a) => ({
+                      value: a.id, label: a.label,
+                      hint: a.verticals?.length ? a.verticals.join(", ") : "",
+                    }))]}
+                  searchPlaceholder="Archetype or vertical…"
+                />
+              </div>
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
                 Gender
               </span>
-              <select style={field} value={gender} onChange={(e) => setGender(e.target.value)}>
-                {GENDERS.map(([value, text]) => (
-                  <option key={value || "either"} value={value}>{text}</option>
-                ))}
-              </select>
+              <div style={{ width: 130 }}>
+                <Select
+                  value={gender}
+                  onChange={setGender}
+                  ariaLabel="Gender"
+                  options={GENDERS.map(([value, text]) => ({ value, label: text }))}
+                />
+              </div>
             </label>
             <Btn size="sm" loading={busy === "cast"} onClick={cast}>
               Cast a creator

@@ -317,25 +317,25 @@ export default function GtmAgentsPage() {
             </label>
             <label style={{ flex: "1 1 220px", fontSize: 12, color: theme.textMuted }}>
               Sends from
-              <select
+              <Select
                 value={draft.email_campaign_id}
-                onChange={(e) => {
-                  const c = campaigns.find((x) => x.id === e.target.value);
+                onChange={(id) => {
+                  const c = campaigns.find((x) => x.id === id);
                   setDraft({
                     ...draft,
-                    email_campaign_id: e.target.value,
+                    email_campaign_id: id,
                     audience_type: c?.audience_type || draft.audience_type,
                   });
                 }}
-                style={field(theme)}
-              >
-                <option value="">Pick a campaign…</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.audience_type || "brand"})
-                  </option>
-                ))}
-              </select>
+                ariaLabel="Sends from"
+                placeholder="Pick a campaign…"
+                options={campaigns.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  hint: `${c.audience_type || "brand"}${c.status ? ` · ${c.status}` : ""}`,
+                }))}
+                searchPlaceholder="Campaign name…"
+              />
             </label>
             <label style={{ width: 110, fontSize: 12, color: theme.textMuted }}>
               Goal (replies)

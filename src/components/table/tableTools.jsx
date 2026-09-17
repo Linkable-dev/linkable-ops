@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Select } from "../ui/Select";
 
 const WIDTHS_STORE_PREFIX = "ops.tableWidths.";
 
@@ -314,6 +315,10 @@ export function ColumnFilter({ type = "text", value, options, placeholder, onCom
     const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     const onDown = (e) => {
       if (popRef.current?.contains(e.target) || btnRef.current?.contains(e.target)) return;
+      // The operator picker inside this popover renders its list in a portal on
+      // <body>, so by DOM it is "outside" — and picking an operator would have
+      // closed the filter underneath it, losing the half-typed value with it.
+      if (e.target?.closest?.('[role="listbox"]')) return;
       setOpen(false);
     };
     window.addEventListener("scroll", onScrollOrResize, true);
@@ -425,13 +430,13 @@ export function ColumnFilter({ type = "text", value, options, placeholder, onCom
 
           {ops && (
             <>
-              <select
+              <Select
+                size="sm"
                 value={draft.op}
-                onChange={(e) => setDraft((d) => ({ ...d, op: e.target.value }))}
-                style={{ ...fieldStyle, cursor: "pointer" }}
-              >
-                {ops.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-              </select>
+                onChange={(op) => setDraft((d) => ({ ...d, op }))}
+                ariaLabel="How to match"
+                options={ops.map(([k, l]) => ({ value: k, label: l }))}
+              />
 
               {!needsNone && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
