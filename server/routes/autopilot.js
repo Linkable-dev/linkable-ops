@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
-import { parseColumnFilters, filterConditions, textFilter, enumFilter } from "../lib/tableQuery.js";
+import {
+  parseColumnFilters, filterConditions, textFilter, enumFilter, orderBySql,
+} from "../lib/tableQuery.js";
 
 // Autopilot: the recruiting machine, watched from here.
 //
@@ -68,6 +70,37 @@ const AGENT_FILTERS = {
     )`,
   }),
 };
+
+// Sortable columns, whitelisted: nothing from the client reaches the SQL
+// string, a key that is not here falls back to the default ordering.
+//
+// The aggregates are COALESCEd the same way they are selected, so sorting by
+// "applied" puts a campaign that has produced nothing at the bottom rather
+// than wherever NULL happens to land.
+const AGENT_SORTS = {
+  campaign_name: "p.title",
+  brand_name: "b.store_name",
+  mode: "a.mode",
+  status: "a.status",
+  found: "COALESCE(f.found, 0)",
+  contactable: "COALESCE(f.contactable, 0)",
+  emailed: "COALESCE(f.emailed, 0)",
+  replied: "COALESCE(r.replied, 0)",
+  applied: "COALESCE(f.applied, 0)",
+  runs_used: "a.runs_used",
+  searches_used: `(SELECT count(*) FROM sourcing_runs sr
+                     JOIN products sp ON sp.id = sr.product_id
+                    WHERE sp.user_id = p.user_id AND sr.${ND}
+                      AND sr.created >= date_trunc('month', current_timestamp))`,
+  last_event_at: "ev.created",
+  next_action_at: "a.next_action_at",
+};
+
+// What it sorts by when nobody has said: whatever is moving, then whatever
+// moved most recently. It doubles as the tie-breaker under every other sort,
+// so the order inside equal values is stable rather than whatever the planner
+// felt like returning.
+const DEFAULT_ORDER = "a.status = 'working' DESC, ev.created DESC NULLS LAST, a.created DESC";
 
 export function autopilotRoutes() {
   const router = Router();
@@ -188,7 +221,7 @@ export function autopilotRoutes() {
         -- Whatever is moving first: an agent mid-run, then the most recently
         -- active, then the ones that have never done anything.
         ${where}
-        ORDER BY a.status = 'working' DESC, ev.created DESC NULLS LAST, a.created DESC
+        ORDER BY ${orderBySql(req.query, AGENT_SORTS, DEFAULT_ORDER)}
         LIMIT ${limitAt} OFFSET ${offsetAt}
         `,
         params,

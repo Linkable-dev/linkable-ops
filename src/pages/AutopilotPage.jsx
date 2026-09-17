@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
-import { ColumnFilter, describeFilter } from "../components/table/tableTools";
+import { ColumnFilter, describeFilter, SortLabel, nextSort } from "../components/table/tableTools";
 
 /**
  * Autopilot — the recruiting machine, watched from here.
@@ -58,10 +58,31 @@ function whenNext(raw) {
   return `in ${Math.round(hours / 24)}d`;
 }
 
-// The filterable columns, declared once so the header, the chips and the
-// endpoint cannot drift apart. `key` must exist in AGENT_FILTERS on the server
-// (routes/autopilot.js) — filtering is server-side, so the count under the
-// table and the empty state stay true.
+// The header, declared once so it cannot drift from the endpoint. `key` must
+// exist in AGENT_SORTS / AGENT_FILTERS in routes/autopilot.js — both sorting
+// and filtering are server-side, so the count under the table and the empty
+// state stay true, and a sort covers every agent rather than the hundred that
+// happen to be loaded.
+//
+// defaultDir is the direction a first click takes: "asc" reads right for
+// names, "desc" for counts and dates — biggest and most recent first is what
+// somebody clicking a number column is asking for.
+const COLUMNS = [
+  { key: "campaign_name", label: "Campaign", sort: "asc", filter: true },
+  { key: "brand_name", label: "Brand", sort: "asc", filter: true },
+  { key: "mode", label: "Mode", sort: "asc", filter: true },
+  { key: "status", label: "State", sort: "asc", filter: true },
+  { key: "found", label: "Found", sort: "desc", right: true },
+  { key: "contactable", label: "Contactable", sort: "desc", right: true },
+  { key: "emailed", label: "Emailed", sort: "desc", right: true },
+  { key: "replied", label: "Replied", sort: "desc", right: true },
+  { key: "applied", label: "Applied", sort: "desc", right: true },
+  { key: "runs_used", label: "Searches", sort: "desc", right: true },
+  { key: "last_event_at", label: "Last did", sort: "desc" },
+  { key: "next_action_at", label: "Next", sort: "asc" },
+];
+
+// The four that can also be narrowed, with the controls each one needs.
 const FILTERS = [
   { key: "campaign_name", label: "Campaign", type: "text", placeholder: "Campaign name…" },
   { key: "brand_name", label: "Brand", type: "text", placeholder: "Brand…" },
@@ -104,6 +125,7 @@ export default function AutopilotPage() {
   const [openId, setOpenId] = useState(null);
   const [detail, setDetail] = useState({ events: [], runs: [], loading: false });
   const [filters, setFilters] = useState({});
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "" });
   const [total, setTotal] = useState(null);
   const [totalAll, setTotalAll] = useState(null);
   // The monthly search limit, per brand and in general. Kept next to the rows
@@ -121,7 +143,7 @@ export default function AutopilotPage() {
     let live = true;
     setLoading(true);
     api
-      .getAutopilotCampaigns({ limit: 100, filters })
+      .getAutopilotCampaigns({ limit: 100, filters, ...sort })
       .then((d) => {
         if (!live) return;
         setRows(d.campaigns || []);
@@ -135,7 +157,7 @@ export default function AutopilotPage() {
     return () => {
       live = false;
     };
-  }, [filters]);
+  }, [filters, sort]);
 
   // The default row, read once so the page can say what a brand with no row of
   // its own actually gets.
@@ -237,6 +259,10 @@ export default function AutopilotPage() {
   }
 
   const activeFilters = FILTERS.filter((f) => filters[f.key]);
+  const byFilterKey = Object.fromEntries(FILTERS.map((f) => [f.key, f]));
+
+  // Click the active column to flip it, another to switch to it.
+  const handleSort = (key, defaultDir) => setSort((s2) => nextSort(s2, key, defaultDir));
 
   function toggle(productId) {
     if (openId === productId) {
@@ -439,33 +465,39 @@ export default function AutopilotPage() {
               <thead>
                 <tr>
                   <th style={{ ...th, width: 28 }} />
-                  {/* The funnel sits in the header cell, the way it does on
-                      every other table here — a filter bar above the table
-                      would be a second place to look for the same thing. */}
-                  {FILTERS.map((f) => (
-                    <th key={f.key} style={th}>
-                      <span style={{ display: "inline-flex", alignItems: "center" }}>
-                        {f.label}
-                        <ColumnFilter
-                          theme={theme}
-                          label={f.label}
-                          type={f.type}
-                          options={f.options}
-                          placeholder={f.placeholder}
-                          value={filters[f.key] || ""}
-                          onCommit={(v) => setFilter(f.key, v)}
-                        />
-                      </span>
-                    </th>
-                  ))}
-                  <th style={{ ...th, textAlign: "right" }}>Found</th>
-                  <th style={{ ...th, textAlign: "right" }}>Contactable</th>
-                  <th style={{ ...th, textAlign: "right" }}>Emailed</th>
-                  <th style={{ ...th, textAlign: "right" }}>Replied</th>
-                  <th style={{ ...th, textAlign: "right" }}>Applied</th>
-                  <th style={{ ...th, textAlign: "right" }}>Searches</th>
-                  <th style={th}>Last did</th>
-                  <th style={th}>Next</th>
+                  {/* Sort label and funnel both live in the header cell, the
+                      way they do on every other table here — a toolbar above
+                      the table would be a second place to look for the same
+                      two things. */}
+                  {COLUMNS.map((col) => {
+                    const f = byFilterKey[col.key];
+                    return (
+                      <th key={col.key} style={col.right ? { ...th, textAlign: "right" } : th}>
+                        <span style={{ display: "inline-flex", alignItems: "center" }}>
+                          <SortLabel
+                            theme={theme}
+                            label={col.label}
+                            colKey={col.key}
+                            sortBy={sort.sortBy}
+                            sortDir={sort.sortDir}
+                            defaultDir={col.sort}
+                            onSort={handleSort}
+                          />
+                          {f && (
+                            <ColumnFilter
+                              theme={theme}
+                              label={f.label}
+                              type={f.type}
+                              options={f.options}
+                              placeholder={f.placeholder}
+                              value={filters[f.key] || ""}
+                              onCommit={(v) => setFilter(f.key, v)}
+                            />
+                          )}
+                        </span>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
