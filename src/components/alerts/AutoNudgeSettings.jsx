@@ -10,6 +10,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
 import { Card } from "../ui/Card";
 import { Btn } from "../ui/Button";
+import { Skeleton } from "../ui/Skeleton";
 
 const COPY = {
   shipping: "Samples accepted but never sent, and sample requests left unanswered.",
@@ -46,9 +47,16 @@ export default function AutoNudgeSettings({ onClose }) {
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>Chase these automatically</div>
           <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2, maxWidth: 640 }}>
-            {data
-              ? `A brand is written to at most once every ${data.limits.quietDays} days, at most ${data.limits.brandsPerRun} brands a run, and only after an alert has been open long enough for someone to get there first.`
-              : "Loading…"}
+            {data ? (
+              `A brand is written to at most once every ${data.limits.quietDays} days, at most ${data.limits.brandsPerRun} brands a run, and only after an alert has been open long enough for someone to get there first.`
+            ) : (
+              // Two lines of the sentence that is coming, rather than the word
+              // "Loading" where a sentence will be.
+              <span style={{ display: "block", maxWidth: 640 }}>
+                <Skeleton width="100%" height={12} style={{ marginBottom: 5 }} />
+                <Skeleton width="72%" height={12} />
+              </span>
+            )}
           </div>
         </div>
         {onClose && <Btn size="sm" variant="outline" onClick={onClose}>Close</Btn>}

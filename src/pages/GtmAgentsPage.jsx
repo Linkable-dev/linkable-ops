@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
-import { SkeletonTableRows } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/Skeleton";
 
 /**
  * GTM outreach, as agents.
@@ -521,8 +521,27 @@ export default function GtmAgentsPage() {
                     {openId === a.id && (
                       <tr>
                         <td style={{ ...td, background: theme.bg }} colSpan={11}>
+                          {/* The six metric tiles and the log beneath them,
+                              in outline, so the row keeps its height while it
+                              fills. */}
                           {detail.loading && (
-                            <div style={{ color: theme.textMuted, fontSize: 13 }}>Loading…</div>
+                            <div>
+                              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 16 }}>
+                                {[0, 1, 2, 3, 4, 5].map((i) => (
+                                  <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                    <Skeleton width={58} height={11} />
+                                    <Skeleton width={i === 2 || i === 3 ? 62 : 34} height={15} />
+                                  </div>
+                                ))}
+                              </div>
+                              <SkeletonListRows
+                                rows={3}
+                                lines={[["60%", 13]]}
+                                meta={{ width: 76, lines: [[60, 12]] }}
+                                padding="6px 0"
+                                gap={10}
+                              />
+                            </div>
                           )}
                           {!detail.loading && (
                             <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 14 }}>
