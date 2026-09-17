@@ -75,6 +75,10 @@ export default function GtmAgentsPage() {
 
   const [agents, setAgents] = useState([]);
   const [available, setAvailable] = useState(true);
+  // Why it is unavailable, in the server's words. There is more than one
+  // reason and they need different people to fix them: a migration nobody has
+  // applied, or a key that row-level security is hiding every row from.
+  const [unavailableReason, setUnavailableReason] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState(null);
@@ -100,6 +104,7 @@ export default function GtmAgentsPage() {
         .then((d) => {
           setAgents(d.agents || []);
           setAvailable(d.available !== false);
+          setUnavailableReason(d.reason || "");
           setError("");
         })
         .catch((e) => setError(e.message))
@@ -115,6 +120,7 @@ export default function GtmAgentsPage() {
         if (!live) return;
         setAgents(d.agents || []);
         setAvailable(d.available !== false);
+        setUnavailableReason(d.reason || "");
       })
       .catch((e) => live && setError(e.message))
       .finally(() => live && setLoading(false));
@@ -268,11 +274,15 @@ export default function GtmAgentsPage() {
 
       {!available && !loading && (
         <Card>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Waiting on a migration</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Nothing to show yet</div>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>
-            The agent tables are not in this database yet — apply{" "}
-            <code>supabase/migrations/018_outbound_agents.sql</code> and reload. Nothing else is
-            affected in the meantime.
+            {unavailableReason || (
+              <>
+                The agent tables are not in this database yet — apply{" "}
+                <code>supabase/migrations/018_outbound_agents.sql</code> and reload. Nothing else
+                is affected in the meantime.
+              </>
+            )}
           </div>
         </Card>
       )}

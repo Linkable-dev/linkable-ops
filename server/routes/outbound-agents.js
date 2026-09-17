@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { supabase } from "../lib/supabase.js";
+import { supabase, supabaseKeyIsPublic, SUPABASE_KEY_ROLE } from "../lib/supabase.js";
 import {
   AGENT_MODES,
   agentOutcome,
@@ -70,9 +70,31 @@ export function outboundAgentsRoutes() {
       for (const agent of data || []) {
         agents.push({ ...agent, ...(await agentProgress(agent)) });
       }
+      // An empty list has two very different causes and Supabase reports them
+      // identically: there are no agents, or this server is holding a key that
+      // RLS hides them from. Say which, rather than rendering a blank page.
+      if (!agents.length && supabaseKeyIsPublic) {
+        return res.json({
+          available: false,
+          agents: [],
+          reason:
+            "This server is using a Supabase anon key, so row-level security is " +
+            "hiding every row — the agents exist, they just cannot be read. Set " +
+            "SUPABASE_SERVICE_ROLE_KEY to the service_role key and redeploy.",
+        });
+      }
       res.json({ available: true, agents });
     } catch (e) {
-      if (notMigrated(e)) return res.json({ available: false, agents: [] });
+      if (notMigrated(e)) {
+        return res.json({
+          available: false,
+          agents: [],
+          reason:
+            "The agent tables are not in this database yet — apply " +
+            "supabase/migrations/018_outbound_agents.sql and reload. " +
+            `(key: ${SUPABASE_KEY_ROLE})`,
+        });
+      }
       console.error("[outbound-agents/list]", e);
       res.status(500).json({ error: e.message });
     }
