@@ -26,4 +26,15 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // The server half of this repo is Node, not a browser: `process`, `console`
+    // and friends are the runtime, not undefined globals. Without this, 210 of
+    // the 242 errors `npm run lint` reported were every server file saying
+    // `process.env` — noise that hid the real ones and taught everybody to
+    // ignore the command.
+    files: ['server/**/*.js', 'api/**/*.js', 'scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
 ])

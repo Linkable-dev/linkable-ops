@@ -12,7 +12,9 @@ import { api, friendlyName } from "../lib/api";
 // somebody reaches for when the name is not the word.
 const PAGES = [
   ["Home", "/"], ["Alerts", "/alerts"], ["Brand health", "/health"], ["Campaigns", "/ops/campaigns"],
-  ["Autopilot", "/ops/autopilot", "recruiting sourcing"], ["Trials", "/trials"], ["Impersonation", "/users"],
+  ["Autopilot", "/ops/autopilot", "recruiting sourcing"],
+  ["AI creators", "/ops/ai-creators", "avatars roster synthetic casting"],
+  ["Trials", "/trials"], ["Impersonation", "/users"],
   ["Outbound", "/ai/agents"], ["Replies", "/ai/inbox"], ["Blog", "/blog"],
   ["Dashboard", "/dashboard"], ["Ask the data", "/ask"], ["Team", "/team"],
 ];

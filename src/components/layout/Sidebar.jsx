@@ -65,6 +65,14 @@ const usersIcon = icon(<>
   <path d="M16 3.13a4 4 0 0 1 0 7.75" />
 </>);
 
+// Invented people, and the plates they are photographed into. A camera rather
+// than another sparkle: the sparkle is Autopilot's, and two AI things wearing
+// one mark is how you end up clicking the wrong one.
+const aiCreatorsIcon = icon(<>
+  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+  <circle cx="12" cy="13" r="3.2" />
+</>);
+
 // --- GTM -----------------------------------------------------------------
 // A rising line for the section, because what these three have in common is
 // growth, not messaging. The plane now belongs to Outbound alone.
@@ -251,6 +259,9 @@ export default function Sidebar() {
             {/* Autopilot, by the name it has everywhere it actually runs, and
                 under the mark the brand app gives it. */}
             {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), autopilotIcon)}
+            {/* The roster every brand generates with — ours to cast, not any
+                one brand's. */}
+            {navItem("/ops/ai-creators", "AI creators", path.startsWith("/ops/ai-creators"), aiCreatorsIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
           </div>

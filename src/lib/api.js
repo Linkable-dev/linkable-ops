@@ -127,6 +127,17 @@ export const api = {
     }),
   wakeAutopilotAgent: (id) => request(`/autopilot/campaigns/${id}/wake`, { method: "POST" }),
 
+  // The synthetic creator roster. Both writes spend: casting is a model call,
+  // rendering is three GPU jobs that change the face on everything generated
+  // afterwards.
+  getAiCreators: () => request("/ai-creators"),
+  castAiCreator: ({ archetype_id, gender }) =>
+    request("/ai-creators/cast", {
+      method: "POST",
+      body: JSON.stringify({ archetype_id, gender }),
+    }),
+  renderAiCreatorPlates: (id) => request(`/ai-creators/${id}/plates`, { method: "POST" }),
+
   // The monthly search limit, which IS ours to change: it is the number the
   // agent reads before it acts, not an action taken on a brand's behalf.
   // `scope` is "default" or a brand's user id.
