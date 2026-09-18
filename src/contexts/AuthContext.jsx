@@ -8,6 +8,12 @@ export function AuthProvider({ children }) {
   const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+  // Distinct from accessDenied: a session exists and is valid, but the admin
+  // check itself failed (a 500, a network error) rather than saying no. That
+  // used to fall through to "admin: null" same as a bad login, which sent a
+  // signed-in person back to the login screen with nothing telling them the
+  // server — not their password — was the problem.
+  const [authError, setAuthError] = useState("");
 
   // Check if Supabase user is a whitelisted admin
   async function checkAdmin(accessToken) {
@@ -18,14 +24,19 @@ export function AuthProvider({ children }) {
       if (res.ok) {
         setAdmin(await res.json());
         setAccessDenied(false);
+        setAuthError("");
       } else if (res.status === 403) {
         setAdmin(null);
         setAccessDenied(true);
+        setAuthError("");
       } else {
         setAdmin(null);
+        const body = await res.json().catch(() => null);
+        setAuthError(body?.error || `The server returned ${res.status} while checking your access.`);
       }
-    } catch {
+    } catch (e) {
       setAdmin(null);
+      setAuthError(e.message || "Could not reach the server.");
     }
   }
 
@@ -46,6 +57,7 @@ export function AuthProvider({ children }) {
       } else {
         setAdmin(null);
         setAccessDenied(false);
+        setAuthError("");
       }
     });
 
@@ -72,6 +84,14 @@ export function AuthProvider({ children }) {
     setSession(null);
     setAdmin(null);
     setAccessDenied(false);
+    setAuthError("");
+  };
+
+  // Re-runs the admin check against the current session — what "Try Again"
+  // on the error screen does, without a full page reload.
+  const retryAuth = async () => {
+    const { data: { session: s } } = await supabase.auth.getSession();
+    if (s?.access_token) await checkAdmin(s.access_token);
   };
 
   // Get the current access token for API calls (always fresh)
@@ -81,7 +101,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, admin, loading, accessDenied, login, signUp, logout, getToken }}>
+    <AuthContext.Provider value={{ session, admin, loading, accessDenied, authError, login, signUp, logout, getToken, retryAuth }}>
       {children}
     </AuthContext.Provider>
   );
