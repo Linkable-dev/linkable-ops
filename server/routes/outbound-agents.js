@@ -57,11 +57,13 @@ export function outboundAgentsRoutes() {
   // GET /api/outbound-agents — one row per agent, with what it has produced.
   router.get("/", async (req, res) => {
     try {
-      const { data, error } = await supabase
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const { data, error, count } = await supabase
         .from("outbound_agents")
-        .select("*, email_campaigns(id, name, status, audience_type)")
+        .select("*, email_campaigns(id, name, status, audience_type)", { count: "exact" })
         .order("created_at", { ascending: false })
-        .limit(100);
+        .range(offset, offset + limit - 1);
       if (error) throw error;
 
       // Progress is read per agent rather than joined: it counts distinct
@@ -83,7 +85,7 @@ export function outboundAgentsRoutes() {
             "SUPABASE_SERVICE_ROLE_KEY to the service_role key and redeploy.",
         });
       }
-      res.json({ available: true, agents });
+      res.json({ available: true, agents, total: count || 0, limit, offset });
     } catch (e) {
       if (notMigrated(e)) {
         return res.json({

@@ -9,7 +9,7 @@
 // handleOutboundInboxManual / optOutOutboundInboxManual). AI thread detail
 // still goes through the existing /api/conversations/threads/:id endpoint.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -40,6 +40,13 @@ export default function AiInboxPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // listOutboundInbox merges two independently-capped sources (manual +
+  // AI) and re-sorts by recency each call — there is no stable offset to
+  // page into, so "more" means asking for a bigger merged slice from
+  // scratch rather than paging. Reset with every new mode/status/search.
+  const [limit, setLimit] = useState(100);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const prevLimitRef = useRef(100);
 
   const [selected, setSelected] = useState(null);   // row object from list
   const [detail, setDetail] = useState(null);       // detail payload (shape depends on mode)
@@ -48,15 +55,26 @@ export default function AiInboxPage() {
   const { ask, dialog: confirmDialog } = useConfirm();
 
   const loadList = useCallback(() => {
-    setLoading(true);
+    // "Load more" only ever grows limit, never a filter change — so growth
+    // is what distinguishes a background top-up (its own inline spinner)
+    // from a real reload (the list's full skeleton).
+    const isMore = limit > prevLimitRef.current;
+    (isMore ? setLoadingMore : setLoading)(true);
     setError(null);
-    api.listOutboundInbox({ mode, status, q: search || undefined, limit: 100 })
+    api.listOutboundInbox({ mode, status, q: search || undefined, limit })
       .then((res) => setRows(res.rows || []))
       .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [mode, status, search]);
+      .finally(() => {
+        (isMore ? setLoadingMore : setLoading)(false);
+        prevLimitRef.current = limit;
+      });
+  }, [mode, status, search, limit]);
 
   useEffect(() => { loadList(); }, [loadList]);
+  // A new filter means the old "how many have I already asked for" no
+  // longer applies to what's being asked now.
+  useEffect(() => { setLimit(100); prevLimitRef.current = 100; }, [mode, status, search]);
+  const onLoadMore = () => setLimit((n) => n + 100);
 
   // Load detail whenever selection changes.
   useEffect(() => {
@@ -149,6 +167,9 @@ export default function AiInboxPage() {
           selectedId={selected?.id || null}
           onSelect={setSelected}
           status={status}
+          hasMore={!loading && rows.length === limit}
+          loadingMore={loadingMore}
+          onLoadMore={onLoadMore}
         />
         {selected && (
           <DetailPane
@@ -220,7 +241,7 @@ function PillGroup({ theme, value, setValue, options }) {
 
 // ----------------------------- List ------------------------------------------
 
-function InboxList({ theme, rows, loading, selectedId, onSelect, status }) {
+function InboxList({ theme, rows, loading, selectedId, onSelect, status, hasMore, loadingMore, onLoadMore }) {
   if (loading) {
     return (
       <Card style={{ padding: 0 }}>
@@ -256,6 +277,11 @@ function InboxList({ theme, rows, loading, selectedId, onSelect, status }) {
           />
         ))}
       </div>
+      {hasMore && (
+        <div style={{ padding: 10, borderTop: `1px solid ${theme.border}`, textAlign: "center" }}>
+          <Btn size="sm" variant="secondary" loading={loadingMore} onClick={onLoadMore}>Load more</Btn>
+        </div>
+      )}
     </Card>
   );
 }

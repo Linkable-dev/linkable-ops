@@ -5,6 +5,7 @@ import OutreachSettings from "../components/autopilot/OutreachSettings";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
+import { Pagination } from "../components/ui/Pagination";
 import { ColumnFilter, describeFilter, SortLabel, nextSort } from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
 import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
@@ -109,6 +110,8 @@ export default function AutopilotPage() {
   const [sort, setSort] = useState({ sortBy: "", sortDir: "" });
   const [total, setTotal] = useState(null);
   const [totalAll, setTotalAll] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   // The default monthly search limit. Read here so the rows can show what a
   // brand without a row of its own actually gets; edited in the settings
   // drawer, which is where the rest of the knobs live.
@@ -125,7 +128,7 @@ export default function AutopilotPage() {
     const run = () => {
       setLoading(true);
       return api
-        .getAutopilotCampaigns({ limit: 100, filters, ...sort })
+        .getAutopilotCampaigns({ limit: pageSize, offset: (page - 1) * pageSize, filters, ...sort })
         .then((d) => {
           if (!live) return;
           setRows(d.campaigns || []);
@@ -141,7 +144,7 @@ export default function AutopilotPage() {
     return () => {
       live = false;
     };
-  }, [filters, sort]);
+  }, [filters, sort, page, pageSize]);
 
   // The default row, read once so the page can say what a brand with no row of
   // its own actually gets.
@@ -173,13 +176,20 @@ export default function AutopilotPage() {
     // A row opened under the old list is about a campaign that may not be in
     // the new one.
     setOpenId(null);
+    // Narrowing means page 3 of the old result set might not exist anymore.
+    setPage(1);
+  }
+
+  function clearFilters() {
+    setFilters({});
+    setPage(1);
   }
 
   const activeFilters = FILTERS.filter((f) => filters[f.key]);
   const byFilterKey = Object.fromEntries(FILTERS.map((f) => [f.key, f]));
 
   // Click the active column to flip it, another to switch to it.
-  const handleSort = (key, defaultDir) => setSort((s2) => nextSort(s2, key, defaultDir));
+  const handleSort = (key, defaultDir) => { setSort((s2) => nextSort(s2, key, defaultDir)); setPage(1); };
 
   const toggle = (productId) => setOpenId((open) => (open === productId ? null : productId));
 
@@ -354,7 +364,7 @@ export default function AutopilotPage() {
           ))}
           {activeFilters.length > 1 && (
             <button
-              onClick={() => setFilters({})}
+              onClick={clearFilters}
               style={{
                 background: "none",
                 border: "none",
@@ -423,7 +433,7 @@ export default function AutopilotPage() {
                         <>
                           No agent matches these filters.{" "}
                           <button
-                            onClick={() => setFilters({})}
+                            onClick={clearFilters}
                             style={{
                               background: "none",
                               border: "none",
@@ -555,11 +565,20 @@ export default function AutopilotPage() {
           one set, "12" on its own would be the answer to a question nobody
           asked. */}
       {available && !loading && rows.length > 0 && (
-        <div style={{ marginTop: 10, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
-          {activeFilters.length
-            ? `${total ?? rows.length} of ${totalAll ?? rows.length} agents match`
-            : `${totalAll ?? rows.length} ${totalAll === 1 ? "agent" : "agents"}`}
-        </div>
+        <>
+          {activeFilters.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
+              {total ?? rows.length} of {totalAll ?? rows.length} agents match
+            </div>
+          )}
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total ?? rows.length}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+          />
+        </>
       )}
     </div>
   );

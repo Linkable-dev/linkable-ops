@@ -6,6 +6,7 @@ import { TabBar } from "../components/ui/TabBar";
 import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
 import { SkeletonGridRows } from "../components/ui/Skeleton";
+import { Pagination } from "../components/ui/Pagination";
 import { useNow } from "../lib/useNow";
 import { useSearchParams } from "react-router-dom";
 import { BrandLink } from "../components/brand/BrandLink";
@@ -136,6 +137,8 @@ export default function UsersPage() {
   const [manageRow, setManageRow] = useState(null); // null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
   const { ask, dialog: confirmDialog } = useConfirm();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const columns = tab === "brands" ? BRAND_COLUMNS
     : tab === "creators" ? CREATOR_COLUMNS
@@ -166,19 +169,20 @@ export default function UsersPage() {
     });
   };
 
+  const offset = (page - 1) * pageSize;
   const fetchRows = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       let data;
       if (tab === "deleted") {
-        data = await api.listDeletedBrands({ q, limit: 100 });
+        data = await api.listDeletedBrands({ q, limit: pageSize, offset });
       } else {
         const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
         const effective = tab === "brands" && !showHidden
           ? { ...filters, visibility: "visible" }
           : filters;
-        data = await fn({ q, limit: 100, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
+        data = await fn({ q, limit: pageSize, offset, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
       }
       setRows(data);
     } catch (err) {
@@ -187,7 +191,7 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, q, sort, filters, showHidden]);
+  }, [tab, q, sort, filters, showHidden, pageSize, offset]);
 
   // Debounce free-text search; sort/filter changes arrive pre-debounced
   // (ColumnFilter commits after a pause) so they refetch immediately.
@@ -195,6 +199,10 @@ export default function UsersPage() {
     const t = setTimeout(fetchRows, q ? 300 : 0);
     return () => clearTimeout(t);
   }, [fetchRows, q]);
+
+  // Anything that changes which rows match — tab, search, sort, filters —
+  // means page 2 of the old result set is not a meaningful place to be.
+  useEffect(() => { setPage(1); }, [tab, q, sort, filters, showHidden]);
 
   function handleStartupChanged(userId, enabled) {
     setRows((rs) => rs.map((r) => (r.user_id === userId ? { ...r, startup_programme: enabled } : r)));
@@ -464,9 +472,19 @@ export default function UsersPage() {
       />
 
       {!loading && rows.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
-          Showing {rows.length}{rows[0]?.total_count != null ? <> of {Number(rows[0].total_count).toLocaleString()}</> : null} {tabLabel}{rows[0]?.total_count != null && Number(rows[0].total_count) > rows.length ? " — refine the search to see the rest" : ""}
-        </div>
+        rows[0]?.total_count != null ? (
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={Number(rows[0].total_count)}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+          />
+        ) : (
+          <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
+            Showing {rows.length} {tabLabel}
+          </div>
+        )
       )}
       {confirmDialog}
     </div>

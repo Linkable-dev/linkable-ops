@@ -208,7 +208,7 @@ export const api = {
 
   // GTM outreach agents: a goal, a budget, a clock — and the two buttons that
   // let an admin drive one by hand.
-  getOutboundAgents: () => request("/outbound-agents"),
+  getOutboundAgents: ({ limit = 100, offset = 0 } = {}) => request(`/outbound-agents?${buildQs({ limit, offset })}`),
   getOutboundAgent: (id) => request(`/outbound-agents/${id}`),
   createOutboundAgent: (data) =>
     request("/outbound-agents", { method: "POST", body: JSON.stringify(data) }),

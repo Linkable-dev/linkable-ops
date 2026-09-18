@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/Skeleton";
+import { Pagination } from "../components/ui/Pagination";
 
 /**
  * GTM outreach, as agents.
@@ -86,6 +87,9 @@ export default function GtmAgentsPage() {
   const [detail, setDetail] = useState({ events: [], metrics: null, replies: [], loading: false });
   const [busy, setBusy] = useState("");
   const [runLog, setRunLog] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   // Creating one: an agent is a goal and a budget put in front of a campaign
   // that already exists, so the form is four numbers and a picker.
   const [campaigns, setCampaigns] = useState([]);
@@ -101,34 +105,37 @@ export default function GtmAgentsPage() {
   const load = useCallback(
     () =>
       api
-        .getOutboundAgents()
+        .getOutboundAgents({ limit: pageSize, offset: (page - 1) * pageSize })
         .then((d) => {
           setAgents(d.agents || []);
           setAvailable(d.available !== false);
           setUnavailableReason(d.reason || "");
+          setTotal(d.total ?? (d.agents || []).length);
           setError("");
         })
         .catch((e) => setError(e.message))
         .finally(() => setLoading(false)),
-    [],
+    [page, pageSize],
   );
 
   useEffect(() => {
     let live = true;
+    setLoading(true);
     api
-      .getOutboundAgents()
+      .getOutboundAgents({ limit: pageSize, offset: (page - 1) * pageSize })
       .then((d) => {
         if (!live) return;
         setAgents(d.agents || []);
         setAvailable(d.available !== false);
         setUnavailableReason(d.reason || "");
+        setTotal(d.total ?? (d.agents || []).length);
       })
       .catch((e) => live && setError(e.message))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, []);
+  }, [page, pageSize]);
 
   // The campaigns an agent can be put in front of. Loaded once; an agent
   // without one has nothing to send from, so the form refuses to submit.
@@ -638,6 +645,15 @@ export default function GtmAgentsPage() {
           </table>
         </div>
       </Card>
+      {available && !loading && agents.length > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+        />
+      )}
     </div>
   );
 }
