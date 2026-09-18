@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { providerCostRoutes } from "./provider-costs.js";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
+import { signedUrls } from "../lib/gcs.js";
 import {
   parseColumnFilters, filterConditions, textFilter, enumFilter, orderBySql,
 } from "../lib/tableQuery.js";
@@ -45,6 +46,21 @@ function notPromoted(e) {
 }
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ""));
+
+// A creator's picture is either a path we copied the bytes for at discovery
+// (the provider's own links die within a day) or, for a candidate never
+// re-enriched, still the provider's original URL — mirrors the same branch
+// in service-grpc's campaign_matches.go. Only the first needs signing; the
+// second is already fetchable, and signing it as if it were our own object
+// name would just produce a broken URL.
+async function withProfileImages(rows, target) {
+  const blobs = rows.map((r) => (r.profile_image?.startsWith("influencer/") ? r.profile_image : ""));
+  const signed = await signedUrls(blobs, 3600, target);
+  rows.forEach((r, i) => {
+    r.profile_image = signed[i] || (blobs[i] ? null : r.profile_image || null);
+  });
+  return rows;
+}
 
 // A whole number inside bounds, or null for something that was never a number.
 function clamp(raw, min, max) {
@@ -832,16 +848,20 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
         `SELECT c.id, c.created, c.instagram_username, c.full_name, c.followers, c.engagement,
                 c.country, c.email <> '' AS reachable, c.status, c.filter_reason,
                 c.push_status, c.pushed_at, c.applied_at, c.decision, c.fit_score, c.fit_verdict,
-                c.dm_status, c.query_label
+                c.dm_status, c.query_label, c.profile_image
            FROM sourcing_candidates c
           WHERE ${where}
           ORDER BY c.applied_at DESC NULLS LAST, c.followers DESC NULLS LAST, c.created DESC
           LIMIT $2 OFFSET $3`,
         [req.params.id, limit, offset],
       );
+      await withProfileImages(rows, req.dbTarget);
 
       // The breakdown is of the WHOLE campaign, not the filtered page: it is
       // the map you choose a state from, so it cannot itself be narrowed.
+      // "matching" (the current state filter's own count) is what pagination
+      // counts against — "total" alone would say "load more" past the end of
+      // a narrowed list.
       const { rows: counts } = await query(
         `SELECT
            count(*)::int                                                          AS total,
@@ -853,8 +873,15 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
          WHERE c.product_id = $1 AND c.${ND}`,
         [req.params.id],
       );
+      const { rows: matching } = await query(
+        `SELECT count(*)::int AS n FROM sourcing_candidates c WHERE ${where}`,
+        [req.params.id],
+      );
 
-      res.json({ available: true, creators: rows, counts: counts[0] || {} });
+      res.json({
+        available: true, creators: rows, counts: counts[0] || {},
+        matching: matching[0]?.n ?? rows.length, limit, offset,
+      });
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false, creators: [], counts: {} });
       console.error("[autopilot/creators]", e);
@@ -871,12 +898,12 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
 
       const { rows } = await query(
         `SELECT r.id, r.created, r.received_at, r.lead_email, r.intent, r.status, r.needs_human,
-                r.escalation_reason, r.channel, r.sent_at, r.error,
+                r.escalation_reason, r.channel, r.sent_at, r.error, r.subject,
                 -- The reply and the answer, trimmed: this is a list to scan,
                 -- and the whole thread lives in the main app.
                 left(r.body, 400)  AS body,
                 left(r.draft, 400) AS draft,
-                c.instagram_username
+                c.instagram_username, c.profile_image
            FROM sourcing_replies r
            LEFT JOIN sourcing_candidates c ON c.id = r.sourcing_candidate_id
           WHERE r.product_id = $1
@@ -884,10 +911,93 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
           LIMIT $2`,
         [req.params.id, limit],
       );
+      await withProfileImages(rows, req.dbTarget);
       res.json({ available: true, replies: rows });
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false, replies: [] });
       console.error("[autopilot/replies]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/autopilot/campaigns/:id/emails
+  // The send-side of outreach — sent, opened, clicked, bounced — as Lemlist's
+  // own webhooks reported it. Distinct from Replies (a person writing back);
+  // this is what happened to the messages themselves, and it is where "we
+  // emailed forty and nothing came back" gets an answer: did they even open it.
+  router.get("/campaigns/:id/emails", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+      const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+      const type = req.query.type ? String(req.query.type) : null;
+      // Two queries, two param counts, so the type placeholder's own index
+      // has to be built per query rather than shared as one string — reusing
+      // "$4" against the matching-count query (no $2/$3 there) would ask
+      // Postgres for a parameter that call never sends.
+      const whereAt = (idx) => `e.product_id = $1${type ? ` AND e.event_type = $${idx}` : ""}`;
+      const params = type ? [req.params.id, limit, offset, type] : [req.params.id, limit, offset];
+
+      const { rows } = await query(
+        `SELECT e.id, e.created, e.occurred_at, e.event_type, e.lead_email,
+                c.instagram_username, c.profile_image
+           FROM sourcing_outreach_events e
+           LEFT JOIN sourcing_candidates c ON c.id = e.sourcing_candidate_id
+          WHERE ${whereAt(4)}
+          ORDER BY e.occurred_at DESC
+          LIMIT $2 OFFSET $3`,
+        params,
+      );
+      await withProfileImages(rows, req.dbTarget);
+
+      const { rows: counts } = await query(
+        `SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE e.event_type = 'emailsSent')::int    AS sent,
+                count(*) FILTER (WHERE e.event_type = 'emailsOpened')::int  AS opened,
+                count(*) FILTER (WHERE e.event_type = 'emailsClicked')::int AS clicked,
+                count(*) FILTER (WHERE e.event_type = 'emailsReplied')::int AS replied
+           FROM sourcing_outreach_events e
+          WHERE e.product_id = $1`,
+        [req.params.id],
+      );
+      const { rows: matching } = await query(
+        `SELECT count(*)::int AS n FROM sourcing_outreach_events e WHERE ${whereAt(2)}`,
+        type ? [req.params.id, type] : [req.params.id],
+      );
+
+      res.json({
+        available: true, emails: rows, counts: counts[0] || {},
+        matching: matching[0]?.n ?? rows.length, limit, offset,
+      });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, emails: [], counts: {} });
+      console.error("[autopilot/emails]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/autopilot/campaigns/:id/chats
+  // The Autopilot conversation that set this campaign up in the first place —
+  // separate from everything else here, which is about creators, not the
+  // brand. One row per model call, transcript-so-far and reply; the client
+  // reconstructs the thread rather than replaying each row's growing prefix.
+  router.get("/campaigns/:id/chats", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 300);
+
+      const { rows } = await query(
+        `SELECT id, created, turn_index, transcript, reply, options, ready, plan, provider
+           FROM autopilot_chats
+          WHERE product_id = $1
+          ORDER BY turn_index ASC, created ASC
+          LIMIT $2`,
+        [req.params.id, limit],
+      );
+      res.json({ available: true, chats: rows });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, chats: [] });
+      console.error("[autopilot/chats]", e);
       res.status(500).json({ error: e.message });
     }
   });

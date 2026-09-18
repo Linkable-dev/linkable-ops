@@ -117,6 +117,14 @@ export const api = {
     request(`/autopilot/campaigns/${id}/creators?${buildQs({ limit, offset, state })}`),
   getAutopilotReplies: (id, { limit = 25 } = {}) =>
     request(`/autopilot/campaigns/${id}/replies?${buildQs({ limit })}`),
+  // The send-side of outreach (sent/opened/clicked), separate from a person
+  // writing back.
+  getAutopilotEmails: (id, { limit = 25, offset = 0, type } = {}) =>
+    request(`/autopilot/campaigns/${id}/emails?${buildQs({ limit, offset, type })}`),
+  // The Autopilot conversation that set this campaign up, kept for training —
+  // see autopilot_chats. Not the same conversation as outreach: this is the
+  // brand talking to Autopilot, before any creator was ever found.
+  getAutopilotChats: (id) => request(`/autopilot/campaigns/${id}/chats`),
   // How far the agent may go, and bringing its next check forward. Neither
   // makes it act — the tick still checks the campaign, the allowance and the
   // budget before it spends anything.
