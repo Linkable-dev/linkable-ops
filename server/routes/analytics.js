@@ -143,11 +143,17 @@ export function analyticsRoutes() {
                     GROUP BY 1) c) as by_currency
           FROM orders WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
 
-        // Creator Stripe connectivity
+        // Creator Stripe connectivity. Joined through influencers rather than
+        // a bare `users WHERE role = 3` scan: a role-3 user with no live
+        // influencers row (2 on prod) never finished onboarding into an
+        // actual creator profile, and counting them inflated the denominator
+        // past kpis.influencers — the same population this reconciles to
+        // everywhere else on the page.
         cloudSqlQuery(`SELECT
           COUNT(*) as total,
-          COUNT(*) FILTER (WHERE stripe_account_id IS NOT NULL AND stripe_account_id != '') as stripe_connected
-          FROM users WHERE role = 3 /* ROLE_INFLUENCER */ AND (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
+          COUNT(*) FILTER (WHERE u.stripe_account_id IS NOT NULL AND u.stripe_account_id != '') as stripe_connected
+          FROM influencers i JOIN users u ON u.id = i.user_id
+          WHERE i.deleted = '-infinity'::timestamptz`),
 
         // Payout stats
         cloudSqlQuery(`SELECT status, COUNT(*) as count, COALESCE(SUM(amount_value::numeric), 0) as total_amount
