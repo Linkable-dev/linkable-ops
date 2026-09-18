@@ -8,7 +8,7 @@ import { Btn } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import { SkeletonTable } from "../components/ui/Skeleton";
 import {
-  useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter,
+  useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter, useColumnOrder, DragHandle,
 } from "../components/table/tableTools";
 
 // sortKey/filterKey are the server-side ops_admins columns (allow-listed in
@@ -19,9 +19,71 @@ const TEAM_COLUMNS = [
   { key: "email",      label: "Email",       width: 280, sortKey: "email",      defaultDir: "asc", filterKey: "email",      filter: { type: "text", placeholder: "Email…" } },
   { key: "status",     label: "Status",      width: 120 },
   { key: "last_login", label: "Last Active", width: 150, sortKey: "last_login", defaultDir: "desc", filterKey: "last_login", filter: { type: "date" } },
-  { key: "actions",    label: "",            width: 60, resizable: false },
+  { key: "actions",    label: "",            width: 60, resizable: false, right: true },
 ];
 const TEAM_DEFAULT_WIDTHS = Object.fromEntries(TEAM_COLUMNS.map((c) => [c.key, c.width]));
+// The delete button, not a column of data — stays put rather than being
+// draggable somewhere into the middle of the table.
+const TEAM_FIXED_KEYS = ["actions"];
+
+// One switch, not five inline <td>s — so the body can map over whatever
+// order the header is currently in instead of a column count that has to
+// stay in lockstep with it by hand. Each case is exactly what used to sit
+// directly in the JSX for that column.
+function renderTeamCell(key, a, { t, authCtx, onDelete }) {
+  switch (key) {
+    case "name":
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+            background: t.mode === "dark" ? "#333" : "#0A0A0A", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, fontWeight: 700,
+          }}>{(a.name || a.email)[0].toUpperCase()}</div>
+          <div>
+            <div style={{ fontWeight: 500, color: t.text }}>{a.name || "—"}</div>
+            {a.role === "owner" && <span style={{ fontSize: 10, color: t.textMuted, background: t.surfaceAlt, padding: "1px 5px", borderRadius: 3 }}>Owner</span>}
+          </div>
+        </div>
+      );
+    case "email":
+      return (
+        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: t.textMid }} title={a.email}>
+          {a.email}
+        </span>
+      );
+    case "status":
+      return a.last_login ? (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#22C55E", fontWeight: 500 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E" }} />
+          Active
+        </span>
+      ) : (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#F59E0B", fontWeight: 500 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B" }} />
+          Invited
+        </span>
+      );
+    case "last_login":
+      return <span style={{ color: t.textMuted, fontSize: 12 }}>{a.last_login ? friendlyDate(a.last_login) : "Never"}</span>;
+    case "actions":
+      return (a.id !== authCtx.admin?.id && !(a.role === "owner" && authCtx.admin?.role !== "owner")) && (
+        <button onClick={() => onDelete(a)} style={{
+          background: "none", border: "none", cursor: "pointer", color: t.textMuted, padding: 4,
+        }}
+          onMouseEnter={(e) => e.currentTarget.style.color = "#EF4444"}
+          onMouseLeave={(e) => e.currentTarget.style.color = t.textMuted}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
+        </button>
+      );
+    default:
+      return null;
+  }
+}
 
 export default function TeamPage() {
   const themeCtx = useTheme();
@@ -48,6 +110,7 @@ export default function TeamPage() {
   const [sort, setSort] = useState({ sortBy: null, sortDir: null });
   const [filters, setFilters] = useState({});
   const { widths, startResize, resetWidth } = useColumnWidths("team-admins", TEAM_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("team-admins", TEAM_COLUMNS, TEAM_FIXED_KEYS);
 
   const handleSort = (key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir));
   const handleFilter = (key, value) => setFilters((f) => {
@@ -167,18 +230,26 @@ export default function TeamPage() {
             borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed",
           }}>
             <colgroup>
-              {TEAM_COLUMNS.map((col) => (
+              {orderedColumns.map((col) => (
                 <col key={col.key} style={{ width: widths[col.key] }} />
               ))}
             </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${t.border}`, background: t.surfaceAlt }}>
-                {TEAM_COLUMNS.map((col) => (
-                  <th key={col.key} style={{
-                    position: "relative", textAlign: "left", padding: "10px 16px",
-                    fontSize: 11, fontWeight: 600, color: t.textMuted,
-                    textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap",
-                  }}>
+                {orderedColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{
+                      position: "relative", textAlign: "left", padding: "10px 16px",
+                      fontSize: 11, fontWeight: 600, color: t.textMuted,
+                      textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap",
+                      background: dragOverKey === col.key ? t.accentLight : undefined,
+                    }}
+                    {...dropTargetProps(col.key)}
+                  >
+                    {!TEAM_FIXED_KEYS.includes(col.key) && (
+                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
+                    )}
                     {col.sortKey ? (
                       <SortLabel
                         theme={t}
@@ -212,7 +283,7 @@ export default function TeamPage() {
             <tbody>
               {admins.length === 0 && (
                 <tr>
-                  <td colSpan={TEAM_COLUMNS.length} style={{ padding: 24, textAlign: "center", color: t.textMuted }}>
+                  <td colSpan={orderedColumns.length} style={{ padding: 24, textAlign: "center", color: t.textMuted }}>
                     No team members match.
                   </td>
                 </tr>
@@ -221,51 +292,17 @@ export default function TeamPage() {
                 <tr key={a.id} style={{ borderBottom: `1px solid ${t.border}` }}
                   onMouseEnter={(e) => e.currentTarget.style.background = t.accentLight}
                   onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{
-                        width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
-                        background: m === "dark" ? "#333" : "#0A0A0A", color: "#fff",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 12, fontWeight: 700,
-                      }}>{(a.name || a.email)[0].toUpperCase()}</div>
-                      <div>
-                        <div style={{ fontWeight: 500, color: t.text }}>{a.name || "—"}</div>
-                        {a.role === "owner" && <span style={{ fontSize: 10, color: t.textMuted, background: t.surfaceAlt, padding: "1px 5px", borderRadius: 3 }}>Owner</span>}
-                      </div>
-                    </div>
-                  </td>
-                  <td style={{ padding: "12px 16px", color: t.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.email}>{a.email}</td>
-                  <td style={{ padding: "12px 16px" }}>
-                    {a.last_login ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#22C55E", fontWeight: 500 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E" }} />
-                        Active
-                      </span>
-                    ) : (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#F59E0B", fontWeight: 500 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B" }} />
-                        Invited
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: "12px 16px", color: t.textMuted, fontSize: 12 }}>
-                    {a.last_login ? friendlyDate(a.last_login) : "Never"}
-                  </td>
-                  <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                    {a.id !== authCtx.admin?.id && !(a.role === "owner" && authCtx.admin?.role !== "owner") && (
-                      <button onClick={() => setDeleteConfirm(a)} style={{
-                        background: "none", border: "none", cursor: "pointer", color: t.textMuted, padding: 4,
+                  {orderedColumns.map((col) => (
+                    <td
+                      key={col.key}
+                      style={{
+                        padding: "12px 16px",
+                        ...(col.key === "actions" ? { textAlign: "right" } : {}),
                       }}
-                        onMouseEnter={(e) => e.currentTarget.style.color = "#EF4444"}
-                        onMouseLeave={(e) => e.currentTarget.style.color = t.textMuted}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                        </svg>
-                      </button>
-                    )}
-                  </td>
+                    >
+                      {renderTeamCell(col.key, a, { t, authCtx, onDelete: setDeleteConfirm })}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
