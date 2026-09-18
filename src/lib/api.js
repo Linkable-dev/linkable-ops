@@ -169,6 +169,11 @@ export const api = {
   // `scope` is "default" or a brand's user id.
   getAutopilotAllowances: () => request("/autopilot/allowances"),
   // The outreach knobs that used to be env vars and Go constants.
+  getProviderCosts: () => request("/autopilot/provider-costs"),
+  setProviderCost: (provider, data) => request(`/autopilot/provider-costs/${encodeURIComponent(provider)}`, {
+    method: "PUT", body: JSON.stringify(data),
+  }),
+  clearProviderCost: (provider) => request(`/autopilot/provider-costs/${encodeURIComponent(provider)}`, { method: "DELETE" }),
   getOutreachSettings: () => request("/autopilot/settings"),
   setOutreachSetting: (key, data) =>
     request(`/autopilot/settings/${encodeURIComponent(key)}`, {

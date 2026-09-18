@@ -3,6 +3,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { Btn } from "../ui/Button";
 import { Skeleton } from "../ui/Skeleton";
 import { api } from "../../lib/api";
+import ProviderCosts from "./ProviderCosts";
 
 /**
  * Everything the sending obeys, behind one cog.
@@ -90,8 +91,11 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
   }
 
   async function saveLimit() {
-    const searches = Math.floor(Number(limitDraft));
-    if (!Number.isFinite(searches) || searches < 0) return;
+    const searches = Number(limitDraft);
+    if (!/^\d+$/.test(limitDraft) || !Number.isInteger(searches) || searches < 0 || searches > 1000) {
+      setError("Enter a whole number from 0 to 1000");
+      return;
+    }
     setBusy("__limit");
     setError("");
     try {
@@ -201,8 +205,9 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>Outreach settings</div>
                 <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
-                  Read on every send, so a change is live within the minute — no deploy. Leave one
-                  empty and the service uses what it shipped with.
+                  Changes are picked up within a minute and used at the next relevant action.
+                  Launch defaults apply to new agents; existing schedules and sequences keep their values.
+                  Leave a setting empty to use its environment or built-in default.
                 </div>
               </div>
               <button
@@ -238,6 +243,8 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
                   <input
                     type="number"
                     min="0"
+                    max="1000"
+                    step="1"
                     value={limitDraft}
                     onChange={(e) => setLimitDraft(e.target.value)}
                     style={{ ...field, width: 110 }}
@@ -299,6 +306,13 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
                           value={drafts[s.key] ?? ""}
                           onChange={(v) => setDrafts({ ...drafts, [s.key]: v })}
                         />
+                      ) : s.kind === "schedule" ? (
+                        <ScheduleEditor
+                          theme={theme}
+                          field={field}
+                          value={drafts[s.key] ?? ""}
+                          onChange={(v) => setDrafts({ ...drafts, [s.key]: v })}
+                        />
                       ) : s.kind === "choice" ? (
                         <select
                           value={drafts[s.key] ?? ""}
@@ -315,6 +329,9 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
                       ) : (
                         <input
                           type={s.kind === "number" ? "number" : "text"}
+                          min={s.kind === "number" ? 1 : undefined}
+                          max={s.kind === "number" ? (s.max ?? 100000) : undefined}
+                          step={s.kind === "number" ? 1 : undefined}
                           value={drafts[s.key] ?? ""}
                           placeholder={s.placeholder || ""}
                           onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })}
@@ -352,6 +369,8 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
                   );
                 })}
 
+              <ProviderCosts theme={theme} field={field} section={section} />
+
               {error && (
                 <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 4 }}>{error}</div>
               )}
@@ -372,6 +391,119 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
  * exactly like a save that worked. So the JSON stays underneath and this edits
  * the steps: a delay in days, a subject, and the body.
  */
+/**
+ * When a campaign's emails are allowed to go out. Lemlist attaches a schedule
+ * to every campaign it creates and defaults it to its own hours (Paris,
+ * 9-to-6, weekdays) unless told otherwise — which is why a push at 7pm can
+ * sit quietly until the next working morning. Days as toggles rather than a
+ * multi-select, because a week is seven things a person recognises at a
+ * glance faster than they read a list.
+ */
+const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function ScheduleEditor({ theme, field, value, onChange }) {
+  let sched = { timezone: "", start: "09:00", end: "18:00", weekdays: [] };
+  let broken = false;
+  try {
+    if (value) sched = { ...sched, ...JSON.parse(value) };
+  } catch {
+    broken = true;
+  }
+
+  const write = (next) => onChange(JSON.stringify(next));
+  const patch = (key, v) => write({ ...sched, [key]: v });
+  const toggleDay = (day) =>
+    patch(
+      "weekdays",
+      sched.weekdays.includes(day)
+        ? sched.weekdays.filter((d) => d !== day)
+        : [...sched.weekdays, day].sort((a, b) => a - b),
+    );
+
+  if (broken) {
+    return (
+      <>
+        <div style={{ color: "#B91C1C", fontSize: 12, marginBottom: 6 }}>
+          This is not valid JSON, so it cannot be shown as a schedule. Fix it here or clear it.
+        </div>
+        <textarea
+          rows={4}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...field, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+        />
+      </>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {!value && (
+        <div style={{ color: theme.textMuted, fontSize: 12 }}>
+          Nothing set, so Lemlist uses its own default hours. Fill this in to take control of
+          when a campaign's emails go out.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {WEEKDAY_NAMES.map((name, i) => {
+          const day = i + 1;
+          const on = sched.weekdays.includes(day);
+          return (
+            <button
+              key={day}
+              type="button"
+              onClick={() => toggleDay(day)}
+              title={name}
+              style={{
+                padding: "5px 9px",
+                borderRadius: 7,
+                border: `1px solid ${on ? theme.text : theme.border}`,
+                background: on ? theme.accentLight : "transparent",
+                color: theme.text,
+                fontSize: 12,
+                fontWeight: on ? 600 : 400,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {name.slice(0, 3)}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <label style={{ fontSize: 12, color: theme.textMuted, display: "flex", flexDirection: "column", gap: 4 }}>
+          From
+          <input
+            type="time"
+            value={sched.start}
+            onChange={(e) => patch("start", e.target.value)}
+            style={{ ...field, width: 110 }}
+          />
+        </label>
+        <label style={{ fontSize: 12, color: theme.textMuted, display: "flex", flexDirection: "column", gap: 4 }}>
+          To
+          <input
+            type="time"
+            value={sched.end}
+            onChange={(e) => patch("end", e.target.value)}
+            style={{ ...field, width: 110 }}
+          />
+        </label>
+        <label style={{ fontSize: 12, color: theme.textMuted, display: "flex", flexDirection: "column", gap: 4, flex: "1 1 180px" }}>
+          Timezone
+          <input
+            value={sched.timezone}
+            placeholder="Europe/London"
+            onChange={(e) => patch("timezone", e.target.value)}
+            style={field}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function StepsEditor({ theme, field, value, onChange }) {
   let steps = [];
   let broken = false;

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { providerCostRoutes } from "./provider-costs.js";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
 import {
   parseColumnFilters, filterConditions, textFilter, enumFilter, orderBySql,
@@ -138,8 +139,9 @@ const AGENT_SORTS = {
 // felt like returning.
 const DEFAULT_ORDER = "a.status = 'working' DESC, ev.created DESC NULLS LAST, a.created DESC";
 
-export function autopilotRoutes() {
+export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
   const router = Router();
+  router.use("/provider-costs", providerCostRoutes({ query }));
 
   // GET /api/autopilot/campaigns
   // One row per campaign that has an agent, whatever state it is in — an agent
@@ -161,7 +163,7 @@ export function autopilotRoutes() {
       const limitAt = `$${params.length - 1}`;
       const offsetAt = `$${params.length}`;
 
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `
         WITH agent AS (
           SELECT a.*
@@ -268,7 +270,7 @@ export function autopilotRoutes() {
       // filter meaning either.
       const countParams = [];
       const countConds = filterConditions(columnFilters, AGENT_FILTERS, countParams);
-      const { rows: totals } = await cloudSqlQuery(
+      const { rows: totals } = await query(
         `SELECT
            count(*) FILTER (WHERE true${countConds.map((c) => ` AND ${c}`).join("")})::int AS total,
            count(*)::int                                                                  AS total_all
@@ -288,7 +290,7 @@ export function autopilotRoutes() {
       // page down rather than one column of it.
       const limits = new Map();
       try {
-        const { rows: allowances } = await cloudSqlQuery(
+        const { rows: allowances } = await query(
           `SELECT scope, monthly_searches FROM sourcing_allowances`,
         );
         for (const a of allowances) limits.set(a.scope, a.monthly_searches);
@@ -342,7 +344,7 @@ export function autopilotRoutes() {
         return res.status(400).json({ error: "Goal and budget must be whole numbers" });
       }
 
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `UPDATE sourcing_agents
             SET mode = $2,
                 goal_applications = $3,
@@ -389,7 +391,7 @@ export function autopilotRoutes() {
   router.post("/campaigns/:id/wake", async (req, res) => {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `UPDATE sourcing_agents
             SET next_action_at = current_timestamp, updated = current_timestamp
           WHERE product_id = $1::uuid AND ${ND} AND mode <> 'off'
@@ -419,7 +421,7 @@ export function autopilotRoutes() {
   // The default, and every brand that has been given a number of its own.
   router.get("/allowances", async (req, res) => {
     try {
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `SELECT sa.scope, sa.monthly_searches, sa.note, sa.updated, sa.updated_by,
                 b.store_name, u.email,
                 (SELECT count(*)::int FROM sourcing_runs sr
@@ -455,8 +457,9 @@ export function autopilotRoutes() {
       if (scope !== "default" && !/^[0-9a-f-]{36}$/i.test(scope)) {
         return res.status(400).json({ error: "Scope must be 'default' or a brand user id" });
       }
-      const searches = Math.floor(Number(req.body?.monthly_searches));
-      if (!Number.isFinite(searches) || searches < 0 || searches > 1000) {
+      const rawSearches = req.body?.monthly_searches;
+      const searches = Number(rawSearches);
+      if (!/^[0-9]+$/.test(String(rawSearches)) || !Number.isInteger(searches) || searches < 0 || searches > 1000) {
         return res.status(400).json({ error: "Searches must be a whole number between 0 and 1000" });
       }
       const note = String(req.body?.note || "").slice(0, 500);
@@ -464,13 +467,13 @@ export function autopilotRoutes() {
       // A brand scope has to be a brand. A typo'd uuid would otherwise sit
       // there as a row that looks like a limit and applies to nobody.
       if (scope !== "default") {
-        const { rows } = await cloudSqlQuery(
+        const { rows } = await query(
           `SELECT 1 FROM users WHERE id = $1 AND role = 2`, [scope],
         );
         if (!rows.length) return res.status(404).json({ error: "No brand with that id" });
       }
 
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `INSERT INTO sourcing_allowances (scope, monthly_searches, note, updated_by)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (scope) DO UPDATE
@@ -536,6 +539,7 @@ export function autopilotRoutes() {
     },
     {
       key: "agent_goal_applications",
+      max: 500,
       label: "Applications to aim for",
       kind: "number",
       placeholder: "25",
@@ -543,6 +547,7 @@ export function autopilotRoutes() {
     },
     {
       key: "agent_max_runs",
+      max: 10,
       label: "Searches allowed per campaign",
       kind: "number",
       placeholder: "2",
@@ -563,6 +568,20 @@ export function autopilotRoutes() {
       help: "Each one can start a search, so this is the ceiling on what the platform spends in a single pass.",
     },
     {
+      key: "agent_short_wait_minutes",
+      label: "Search check and initial retry delay",
+      kind: "number",
+      placeholder: "10",
+      help: "Minutes before checking an in-progress search again, or retrying a failed action. Applies when the next check is scheduled.",
+    },
+    {
+      key: "agent_max_backoff_hours",
+      label: "Maximum retry delay",
+      kind: "number",
+      placeholder: "6",
+      help: "Maximum hours between retries after repeated failures. Applies when the next retry is scheduled.",
+    },
+    {
       key: "test_recipients",
       label: "Test inboxes",
       kind: "text",
@@ -575,11 +594,20 @@ export function autopilotRoutes() {
       kind: "steps",
       help: "Sent when the writer is off, and whenever it produces nothing. {{brandName}}, {{campaignName}}, {{firstName}}, {{offerSummary}} and {{applyUrl}} are filled in per creator.",
     },
+    {
+      key: "sending_schedule",
+      label: "Sending hours",
+      kind: "schedule",
+      help: "When a new campaign's emails are allowed to go out. Without this, Lemlist uses its own default (Europe/Paris, 09:00–18:00, Monday to Friday) — which is why a campaign pushed at 7pm can sit until the next working morning.",
+    },
   ];
+
+  const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
   router.get("/settings", async (req, res) => {
     try {
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `SELECT key, value, note, updated, updated_by FROM sourcing_settings`,
       );
       const stored = new Map(rows.map((r) => [r.key, r]));
@@ -594,7 +622,7 @@ export function autopilotRoutes() {
           // An unset key is not an empty setting: the service falls back to the
           // environment variable it replaced and then to the built-in value,
           // and the page should say so rather than imply a blank.
-          set: stored.has(k.key),
+          set: Boolean(stored.get(k.key)?.value?.trim()),
         })),
       });
     } catch (e) {
@@ -614,13 +642,41 @@ export function autopilotRoutes() {
       const value = String(req.body?.value ?? "").trim();
       if (known.kind === "number" && value !== "") {
         const n = Number(value);
-        if (!Number.isInteger(n) || n <= 0 || n > 100000) {
-          return res.status(400).json({ error: "That has to be a whole number above zero" });
+        if (!/^\d+$/.test(value) || !Number.isInteger(n) || n <= 0 || n > (known.max ?? 100000)) {
+          return res.status(400).json({ error: `Enter a whole number from 1 to ${known.max ?? 100000}` });
         }
       }
       if (known.kind === "choice" && value !== "") {
         if (!known.options.some((o) => o.value === value)) {
           return res.status(400).json({ error: "Pick one of the offered options" });
+        }
+      }
+      if (known.kind === "schedule" && value !== "") {
+        // Checked here too, for the reason the steps below are: a schedule
+        // saved broken would look saved and Lemlist would keep whatever hours
+        // it already had, which is the confusing half of a safe failure.
+        let sched;
+        try {
+          sched = JSON.parse(value);
+        } catch {
+          return res.status(400).json({ error: "That is not valid JSON" });
+        }
+        if (!sched?.timezone || typeof sched.timezone !== "string") {
+          return res.status(400).json({ error: "Needs a timezone" });
+        }
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: sched.timezone });
+        } catch {
+          return res.status(400).json({ error: `"${sched.timezone}" is not a timezone name (use the IANA form, e.g. Europe/London)` });
+        }
+        if (!HHMM.test(sched.start) || !HHMM.test(sched.end)) {
+          return res.status(400).json({ error: "Start and end need to be 24-hour times, like 09:00" });
+        }
+        if (!Array.isArray(sched.weekdays) || !sched.weekdays.length) {
+          return res.status(400).json({ error: "Needs at least one day" });
+        }
+        if (sched.weekdays.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {
+          return res.status(400).json({ error: "Days are 1 (Monday) through 7 (Sunday)" });
         }
       }
       if (known.kind === "steps" && value !== "") {
@@ -638,17 +694,17 @@ export function autopilotRoutes() {
           return res.status(400).json({ error: "Needs a non-empty \"steps\" array" });
         }
         for (const [i, step] of steps.entries()) {
-          if (!String(step?.subject || "").trim() || !String(step?.message || "").trim()) {
+          if (typeof step?.subject !== "string" || typeof step?.message !== "string" || !step.subject.trim() || !step.message.trim()) {
             return res.status(400).json({ error: `Step ${i + 1} needs both a subject and a message` });
           }
-          if (!Number.isInteger(step?.delay) || step.delay < 0) {
-            return res.status(400).json({ error: `Step ${i + 1} needs a whole-number delay in days` });
+          if (!Number.isSafeInteger(step?.delay) || step.delay < 0 || step.delay > 100000) {
+            return res.status(400).json({ error: `Step ${i + 1} needs a whole-number delay from 0 to 100000 days` });
           }
         }
       }
 
       const note = String(req.body?.note || "").slice(0, 500);
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `INSERT INTO sourcing_settings (key, value, note, updated_by)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (key) DO UPDATE
@@ -675,7 +731,10 @@ export function autopilotRoutes() {
   router.delete("/settings/:key", async (req, res) => {
     try {
       const key = String(req.params.key || "");
-      await cloudSqlQuery(`DELETE FROM sourcing_settings WHERE key = $1`, [key]);
+      if (!SETTING_KEYS.some((setting) => setting.key === key)) {
+        return res.status(400).json({ error: "Unknown setting" });
+      }
+      await query(`DELETE FROM sourcing_settings WHERE key = $1`, [key]);
       console.log(
         `[sourcing-setting] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
         `key=${key} CLEARED`,
@@ -697,7 +756,7 @@ export function autopilotRoutes() {
       if (!/^[0-9a-f-]{36}$/i.test(scope)) {
         return res.status(400).json({ error: "Only a brand's own limit can be removed" });
       }
-      await cloudSqlQuery(`DELETE FROM sourcing_allowances WHERE scope = $1`, [scope]);
+      await query(`DELETE FROM sourcing_allowances WHERE scope = $1`, [scope]);
       console.log(
         `[sourcing-allowance] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
         `scope=${scope} removed`,
@@ -729,7 +788,7 @@ export function autopilotRoutes() {
       const state = STATES[req.query.state] ? STATES[req.query.state] : null;
       const where = `c.product_id = $1 AND c.${ND}${state ? ` AND ${state}` : ""}`;
 
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `SELECT c.id, c.created, c.instagram_username, c.full_name, c.followers, c.engagement,
                 c.country, c.email <> '' AS reachable, c.status, c.filter_reason,
                 c.push_status, c.pushed_at, c.applied_at, c.decision, c.fit_score, c.fit_verdict,
@@ -743,7 +802,7 @@ export function autopilotRoutes() {
 
       // The breakdown is of the WHOLE campaign, not the filtered page: it is
       // the map you choose a state from, so it cannot itself be narrowed.
-      const { rows: counts } = await cloudSqlQuery(
+      const { rows: counts } = await query(
         `SELECT
            count(*)::int                                                          AS total,
            count(*) FILTER (WHERE c.email <> '')::int                             AS reachable,
@@ -770,7 +829,7 @@ export function autopilotRoutes() {
       if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid campaign id" });
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
 
-      const { rows } = await cloudSqlQuery(
+      const { rows } = await query(
         `SELECT r.id, r.created, r.received_at, r.lead_email, r.intent, r.status, r.needs_human,
                 r.escalation_reason, r.channel, r.sent_at, r.error,
                 -- The reply and the answer, trimmed: this is a list to scan,
@@ -803,7 +862,7 @@ export function autopilotRoutes() {
       }
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
 
-      const { rows: events } = await cloudSqlQuery(
+      const { rows: events } = await query(
         `SELECT e.created, e.action, e.summary, e.detail
          FROM sourcing_agent_events e
          JOIN sourcing_agents a ON a.id = e.sourcing_agent_id
@@ -816,7 +875,7 @@ export function autopilotRoutes() {
       // The searches themselves: what each one cost and what it found. A stalled
       // enrichment shows up here as a run that is still 'enriching' with a
       // checked count well under what it discovered.
-      const { rows: runs } = await cloudSqlQuery(
+      const { rows: runs } = await query(
         `SELECT
            r.id, r.created, r.status, r.error,
            r.target_creators, r.discovered_count, r.filtered_count, r.enriched_count,
