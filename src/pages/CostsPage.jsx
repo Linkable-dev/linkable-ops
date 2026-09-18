@@ -154,7 +154,6 @@ export default function CostsPage() {
       <div style={{ marginBottom: 34 }}>
         <Card pad={0} style={{ padding: 16 }}>
           <ProviderCosts theme={theme}
-            field={{ width: "100%", padding: "7px 9px", borderRadius: 7, border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: 13, fontFamily: "inherit" }}
             section={{ background: "transparent", border: "none", padding: 0, margin: 0 }} />
         </Card>
       </div>

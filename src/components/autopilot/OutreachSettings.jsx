@@ -407,7 +407,7 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
                   );
                 })}
 
-              <ProviderCosts theme={theme} field={field} section={section} />
+              <ProviderCosts theme={theme} section={section} />
 
               {error && (
                 <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 4 }}>{error}</div>
