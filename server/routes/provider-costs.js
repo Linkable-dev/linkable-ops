@@ -3,11 +3,20 @@ import { cloudSqlQuery } from "../lib/cloudsql.js";
 
 // Units are fixed to the counters we actually record. A rate cannot silently
 // change from cost per credit to cost per thousand credits.
+// rateHint is what their own pricing page discloses publicly — never a
+// number to trust as-is. Neither provider publishes a rate that applies to
+// us specifically: Influencers.club quotes a price-per-credit band that
+// depends on which plan and volume we're actually contracted at, and Lemlist
+// doesn't bill per lead at all (flat monthly fee, by seat or by send
+// volume). The real rate is whatever our own invoice says — until that's
+// on hand, this is a plausibility check on what gets typed in, not a default.
 export const COST_PROVIDERS = [
   { provider: "influencers_club", label: "Influencers.club", unit: "credit",
-    help: "Recorded credits for sourcing runs started this month, valued at the current rate. Includes deleted runs; excludes enrichment outside sourcing." },
+    help: "Recorded credits for sourcing runs started this month, valued at the current rate. Includes deleted runs; excludes enrichment outside sourcing.",
+    rateHint: "Their pricing page quotes $0.15–$0.28/credit depending on plan and volume (influencers.club/pricing) — check our actual invoice for the real rate." },
   { provider: "lemlist", label: "Lemlist", unit: "lead",
-    help: "Candidate records last pushed to Lemlist this month, valued at the current rate. An allocated cost per lead, not a provider invoice or count of emails sent." },
+    help: "Candidate records last pushed to Lemlist this month, valued at the current rate. An allocated cost per lead, not a provider invoice or count of emails sent.",
+    rateHint: "Lemlist doesn't charge per lead — it's a flat monthly fee ($69–$659 by send volume, or $109/seat on Multichannel). Divide our real monthly bill by leads pushed to get an allocated rate." },
 ];
 
 export function providerCostRoutes({ query = cloudSqlQuery } = {}) {

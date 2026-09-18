@@ -60,9 +60,13 @@ export default function ProviderCosts({ theme, field, section }) {
                 ? `${p.currency} ${Number(p.estimated_cost).toFixed(4)} estimated`
                 : "Rate unset"}
             </p>
+            {p.rateHint && !p.configured && (
+              <p style={{ fontSize: 11, color: theme.textMuted, fontStyle: "italic" }}>{p.rateHint}</p>
+            )}
             <label style={{ display: "block", fontSize: 12 }}>
               Cost per {p.unit}
               <input aria-label={`${p.label} cost per ${p.unit}`} type="number" min="0" max="999999.999999" step="0.000001"
+                placeholder={p.rateHint ? "e.g. from the real invoice" : undefined}
                 value={draft.unit_cost} onChange={(e) => patch(p.provider, "unit_cost", e.target.value)} style={field} />
             </label>
             <label style={{ display: "block", fontSize: 12, marginTop: 8 }}>

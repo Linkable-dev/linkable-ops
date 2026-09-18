@@ -92,6 +92,7 @@ test("HTTP saves, resets and estimates use actual Postgres values", {
     agent_goal_applications: "40", agent_max_runs: "4", agent_patience_hours: "24", agents_per_tick: "2",
     test_recipients: "test@example.com", agent_short_wait_minutes: "7", agent_max_backoff_hours: "3",
     house_sequence: JSON.stringify({ steps: [{ delay: 0, subject: "Hi", message: "Body" }] }),
+    sending_schedule: JSON.stringify({ timezone: "Europe/London", start: "09:00", end: "18:00", weekdays: [1, 2, 3, 4, 5] }),
   };
   assert.equal((await request("/settings")).body.settings.length, Object.keys(samples).length);
   for (const [key, value] of Object.entries(samples)) {
