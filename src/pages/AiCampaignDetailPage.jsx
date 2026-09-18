@@ -11,6 +11,7 @@ import { Select } from "../components/ui/Select";
 import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonStat, SkeletonStatGrid, SkeletonTableRows, SkeletonPills, SkeletonKeyValue } from "../components/ui/Skeleton";
 import { TabBar } from "../components/ui/TabBar";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 import { Pagination } from "../components/ui/Pagination";
 import { useColumnWidths, ResizeHandle, SortLabel, nextSort } from "../components/table/tableTools";
 
@@ -496,6 +497,7 @@ function SendsTab({ campaign, theme }) {
   const [stopReason, setStopReason] = useState("replied");
   const [stopBusy, setStopBusy] = useState(false);
   const [stopResult, setStopResult] = useState(null);
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   const [previewId, setPreviewId] = useState(null);
 
@@ -772,7 +774,14 @@ function SendsTab({ campaign, theme }) {
                       </button>
                       {(r.status === "pending" || r.status === "scheduled") && (
                         <button
-                          onClick={() => { if (window.confirm(`Stop all pending emails to ${r.to_email}? This suppresses the address for this campaign.`)) runStop([r.to_email], "replied"); }}
+                          onClick={async () => {
+                            const ok = await ask({
+                              title: "Stop pending emails?",
+                              body: `Stop all pending emails to ${r.to_email}? This suppresses the address for this campaign.`,
+                              confirmLabel: "Stop", danger: true,
+                            });
+                            if (ok) runStop([r.to_email], "replied");
+                          }}
                           disabled={stopBusy}
                           style={miniBtn(theme)}
                           title="Cancel this row + all other pending touches for this address"
@@ -807,6 +816,7 @@ function SendsTab({ campaign, theme }) {
           onClose={() => setPreviewId(null)}
         />
       )}
+      {confirmDialog}
     </>
   );
 }
@@ -1316,6 +1326,7 @@ function ScheduleEditor({ form, setForm, theme }) {
 function CampaignActions({ campaign, onChange, navigate }) {
   const [busy, setBusy] = useState(null); // "pause" | "resume" | "archive"
   const [err, setErr] = useState(null);
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   async function run(action, fn) {
     setBusy(action); setErr(null);
@@ -1325,8 +1336,13 @@ function CampaignActions({ campaign, onChange, navigate }) {
   }
   const pause = () => run("pause", async () => { await api.pauseOutboundCampaign(campaign.id); onChange(); });
   const resume = () => run("resume", async () => { await api.resumeOutboundCampaign(campaign.id); onChange(); });
-  const archive = () => {
-    if (!window.confirm(`Archive "${campaign.name}"? Already-scheduled touches will still go out unless you also pause.`)) return;
+  const archive = async () => {
+    const ok = await ask({
+      title: "Archive campaign?",
+      body: `Archive "${campaign.name}"? Already-scheduled touches will still go out unless you also pause.`,
+      confirmLabel: "Archive", danger: true,
+    });
+    if (!ok) return;
     run("archive", async () => { await api.archiveOutboundCampaign(campaign.id); navigate("/ai/agents"); });
   };
 
@@ -1338,6 +1354,7 @@ function CampaignActions({ campaign, onChange, navigate }) {
         {campaign.status !== "archived" && <Btn onClick={archive} loading={busy === "archive"} disabled={!!busy} variant="outline" color="#DC2626">Archive</Btn>}
       </div>
       {err && <div style={{ fontSize: 12, color: "#B91C1C" }}>{err}</div>}
+      {confirmDialog}
     </div>
   );
 }
@@ -1816,6 +1833,7 @@ function TemplateRow({ template, theme, onChange }) {
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   async function save() {
     setBusy(true); setErr(null);
@@ -1835,7 +1853,12 @@ function TemplateRow({ template, theme, onChange }) {
   }
 
   async function deactivate() {
-    if (!window.confirm("Deactivate this template? It won't be sent again until you toggle is_active back on.")) return;
+    const ok = await ask({
+      title: "Deactivate template?",
+      body: "It won't be sent again until you toggle is_active back on.",
+      confirmLabel: "Deactivate", danger: true,
+    });
+    if (!ok) return;
     setBusy(true); setErr(null);
     try { await api.deleteOutboundTemplate(template.id); onChange(); }
     catch (e) { setErr(e.message); }
@@ -1845,6 +1868,7 @@ function TemplateRow({ template, theme, onChange }) {
   if (!editing) {
     return (
       <div style={{ padding: 8, background: theme.surfaceAlt, borderRadius: 6, fontSize: 12 }}>
+        {confirmDialog}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ color: theme.text }}>{template.name || template.template_key}</strong>

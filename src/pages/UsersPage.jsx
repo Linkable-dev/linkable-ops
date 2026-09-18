@@ -12,6 +12,7 @@ import { BrandLink } from "../components/brand/BrandLink";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 import {
   useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
 } from "../components/table/tableTools";
@@ -134,6 +135,7 @@ export default function UsersPage() {
   const [showHidden, setShowHidden] = useState(false);
   const [manageRow, setManageRow] = useState(null); // null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   const columns = tab === "brands" ? BRAND_COLUMNS
     : tab === "creators" ? CREATOR_COLUMNS
@@ -228,11 +230,13 @@ export default function UsersPage() {
       : (`${row.first_name || ""} ${row.last_name || ""}`.trim() || row.email);
     let reason = "";
     if (!row.disqualified_at) {
-      const answer = window.prompt(
-        `Rule out ${label}?\n\nThey will not be able to apply to any campaign. ` +
-        `A brand can still invite them directly.\n\nWhy?`,
-      );
-      if (answer === null || !answer.trim()) return;
+      const answer = await ask({
+        title: `Rule out ${label}?`,
+        body: "They will not be able to apply to any campaign. A brand can still invite them directly.",
+        confirmLabel: "Rule out", danger: true,
+        prompt: { placeholder: "Why?", required: true },
+      });
+      if (!answer || !answer.trim()) return;
       reason = answer.trim();
     }
     setActionError("");
@@ -251,10 +255,12 @@ export default function UsersPage() {
 
   async function handleRestore(row) {
     const label = row.store_name || row.email || "this brand";
-    if (!window.confirm(
-      `Restore "${label}"?\n\nThis reactivates the brand and cancels the scheduled deletion. ` +
-      `Ended links are not automatically re-activated.`,
-    )) return;
+    const ok = await ask({
+      title: `Restore "${label}"?`,
+      body: "This reactivates the brand and cancels the scheduled deletion. Ended links are not automatically re-activated.",
+      confirmLabel: "Restore",
+    });
+    if (!ok) return;
     setActionError("");
     setRestoring(row.user_id);
     try {
@@ -462,6 +468,7 @@ export default function UsersPage() {
           Showing {rows.length}{rows[0]?.total_count != null ? <> of {Number(rows[0].total_count).toLocaleString()}</> : null} {tabLabel}{rows[0]?.total_count != null && Number(rows[0].total_count) > rows.length ? " — refine the search to see the rest" : ""}
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

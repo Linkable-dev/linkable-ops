@@ -16,6 +16,7 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Skeleton, SkeletonRow, SkeletonListRows, SkeletonKeyValue, SkeletonPills } from "../components/ui/Skeleton";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 
 const MODE_OPTIONS = [
   { value: "all", label: "All" },
@@ -44,6 +45,7 @@ export default function AiInboxPage() {
   const [detail, setDetail] = useState(null);       // detail payload (shape depends on mode)
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyAction, setBusyAction] = useState(null);
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   const loadList = useCallback(() => {
     setLoading(true);
@@ -99,7 +101,12 @@ export default function AiInboxPage() {
 
   async function onOptOut() {
     if (!selected || selected.mode !== "manual") return;
-    if (!confirm(`Opt out ${selected.to_email}? This adds them to suppressions and cancels remaining touches.`)) return;
+    const ok = await ask({
+      title: "Opt out?",
+      body: `Opt out ${selected.to_email}? This adds them to suppressions and cancels remaining touches.`,
+      confirmLabel: "Opt out", danger: true,
+    });
+    if (!ok) return;
     setBusyAction("opt-out");
     try {
       await api.optOutOutboundInboxManual(selected.send_id, { note: "ui inbox opt-out" });
@@ -157,6 +164,7 @@ export default function AiInboxPage() {
           />
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }
