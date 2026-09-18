@@ -8,17 +8,31 @@ import { ENUM_LABELS } from "../lib/statusLabels.js";
 // Best-first guess at which column on a referenced table is fit for a human
 // to read — reused by both fk-options and resolve-fks so the two endpoints
 // can never pick a different label column for the same table.
+//
+// first_name/last_name are excluded from the generic "_name" match and tried
+// only as a last resort: they're a contact's name fragment, not the row's
+// identity, and a table can have both a real identity column (store_name,
+// username, email...) AND an empty first_name that happens to come first in
+// column order. Before this exclusion, brands.first_name (empty on most
+// rows) beat brands.store_name for exactly that reason, and every brand_id
+// resolved to "Unknown".
 async function pickLabelColumn(table, pk) {
   const { rows: cols } = await cloudSqlQuery(
     `SELECT column_name, data_type FROM information_schema.columns
      WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
     [table]
   );
+  const isPersonNameFragment = (n) => n === "first_name" || n === "last_name";
   const labelPrefs = ["name", "title", "full_name", "username", "email", "label", "display_name", "slug"];
   for (const pref of labelPrefs) {
-    const found = cols.find((c) => c.column_name === pref || c.column_name.endsWith(`_${pref}`) || c.column_name.endsWith(`_name`));
+    const found = cols.find((c) =>
+      !isPersonNameFragment(c.column_name) &&
+      (c.column_name === pref || c.column_name.endsWith(`_${pref}`) || c.column_name.endsWith(`_name`))
+    );
     if (found) return found.column_name;
   }
+  const nameFragment = cols.find((c) => isPersonNameFragment(c.column_name));
+  if (nameFragment) return nameFragment.column_name;
   const textCol = cols.find(
     (c) => ["text", "character varying", "varchar"].includes(c.data_type) && c.column_name !== pk
   );
