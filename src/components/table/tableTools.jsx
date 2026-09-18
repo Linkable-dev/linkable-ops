@@ -142,11 +142,17 @@ export function ResizeHandle({ colKey, startResize, resetWidth, theme }) {
 // ("asc" reads right for text, "desc" for dates/numbers).
 export function SortLabel({ label, colKey, sortBy, sortDir, onSort, defaultDir = "desc", theme }) {
   const isActive = sortBy === colKey;
-  const arrow = !isActive ? "" : sortDir === "asc" ? " ↑" : " ↓";
+  // Active: a solid arrow saying which way. Inactive: both arrows, faint,
+  // rather than nothing -- every sortable column here IS clickable today,
+  // but without a persistent mark a header reads as a label, not a control,
+  // until you happen to hover it.
+  const indicator = isActive ? (sortDir === "asc" ? "↑" : "↓") : "↕";
   return (
     <span
       onClick={() => onSort(colKey, defaultDir)}
+      title={isActive ? undefined : "Sort by " + label}
       style={{
+        display: "inline-flex", alignItems: "center", gap: 3,
         cursor: "pointer", userSelect: "none",
         color: isActive ? theme.text : theme.textMuted,
         transition: "color 0.12s",
@@ -154,7 +160,8 @@ export function SortLabel({ label, colKey, sortBy, sortDir, onSort, defaultDir =
       onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; }}
       onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; }}
     >
-      {label}{arrow}
+      {label}
+      <span style={{ fontSize: 10, opacity: isActive ? 1 : 0.45 }}>{indicator}</span>
     </span>
   );
 }

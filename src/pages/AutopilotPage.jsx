@@ -50,6 +50,10 @@ const COLUMNS = [
   { key: "brand_name", label: "Brand", sort: "asc", filter: true },
   { key: "mode", label: "Mode", sort: "asc", filter: true },
   { key: "status", label: "State", sort: "asc", filter: true },
+  // When enrolSourcingAgent created this campaign's agent — which happens
+  // only at the NEW -> ACTIVE transition, so it doubles as "when this
+  // campaign launched" without needing a column of its own on products.
+  { key: "enrolled_at", label: "Launched", sort: "desc" },
   { key: "found", label: "Found", sort: "desc", right: true },
   { key: "contactable", label: "Contactable", sort: "desc", right: true },
   { key: "emailed", label: "Emailed", sort: "desc", right: true },
@@ -410,11 +414,11 @@ export default function AutopilotPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonTableRows rows={6} cols={13} />}
+                {loading && <SkeletonTableRows rows={6} cols={COLUMNS.length + 1} />}
 
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td style={{ ...td, color: theme.textMuted }} colSpan={13}>
+                    <td style={{ ...td, color: theme.textMuted }} colSpan={COLUMNS.length + 1}>
                       {activeFilters.length ? (
                         <>
                           No agent matches these filters.{" "}
@@ -514,6 +518,9 @@ export default function AutopilotPage() {
                           )}
                         </td>
                         <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
+                          {ago(r.enrolled_at)}
+                        </td>
+                        <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
                           {ago(r.last_event_at)}
                         </td>
                         <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
@@ -525,7 +532,7 @@ export default function AutopilotPage() {
 
                       {openId === r.product_id && (
                         <tr>
-                          <td style={{ ...td, background: theme.bg }} colSpan={13}>
+                          <td style={{ ...td, background: theme.bg }} colSpan={COLUMNS.length + 1}>
                             <AgentDetail
                               row={r}
                               defaultLimit={defaultLimit}

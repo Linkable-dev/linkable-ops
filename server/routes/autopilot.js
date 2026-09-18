@@ -119,6 +119,7 @@ const AGENT_SORTS = {
   brand_name: "b.store_name",
   mode: "a.mode",
   status: "a.status",
+  enrolled_at: "a.created",
   found: "COALESCE(f.found, 0)",
   contactable: "COALESCE(f.contactable, 0)",
   emailed: "COALESCE(f.emailed, 0)",
