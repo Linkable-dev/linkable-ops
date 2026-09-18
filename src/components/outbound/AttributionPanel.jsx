@@ -11,12 +11,23 @@ import { api, friendlyDate } from "../../lib/api";
 import { Card } from "../ui/Card";
 import { Btn } from "../ui/Button";
 import { Skeleton } from "../ui/Skeleton";
+import { useColumnWidths, ResizeHandle } from "../table/tableTools";
 
 const SPLITS = [
   ["byGroup", "Segment"],
   ["bySender", "Sender"],
   ["byTemplate", "Template"],
 ];
+
+const ATTRIBUTION_COLUMNS = [
+  { key: "name", label: "", width: 200 },
+  { key: "sends", label: "Sends", width: 100 },
+  { key: "signups", label: "Signups", width: 100 },
+  { key: "rate", label: "Rate", width: 90 },
+  { key: "paying", label: "Paying", width: 90 },
+  { key: "mrr", label: "MRR", width: 100 },
+];
+const ATTRIBUTION_DEFAULT_WIDTHS = Object.fromEntries(ATTRIBUTION_COLUMNS.map((c) => [c.key, c.width]));
 
 export default function AttributionPanel() {
   const { theme } = useTheme();
@@ -40,6 +51,7 @@ export default function AttributionPanel() {
 
   const t = data?.totals;
   const rows = (data?.[split] || []).filter((r) => r.sends > 0).slice(0, 8);
+  const { widths, startResize, resetWidth } = useColumnWidths("attribution-panel", ATTRIBUTION_DEFAULT_WIDTHS);
 
   const stat = (label, value, sub, accent) => (
     <div key={label} style={{ minWidth: 0 }}>
@@ -104,18 +116,24 @@ export default function AttributionPanel() {
               ))}
             </div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", minWidth: 420, borderCollapse: "collapse", fontSize: 12 }}>
+              <table style={{ width: "100%", tableLayout: "fixed", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", fontSize: 12 }}>
+                <colgroup>
+                  {ATTRIBUTION_COLUMNS.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}
+                </colgroup>
                 <thead>
                   <tr style={{ color: theme.textMuted }}>
-                    {["", "Sends", "Signups", "Rate", "Paying", "MRR"].map((h, i) => (
-                      <th key={h || i} style={{ textAlign: i === 0 ? "left" : "right", padding: "4px 8px", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{h}</th>
+                    {ATTRIBUTION_COLUMNS.map((c, i) => (
+                      <th key={c.key} style={{ position: "relative", textAlign: i === 0 ? "left" : "right", padding: "4px 8px", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                        {c.label}
+                        <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.key} style={{ borderTop: `1px solid ${theme.border}` }}>
-                      <td style={{ padding: "6px 8px", color: theme.text, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.key}</td>
+                      <td style={{ padding: "6px 8px", color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.key}</td>
                       {[r.sends.toLocaleString(), r.signups, `${r.signupRate}%`, r.paying, `$${r.mrr}`].map((v, i) => (
                         <td key={i} style={{ padding: "6px 8px", textAlign: "right", color: theme.textMid, fontVariantNumeric: "tabular-nums" }}>{v}</td>
                       ))}

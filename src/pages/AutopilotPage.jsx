@@ -6,7 +6,9 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
-import { ColumnFilter, describeFilter, SortLabel, nextSort } from "../components/table/tableTools";
+import {
+  ColumnFilter, describeFilter, SortLabel, nextSort, useColumnWidths, ResizeHandle,
+} from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
 import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
 
@@ -46,24 +48,27 @@ const STATUS_COLORS = {
 // defaultDir is the direction a first click takes: "asc" reads right for
 // names, "desc" for counts and dates — biggest and most recent first is what
 // somebody clicking a number column is asking for.
-const COLUMNS = [
-  { key: "campaign_name", label: "Campaign", sort: "asc", filter: true },
-  { key: "brand_name", label: "Brand", sort: "asc", filter: true },
-  { key: "mode", label: "Mode", sort: "asc", filter: true },
-  { key: "status", label: "State", sort: "asc", filter: true },
+const AGENT_COLUMNS = [
+  { key: "campaign_name", label: "Campaign", sort: "asc", filter: true, width: 220 },
+  { key: "brand_name", label: "Brand", sort: "asc", filter: true, width: 160 },
+  { key: "mode", label: "Mode", sort: "asc", filter: true, width: 110 },
+  { key: "status", label: "State", sort: "asc", filter: true, width: 140 },
   // When enrolSourcingAgent created this campaign's agent — which happens
   // only at the NEW -> ACTIVE transition, so it doubles as "when this
   // campaign launched" without needing a column of its own on products.
-  { key: "enrolled_at", label: "Launched", sort: "desc" },
-  { key: "found", label: "Found", sort: "desc", right: true },
-  { key: "contactable", label: "Contactable", sort: "desc", right: true },
-  { key: "emailed", label: "Emailed", sort: "desc", right: true },
-  { key: "replied", label: "Replied", sort: "desc", right: true },
-  { key: "applied", label: "Applied", sort: "desc", right: true },
-  { key: "runs_used", label: "Searches", sort: "desc", right: true },
-  { key: "last_event_at", label: "Last did", sort: "desc" },
-  { key: "next_action_at", label: "Next", sort: "asc" },
+  { key: "enrolled_at", label: "Launched", sort: "desc", width: 110 },
+  { key: "found", label: "Found", sort: "desc", right: true, width: 90 },
+  { key: "contactable", label: "Contactable", sort: "desc", right: true, width: 110 },
+  { key: "emailed", label: "Emailed", sort: "desc", right: true, width: 110 },
+  { key: "replied", label: "Replied", sort: "desc", right: true, width: 90 },
+  { key: "applied", label: "Applied", sort: "desc", right: true, width: 100 },
+  { key: "runs_used", label: "Searches", sort: "desc", right: true, width: 110 },
+  { key: "last_event_at", label: "Last did", sort: "desc", width: 120 },
+  { key: "next_action_at", label: "Next", sort: "asc", width: 120 },
 ];
+const AGENT_DEFAULT_WIDTHS = Object.fromEntries(AGENT_COLUMNS.map((c) => [c.key, c.width]));
+// The leading expand/collapse chevron column: fixed width, never resized.
+const TOGGLE_COL_WIDTH = 28;
 
 // The four that can also be narrowed, with the controls each one needs.
 const FILTERS = [
@@ -116,6 +121,8 @@ export default function AutopilotPage() {
   // brand without a row of its own actually gets; edited in the settings
   // drawer, which is where the rest of the knobs live.
   const [defaultLimit, setDefaultLimit] = useState(null);
+
+  const { widths, startResize, resetWidth } = useColumnWidths("autopilot-agents", AGENT_DEFAULT_WIDTHS);
 
   // Re-reads whenever a filter changes. The popover commits after a pause, so
   // there is nothing to debounce here — every change that arrives is one the
@@ -384,18 +391,37 @@ export default function AutopilotPage() {
       {available && (
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                tableLayout: "fixed",
+                minWidth: TOGGLE_COL_WIDTH + Object.values(widths).reduce((a, b) => a + b, 0),
+              }}
+            >
+              <colgroup>
+                <col style={{ width: TOGGLE_COL_WIDTH }} />
+                {AGENT_COLUMNS.map((col) => (
+                  <col key={col.key} style={{ width: widths[col.key] }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr>
-                  <th style={{ ...th, width: 28 }} />
+                  <th style={{ ...th, width: TOGGLE_COL_WIDTH }} />
                   {/* Sort label and funnel both live in the header cell, the
                       way they do on every other table here — a toolbar above
                       the table would be a second place to look for the same
                       two things. */}
-                  {COLUMNS.map((col) => {
+                  {AGENT_COLUMNS.map((col) => {
                     const f = byFilterKey[col.key];
                     return (
-                      <th key={col.key} style={col.right ? { ...th, textAlign: "right" } : th}>
+                      <th
+                        key={col.key}
+                        style={{
+                          ...(col.right ? { ...th, textAlign: "right" } : th),
+                          position: "relative",
+                        }}
+                      >
                         <span style={{ display: "inline-flex", alignItems: "center" }}>
                           <SortLabel
                             theme={theme}
@@ -418,17 +444,20 @@ export default function AutopilotPage() {
                             />
                           )}
                         </span>
+                        {col.resizable !== false && (
+                          <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                        )}
                       </th>
                     );
                   })}
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonTableRows rows={6} cols={COLUMNS.length + 1} />}
+                {loading && <SkeletonTableRows rows={6} cols={AGENT_COLUMNS.length + 1} />}
 
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td style={{ ...td, color: theme.textMuted }} colSpan={COLUMNS.length + 1}>
+                    <td style={{ ...td, color: theme.textMuted }} colSpan={AGENT_COLUMNS.length + 1}>
                       {activeFilters.length ? (
                         <>
                           No agent matches these filters.{" "}
@@ -542,7 +571,7 @@ export default function AutopilotPage() {
 
                       {openId === r.product_id && (
                         <tr>
-                          <td style={{ ...td, background: theme.bg }} colSpan={COLUMNS.length + 1}>
+                          <td style={{ ...td, background: theme.bg }} colSpan={AGENT_COLUMNS.length + 1}>
                             <AgentDetail
                               row={r}
                               defaultLimit={defaultLimit}

@@ -10,6 +10,7 @@ import { Input } from "../../components/ui/Input";
 import { Label } from "../../components/ui/Label";
 import { Tag } from "../../components/ui/Tag";
 import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useColumnWidths, ResizeHandle } from "../../components/table/tableTools";
 
 // Where articles are served. Switch to https://www.linkable.link once the
 // domain points at the Vercel project.
@@ -17,6 +18,17 @@ export const SITE_URL = "https://linkable-landing-page.vercel.app";
 
 const STATUS_COLOR = { published: "#16A34A", draft: "#CA8A04", archived: "#A3A3A3" };
 const SOURCE_LABEL = { ai: "AI", manual: "Manual", framer: "Framer" };
+
+const BLOG_COLUMNS = [
+  { key: "article",   label: "Article",   width: 340 },
+  { key: "status",    label: "Status",    width: 110 },
+  { key: "source",    label: "Source",    width: 90 },
+  { key: "length",    label: "Length",    width: 150 },
+  { key: "published", label: "Published", width: 110 },
+  { key: "updated",   label: "Updated",   width: 110 },
+  { key: "actions",   label: "",          width: 260, resizable: false },
+];
+const BLOG_DEFAULT_WIDTHS = Object.fromEntries(BLOG_COLUMNS.map((c) => [c.key, c.width]));
 
 export default function BlogPage() {
   const { theme: t } = useTheme();
@@ -32,6 +44,7 @@ export default function BlogPage() {
   const [busy, setBusy] = useState(null); // id or action being processed
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
+  const { widths, startResize, resetWidth } = useColumnWidths("blog-posts", BLOG_DEFAULT_WIDTHS);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,7 +86,7 @@ export default function BlogPage() {
     finally { setBusy(null); }
   };
 
-  const th = { textAlign: "left", fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.6, padding: "10px 14px", borderBottom: `1px solid ${t.border}`, whiteSpace: "nowrap" };
+  const th = { position: "relative", textAlign: "left", fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.6, padding: "10px 14px", borderBottom: `1px solid ${t.border}`, whiteSpace: "nowrap" };
   const td = { padding: "12px 14px", borderBottom: `1px solid ${t.border}`, fontSize: 13, color: t.text, verticalAlign: "top" };
   const link = { color: t.textMid, fontSize: 12, textDecoration: "none", border: `1px solid ${t.border}`, borderRadius: 6, padding: "4px 8px", background: "transparent", cursor: "pointer", fontFamily: "inherit" };
 
@@ -111,12 +124,28 @@ export default function BlogPage() {
           />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table style={{
+              width: "100%",
+              minWidth: Object.values(widths).reduce((a, b) => a + b, 0),
+              borderCollapse: "collapse", tableLayout: "fixed",
+            }}>
+              <colgroup>
+                {BLOG_COLUMNS.map((col) => (
+                  <col key={col.key} style={{ width: widths[col.key] }} />
+                ))}
+              </colgroup>
               <thead><tr>
-                <th style={th}>Article</th><th style={th}>Status</th><th style={th}>Source</th><th style={th}>Length</th><th style={th}>Published</th><th style={th}>Updated</th><th style={th}></th>
+                {BLOG_COLUMNS.map((col) => (
+                  <th key={col.key} style={th}>
+                    {col.label}
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
+                    )}
+                  </th>
+                ))}
               </tr></thead>
               <tbody>
-                {visible.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={7}>No articles here yet.</td></tr>}
+                {visible.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={BLOG_COLUMNS.length}>No articles here yet.</td></tr>}
                 {visible.map((p) => (
                   <tr key={p.id}>
                     <td style={{ ...td, maxWidth: 460 }}>

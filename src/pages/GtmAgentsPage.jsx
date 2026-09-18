@@ -6,6 +6,7 @@ import { Card } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
+import { useColumnWidths, ResizeHandle } from "../components/table/tableTools";
 
 /**
  * GTM outreach, as agents.
@@ -56,6 +57,24 @@ function when(raw) {
   return hours < 48 ? `in ${hours}h` : `in ${Math.round(hours / 24)}d`;
 }
 
+// The agents table's columns, widths matching what was hard-coded inline
+// before resize existed. The leading chevron and the trailing actions column
+// are fixed — nothing useful comes from dragging a toggle or a button group.
+const GTM_AGENT_COLUMNS = [
+  { key: "expand", label: "", width: 28, resizable: false },
+  { key: "agent", label: "Agent", width: 260 },
+  { key: "audience", label: "Audience", width: 110 },
+  { key: "mode", label: "Mode", width: 110 },
+  { key: "state", label: "State", width: 140 },
+  { key: "contacted", label: "Contacted", width: 110, right: true },
+  { key: "replied", label: "Replied", width: 110, right: true },
+  { key: "daily_cap", label: "Per day", width: 90, right: true },
+  { key: "last_did", label: "Last did", width: 110 },
+  { key: "next", label: "Next", width: 100 },
+  { key: "actions", label: "", width: 230, resizable: false },
+];
+const GTM_AGENT_DEFAULT_WIDTHS = Object.fromEntries(GTM_AGENT_COLUMNS.map((c) => [c.key, c.width]));
+
 // One input style, so the form reads as one control rather than six.
 function field(theme) {
   return {
@@ -101,6 +120,8 @@ export default function GtmAgentsPage() {
     max_prospects: 500,
     daily_cap: 40,
   });
+
+  const { widths, startResize, resetWidth } = useColumnWidths("gtm-agents", GTM_AGENT_DEFAULT_WIDTHS);
 
   const load = useCallback(
     () =>
@@ -413,28 +434,40 @@ export default function GtmAgentsPage() {
 
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table
+            style={{
+              width: "100%",
+              minWidth: Object.values(widths).reduce((a, b) => a + b, 0),
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+            }}
+          >
+            <colgroup>
+              {GTM_AGENT_COLUMNS.map((col) => (
+                <col key={col.key} style={{ width: widths[col.key] }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ ...th, width: 28 }} />
-                <th style={th}>Agent</th>
-                <th style={th}>Audience</th>
-                <th style={th}>Mode</th>
-                <th style={th}>State</th>
-                <th style={{ ...th, textAlign: "right" }}>Contacted</th>
-                <th style={{ ...th, textAlign: "right" }}>Replied</th>
-                <th style={{ ...th, textAlign: "right" }}>Per day</th>
-                <th style={th}>Last did</th>
-                <th style={th}>Next</th>
-                <th style={th} />
+                {GTM_AGENT_COLUMNS.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{ ...th, ...(col.right ? { textAlign: "right" } : {}), position: "relative" }}
+                  >
+                    {col.label}
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {loading && <SkeletonTableRows rows={4} cols={11} />}
+              {loading && <SkeletonTableRows rows={4} cols={GTM_AGENT_COLUMNS.length} />}
 
               {!loading && agents.length === 0 && (
                 <tr>
-                  <td style={{ ...td, color: theme.textMuted }} colSpan={11}>
+                  <td style={{ ...td, color: theme.textMuted }} colSpan={GTM_AGENT_COLUMNS.length}>
                     No agents yet. One points at an existing campaign and decides when it runs.
                   </td>
                 </tr>
@@ -538,7 +571,7 @@ export default function GtmAgentsPage() {
 
                     {openId === a.id && (
                       <tr>
-                        <td style={{ ...td, background: theme.bg }} colSpan={11}>
+                        <td style={{ ...td, background: theme.bg }} colSpan={GTM_AGENT_COLUMNS.length}>
                           {/* The six metric tiles and the log beneath them,
                               in outline, so the row keeps its height while it
                               fills. */}

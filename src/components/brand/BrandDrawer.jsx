@@ -8,6 +8,7 @@ import { Skeleton, SkeletonStatGrid, SkeletonTable, SkeletonKeyValue } from "../
 import GrantTrialModal from "../trials/GrantTrialModal";
 import ManageBrandModal from "../users/ManageBrandModal";
 import { planLabel } from "../trials/planConfig";
+import { useColumnWidths, ResizeHandle } from "../table/tableTools";
 
 const TABS = [["overview", "Overview"], ["campaigns", "Campaigns"], ["creators", "Creators"], ["outbound", "Outbound"], ["history", "History"]];
 
@@ -268,16 +269,30 @@ function Overview({ data, theme, label, section }) {
 const th = (theme, right) => ({ textAlign: right ? "right" : "left", fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5, padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, whiteSpace: "nowrap" });
 const td = (theme, right) => ({ textAlign: right ? "right" : "left", fontSize: 13, color: theme.text, padding: "9px 10px", borderBottom: `1px solid ${theme.border}`, verticalAlign: "top" });
 
-function Table({ theme, columns, rows, empty }) {
+function Table({ theme, columns, rows, empty, widths, startResize, resetWidth }) {
   if (!rows.length) return <div style={{ padding: "18px 0", fontSize: 13, color: theme.textMuted }}>{empty}</div>;
   return (
     <div style={{ overflowX: "auto", background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{columns.map((c) => <th key={c.key} style={th(theme, c.right)}>{c.label}</th>)}</tr></thead>
+      <table style={{ width: "100%", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <colgroup>
+          {columns.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}
+        </colgroup>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c.key} style={{ ...th(theme, c.right), position: "relative" }}>
+                {c.label}
+                {c.resizable !== false && (
+                  <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.id || r.link_id || i}>
-              {columns.map((c) => <td key={c.key} style={{ ...td(theme, c.right), ...(i === rows.length - 1 ? { borderBottom: "none" } : {}) }}>{c.render ? c.render(r) : r[c.key]}</td>)}
+              {columns.map((c) => <td key={c.key} style={{ ...td(theme, c.right), ...(i === rows.length - 1 ? { borderBottom: "none" } : {}) }}>{c.render ? c.render(r, theme) : r[c.key]}</td>)}
             </tr>
           ))}
         </tbody>
@@ -297,36 +312,70 @@ function StatusPill({ value, theme }) {
   return <Pill bg={bg} fg={fg}>{value}</Pill>;
 }
 
+const CAMPAIGNS_COLUMNS = [
+  { key: "title", label: "Campaign", width: 220, render: (c, theme) => <div><div style={{ fontWeight: 600 }}>{c.title}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{c.status === 2 && c.activated_at ? `live since ${friendlyDate(c.activated_at)}` : c.status >= 3 && c.activated_at ? `ran from ${friendlyDate(c.activated_at)}` : `created ${friendlyDate(c.created)}`}{c.sale_commission ? ` · ${c.sale_commission}% commission` : ""}{c.shipping ? " · ships samples" : ""}</div></div> },
+  { key: "status_label", label: "Status", width: 100, render: (c, theme) => <StatusPill value={c.status_label} theme={theme} /> },
+  { key: "invited", label: "Invited", width: 80, right: true },
+  { key: "applied", label: "Applied", width: 80, right: true },
+  { key: "accepted", label: "Accepted", width: 85, right: true },
+  { key: "shipped", label: "Shipped", width: 80, right: true },
+  { key: "clicks", label: "Clicks", width: 80, right: true, render: (c) => friendlyNumber(c.clicks) },
+  { key: "sales", label: "Sales", width: 80, right: true, render: (c, theme) => <span style={{ fontWeight: c.sales ? 600 : 400, color: c.sales ? theme.text : theme.textMuted }}>{c.sales}</span> },
+];
+const CAMPAIGNS_DEFAULT_WIDTHS = Object.fromEntries(CAMPAIGNS_COLUMNS.map((c) => [c.key, c.width]));
+
 function Campaigns({ data, theme }) {
+  const { widths, startResize, resetWidth } = useColumnWidths("brand-drawer-campaigns", CAMPAIGNS_DEFAULT_WIDTHS);
   return (
-    <Table theme={theme} empty={data.notLaunched ? `No campaign launched yet (${data.notLaunched} synced products waiting).` : "This brand has not created a campaign yet."} rows={data.campaigns} columns={[
-      { key: "title", label: "Campaign", render: (c) => <div><div style={{ fontWeight: 600 }}>{c.title}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{c.status === 2 && c.activated_at ? `live since ${friendlyDate(c.activated_at)}` : c.status >= 3 && c.activated_at ? `ran from ${friendlyDate(c.activated_at)}` : `created ${friendlyDate(c.created)}`}{c.sale_commission ? ` · ${c.sale_commission}% commission` : ""}{c.shipping ? " · ships samples" : ""}</div></div> },
-      { key: "status_label", label: "Status", render: (c) => <StatusPill value={c.status_label} theme={theme} /> },
-      { key: "invited", label: "Invited", right: true },
-      { key: "applied", label: "Applied", right: true },
-      { key: "accepted", label: "Accepted", right: true },
-      { key: "shipped", label: "Shipped", right: true },
-      { key: "clicks", label: "Clicks", right: true, render: (c) => friendlyNumber(c.clicks) },
-      { key: "sales", label: "Sales", right: true, render: (c) => <span style={{ fontWeight: c.sales ? 600 : 400, color: c.sales ? theme.text : theme.textMuted }}>{c.sales}</span> },
-    ]} />
+    <Table
+      theme={theme} widths={widths} startResize={startResize} resetWidth={resetWidth}
+      empty={data.notLaunched ? `No campaign launched yet (${data.notLaunched} synced products waiting).` : "This brand has not created a campaign yet."}
+      rows={data.campaigns} columns={CAMPAIGNS_COLUMNS}
+    />
   );
 }
 
+const CREATORS_COLUMNS = [
+  { key: "creator_name", label: "Creator", width: 200, render: (c, theme) => <div><div style={{ fontWeight: 600 }}>{c.creator_name}</div>{c.instagram_username && <div style={{ fontSize: 11, color: theme.textMuted }}>@{c.instagram_username}{c.instagram_followers_count ? ` · ${friendlyNumber(c.instagram_followers_count)} followers` : ""}</div>}</div> },
+  { key: "campaign", label: "Campaign", width: 160, render: (c, theme) => <span style={{ color: theme.textMid }}>{c.campaign}</span> },
+  { key: "status_label", label: "Status", width: 100, render: (c, theme) => <StatusPill value={c.status_label} theme={theme} /> },
+  { key: "clicks", label: "Clicks", width: 80, right: true, render: (c) => friendlyNumber(c.clicks) },
+  { key: "sales", label: "Sales", width: 80, right: true },
+  { key: "created", label: "Since", width: 100, render: (c, theme) => <span style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>{friendlyDate(c.accepted_at || c.created)}</span> },
+];
+const CREATORS_DEFAULT_WIDTHS = Object.fromEntries(CREATORS_COLUMNS.map((c) => [c.key, c.width]));
+
 function Creators({ data, theme }) {
+  const { widths, startResize, resetWidth } = useColumnWidths("brand-drawer-creators", CREATORS_DEFAULT_WIDTHS);
   return (
-    <Table theme={theme} empty="No creators have been invited or applied yet." rows={data.creators} columns={[
-      { key: "creator_name", label: "Creator", render: (c) => <div><div style={{ fontWeight: 600 }}>{c.creator_name}</div>{c.instagram_username && <div style={{ fontSize: 11, color: theme.textMuted }}>@{c.instagram_username}{c.instagram_followers_count ? ` · ${friendlyNumber(c.instagram_followers_count)} followers` : ""}</div>}</div> },
-      { key: "campaign", label: "Campaign", render: (c) => <span style={{ color: theme.textMid }}>{c.campaign}</span> },
-      { key: "status_label", label: "Status", render: (c) => <StatusPill value={c.status_label} theme={theme} /> },
-      { key: "clicks", label: "Clicks", right: true, render: (c) => friendlyNumber(c.clicks) },
-      { key: "sales", label: "Sales", right: true },
-      { key: "created", label: "Since", render: (c) => <span style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>{friendlyDate(c.accepted_at || c.created)}</span> },
-    ]} />
+    <Table
+      theme={theme} widths={widths} startResize={startResize} resetWidth={resetWidth}
+      empty="No creators have been invited or applied yet."
+      rows={data.creators} columns={CREATORS_COLUMNS}
+    />
   );
 }
+
+const OUTBOUND_SENDS_COLUMNS = [
+  { key: "sent_at", label: "When", width: 110, render: (s, theme) => <span style={{ whiteSpace: "nowrap", color: theme.textMid }}>{friendlyDate(s.sent_at)}</span> },
+  { key: "subject", label: "Email", width: 220, render: (s, theme) => <div><div>{s.subject}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{s.campaign_name || "campaign"} · {s.brand_group || "—"} T{s.touch_number || "?"}</div></div> },
+  { key: "status", label: "Status", width: 100, render: (s, theme) => <StatusPill value={s.status} theme={theme} /> },
+  { key: "engagement", label: "Engagement", width: 160, render: (s, theme) => <span style={{ fontSize: 12, color: theme.textMid }}>{[s.opened_at && "opened", s.replied_at && "replied", s.bounced_at && "bounced"].filter(Boolean).join(" · ") || "—"}</span> },
+];
+const OUTBOUND_SENDS_DEFAULT_WIDTHS = Object.fromEntries(OUTBOUND_SENDS_COLUMNS.map((c) => [c.key, c.width]));
+
+const OUTBOUND_CONVERSATIONS_COLUMNS = [
+  { key: "thread_subject", label: "Thread", width: 220, render: (c, theme) => <div><div>{c.thread_subject || "(no subject)"}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{c.campaign_name || "campaign"}</div></div> },
+  { key: "status", label: "Status", width: 100, render: (c, theme) => <StatusPill value={c.status} theme={theme} /> },
+  { key: "qualification_score", label: "Score", width: 80, right: true, render: (c) => c.qualification_score ?? "—" },
+  { key: "last_inbound_at", label: "Last reply", width: 110, render: (c, theme) => <span style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>{c.last_inbound_at ? friendlyDate(c.last_inbound_at) : "—"}</span> },
+];
+const OUTBOUND_CONVERSATIONS_DEFAULT_WIDTHS = Object.fromEntries(OUTBOUND_CONVERSATIONS_COLUMNS.map((c) => [c.key, c.width]));
 
 function Outbound({ data, theme, label, section }) {
   const o = data.outbound || {};
+  const sends = useColumnWidths("brand-drawer-outbound-sends", OUTBOUND_SENDS_DEFAULT_WIDTHS);
+  const conversations = useColumnWidths("brand-drawer-outbound-conversations", OUTBOUND_CONVERSATIONS_DEFAULT_WIDTHS);
   return (
     <>
       {o.error && <div style={{ padding: 12, borderRadius: 10, background: "#FEF2F2", color: "#B91C1C", fontSize: 12, marginBottom: 12 }}>Outbound history unavailable: {o.error}</div>}
@@ -337,25 +386,30 @@ function Outbound({ data, theme, label, section }) {
         ) : <div style={{ fontSize: 13, color: theme.textMuted }}>This shop is not in the StoreLeads pool (it probably signed up organically).</div>}
       </div>
       <div style={{ ...label, marginTop: 4 }}>Sequence emails ({o.sends?.length || 0})</div>
-      <Table theme={theme} empty="No outbound emails were sent to this address." rows={o.sends || []} columns={[
-        { key: "sent_at", label: "When", render: (s) => <span style={{ whiteSpace: "nowrap", color: theme.textMid }}>{friendlyDate(s.sent_at)}</span> },
-        { key: "subject", label: "Email", render: (s) => <div><div>{s.subject}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{s.campaign_name || "campaign"} · {s.brand_group || "—"} T{s.touch_number || "?"}</div></div> },
-        { key: "status", label: "Status", render: (s) => <StatusPill value={s.status} theme={theme} /> },
-        { key: "engagement", label: "Engagement", render: (s) => <span style={{ fontSize: 12, color: theme.textMid }}>{[s.opened_at && "opened", s.replied_at && "replied", s.bounced_at && "bounced"].filter(Boolean).join(" · ") || "—"}</span> },
-      ]} />
+      <Table
+        theme={theme} widths={sends.widths} startResize={sends.startResize} resetWidth={sends.resetWidth}
+        empty="No outbound emails were sent to this address." rows={o.sends || []} columns={OUTBOUND_SENDS_COLUMNS}
+      />
       <div style={{ ...label, marginTop: 16 }}>AI conversations ({o.conversations?.length || 0})</div>
-      <Table theme={theme} empty="No AI-handled thread with this brand." rows={o.conversations || []} columns={[
-        { key: "thread_subject", label: "Thread", render: (c) => <div><div>{c.thread_subject || "(no subject)"}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{c.campaign_name || "campaign"}</div></div> },
-        { key: "status", label: "Status", render: (c) => <StatusPill value={c.status} theme={theme} /> },
-        { key: "qualification_score", label: "Score", right: true, render: (c) => c.qualification_score ?? "—" },
-        { key: "last_inbound_at", label: "Last reply", render: (c) => <span style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>{c.last_inbound_at ? friendlyDate(c.last_inbound_at) : "—"}</span> },
-      ]} />
+      <Table
+        theme={theme} widths={conversations.widths} startResize={conversations.startResize} resetWidth={conversations.resetWidth}
+        empty="No AI-handled thread with this brand." rows={o.conversations || []} columns={OUTBOUND_CONVERSATIONS_COLUMNS}
+      />
     </>
   );
 }
 
+const ORDERS_COLUMNS = [
+  { key: "created", label: "When", width: 110, render: (o, theme) => <span style={{ whiteSpace: "nowrap", color: theme.textMid }}>{friendlyDate(o.created)}</span> },
+  { key: "campaign", label: "Campaign / creator", width: 200, render: (o, theme) => <div><div>{o.campaign || "—"}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{o.creator_name || "—"}</div></div> },
+  { key: "shopify_amount", label: "Amount", width: 100, right: true, render: (o) => money(o.shopify_amount, o.shopify_currency || "USD", true) },
+  { key: "commission", label: "Commission", width: 110, right: true, render: (o) => o.commission ? money(o.commission, o.shopify_currency || "USD", true) : "—" },
+];
+const ORDERS_DEFAULT_WIDTHS = Object.fromEntries(ORDERS_COLUMNS.map((c) => [c.key, c.width]));
+
 function History({ data, theme, label, section }) {
   const h = data.history || {};
+  const { widths, startResize, resetWidth } = useColumnWidths("brand-drawer-orders", ORDERS_DEFAULT_WIDTHS);
   return (
     <>
       <div style={section}>
@@ -383,12 +437,10 @@ function History({ data, theme, label, section }) {
       </div>
       <div style={{ ...section, marginBottom: 0 }}>
         <div style={label}>Recent orders</div>
-        <Table theme={theme} empty="No orders attributed to this brand's links." rows={data.orders.items} columns={[
-          { key: "created", label: "When", render: (o) => <span style={{ whiteSpace: "nowrap", color: theme.textMid }}>{friendlyDate(o.created)}</span> },
-          { key: "campaign", label: "Campaign / creator", render: (o) => <div><div>{o.campaign || "—"}</div><div style={{ fontSize: 11, color: theme.textMuted }}>{o.creator_name || "—"}</div></div> },
-          { key: "shopify_amount", label: "Amount", right: true, render: (o) => money(o.shopify_amount, o.shopify_currency || "USD", true) },
-          { key: "commission", label: "Commission", right: true, render: (o) => o.commission ? money(o.commission, o.shopify_currency || "USD", true) : "—" },
-        ]} />
+        <Table
+          theme={theme} widths={widths} startResize={startResize} resetWidth={resetWidth}
+          empty="No orders attributed to this brand's links." rows={data.orders.items} columns={ORDERS_COLUMNS}
+        />
       </div>
     </>
   );

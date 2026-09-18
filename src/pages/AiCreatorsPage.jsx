@@ -5,6 +5,7 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
+import { useColumnWidths, ResizeHandle } from "../components/table/tableTools";
 
 /**
  * The synthetic creator roster.
@@ -29,6 +30,18 @@ const GENDERS = [
   ["male", "Male"],
 ];
 
+// The roster table's columns. No server-side sort/filter here (the roster is
+// small and unpaginated), just drag-resizable widths — the "actions" column
+// holds two buttons and doesn't shrink below that.
+const ROSTER_COLUMNS = [
+  { key: "name",      label: "Name",      width: 220 },
+  { key: "archetype", label: "Archetype", width: 160 },
+  { key: "status",    label: "Status",    width: 170 },
+  { key: "plates",    label: "Plates",    width: 160 },
+  { key: "actions",   label: "Actions",   width: 200, resizable: false },
+];
+const ROSTER_DEFAULT_WIDTHS = Object.fromEntries(ROSTER_COLUMNS.map((c) => [c.key, c.width]));
+
 export default function AiCreatorsPage() {
   const { theme, mode } = useTheme();
   const dark = mode === "dark";
@@ -41,6 +54,8 @@ export default function AiCreatorsPage() {
   const [openSheet, setOpenSheet] = useState("");
   const [confirmRender, setConfirmRender] = useState("");
   const [note, setNote] = useState("");
+
+  const { widths, startResize, resetWidth } = useColumnWidths("ai-creators-roster", ROSTER_DEFAULT_WIDTHS);
 
   const load = () =>
     api
@@ -209,14 +224,30 @@ export default function AiCreatorsPage() {
       {/* Roster ---------------------------------------------------------- */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table style={{
+            width: "100%",
+            minWidth: Object.values(widths).reduce((a, b) => a + b, 0),
+            borderCollapse: "collapse", tableLayout: "fixed",
+          }}>
+            <colgroup>
+              {ROSTER_COLUMNS.map((col) => (
+                <col key={col.key} style={{ width: widths[col.key] }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th style={th}>Name</th>
-                <th style={th}>Archetype</th>
-                <th style={th}>Status</th>
-                <th style={th}>Plates</th>
-                <th style={{ ...th, textAlign: "right" }}>Actions</th>
+                {ROSTER_COLUMNS.map((col) => (
+                  <th key={col.key} style={{
+                    ...th,
+                    position: "relative",
+                    ...(col.key === "actions" ? { textAlign: "right" } : {}),
+                  }}>
+                    {col.label}
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>

@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
+import { useColumnWidths, ResizeHandle } from "../components/table/tableTools";
 
 const EXAMPLES = [
   "How many brands signed up each month this year?",
@@ -168,8 +169,17 @@ const isNumeric = (v) => typeof v === "number" || (typeof v === "string" && /^-?
 
 function ResultTable({ result, theme }) {
   const { columns, rows, chart } = result;
-  if (!rows.length) return <Card><div style={{ fontSize: 13, color: theme.textMuted }}>The query returned no rows.</div></Card>;
   const numericCols = columns.filter((c) => rows.every((r) => r[c] == null || isNumeric(r[c])));
+  // Columns come straight from the SQL result, so they differ per question —
+  // there's no fixed schema to hang a single tableId/defaultWidths pair off
+  // of. Scoping the tableId to the column set lets useColumnWidths' existing
+  // "different tableId → re-seed" behavior (see tableTools.jsx) do the work:
+  // each distinct result shape gets sane defaults, and repeats of the same
+  // question keep whatever widths were dragged last time.
+  const defaultWidths = Object.fromEntries(columns.map((c) => [c, numericCols.includes(c) ? 120 : 220]));
+  const tableId = `ask-results:${columns.join("|")}`;
+  const { widths, startResize, resetWidth } = useColumnWidths(tableId, defaultWidths);
+  if (!rows.length) return <Card><div style={{ fontSize: 13, color: theme.textMuted }}>The query returned no rows.</div></Card>;
   const labelCol = columns.find((c) => !numericCols.includes(c));
   const valueCol = numericCols.find((c) => c !== labelCol);
   const showChart = chart !== "none" && labelCol && valueCol && rows.length >= 2 && rows.length <= 60;
@@ -194,10 +204,18 @@ function ResultTable({ result, theme }) {
       )}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto", maxHeight: 560 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ width: "100%", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <colgroup>
+              {columns.map((c) => <col key={c} style={{ width: widths[c] }} />)}
+            </colgroup>
             <thead>
               <tr style={{ background: theme.surfaceAlt, position: "sticky", top: 0 }}>
-                {columns.map((c) => <th key={c} style={{ textAlign: numericCols.includes(c) ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", borderBottom: `1px solid ${theme.border}` }}>{c}</th>)}
+                {columns.map((c) => (
+                  <th key={c} style={{ position: "relative", textAlign: numericCols.includes(c) ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", borderBottom: `1px solid ${theme.border}` }}>
+                    {c}
+                    <ResizeHandle colKey={c} startResize={startResize} resetWidth={resetWidth} theme={theme} />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
