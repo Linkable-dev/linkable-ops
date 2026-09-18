@@ -51,6 +51,13 @@ const campaignsIcon = icon(<>
 const autopilotIcon = icon(
   <path d="M9.813 15.904 9.375 17.25l-.438-1.346a4.5 4.5 0 0 0-2.841-2.841L4.75 12.625l1.346-.438a4.5 4.5 0 0 0 2.841-2.841L9.375 8l.438 1.346a4.5 4.5 0 0 0 2.841 2.841l1.346.438-1.346.438a4.5 4.5 0 0 0-2.841 2.841ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />,
 );
+// A coin for the money question: what recruiting costs against what it
+// brings in. Distinct from the trophy-less trials icon and from the megaphone
+// on Campaigns — this is the only page that is about the ledger, not activity.
+const costsIcon = icon(<>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M12 7v10M9.5 9.5c0-1.4 1.2-2.2 2.7-2.2 1.7 0 2.8.9 2.8 2 0 3-5.5 1.3-5.5 4.2 0 1.2 1.2 2 2.8 2 1.5 0 2.7-.8 2.7-2.2" />
+</>);
 const trialsIcon = icon(<>
   <polyline points="20 12 20 22 4 22 4 12" />
   <rect x="2" y="7" width="20" height="5" />
@@ -267,6 +274,7 @@ export default function Sidebar() {
             {/* Autopilot, by the name it has everywhere it actually runs, and
                 under the mark the brand app gives it. */}
             {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), autopilotIcon)}
+            {navItem("/ops/costs", "Costs & margin", path.startsWith("/ops/costs"), costsIcon)}
             {/* The roster every brand generates with — ours to cast, not any
                 one brand's. */}
             {navItem("/ops/ai-creators", "AI creators", path.startsWith("/ops/ai-creators"), aiCreatorsIcon)}
