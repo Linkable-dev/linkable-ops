@@ -7,7 +7,7 @@ import { Btn } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import RecordForm from "./RecordForm";
 import { Skeleton } from "../components/ui/Skeleton";
-import { ColumnFilter } from "../components/table/tableTools";
+import { ColumnFilter, useColumnOrder, DragHandle } from "../components/table/tableTools";
 
 // Columns to hide from table view (sensitive, internal, or not useful)
 const HIDDEN_COLUMNS = new Set([
@@ -131,8 +131,16 @@ export default function TablePage() {
 
   const pk = schema.find((c) => c.is_primary_key)?.column_name;
   const displayableCols = sortColumns(schema.filter((c) => !shouldHideColumn(c)));
-  const visibleCols = displayableCols.slice(0, 10);
-  const hasMore = displayableCols.length > 10;
+  // useColumnOrder wants a stable "key" per column; column_name already is
+  // one. Reordered BEFORE the 10-column cutoff below, so dragging a column
+  // that was past "+N more" earlier in the row brings it into view rather
+  // than only ever reshuffling the columns already showing.
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder(
+    table,
+    displayableCols.map((c) => ({ ...c, key: c.column_name })),
+  );
+  const visibleCols = orderedColumns.slice(0, 10);
+  const hasMore = orderedColumns.length > 10;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -397,8 +405,10 @@ export default function TablePage() {
                     minWidth: colWidths[col.column_name] || 120,
                     maxWidth: colWidths[col.column_name] || 280,
                     width: colWidths[col.column_name] || undefined,
-                  }} onClick={() => handleSort(col.column_name)}>
+                    background: dragOverKey === col.column_name ? theme.accentLight : undefined,
+                  }} onClick={() => handleSort(col.column_name)} {...dropTargetProps(col.column_name)}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%" }}>
+                      <DragHandle colKey={col.column_name} dragHandleProps={dragHandleProps} theme={theme} />
                       {/* Truncates on its own — a long label (e.g. "Banner Pic
                           Name") used to overflow the header's fixed maxWidth
                           with nothing to clip it, bleeding into the next

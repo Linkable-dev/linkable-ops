@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle } from "../components/table/tableTools";
+import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../components/table/tableTools";
 
 const EXAMPLES = [
   "How many brands signed up each month this year?",
@@ -179,6 +179,15 @@ function ResultTable({ result, theme }) {
   const defaultWidths = Object.fromEntries(columns.map((c) => [c, numericCols.includes(c) ? 120 : 220]));
   const tableId = `ask-results:${columns.join("|")}`;
   const { widths, startResize, resetWidth } = useColumnWidths(tableId, defaultWidths);
+  // Same "scope the id to the column set" reasoning as the widths above —
+  // orderedCols reduces back to plain strings since that's what every other
+  // use of `columns` in this component (numericCols, labelCol, cell lookups
+  // by r[c]) already expects.
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder(
+    tableId,
+    columns.map((c) => ({ key: c })),
+  );
+  const orderedCols = orderedColumns.map((c) => c.key);
   if (!rows.length) return <Card><div style={{ fontSize: 13, color: theme.textMuted }}>The query returned no rows.</div></Card>;
   const labelCol = columns.find((c) => !numericCols.includes(c));
   const valueCol = numericCols.find((c) => c !== labelCol);
@@ -206,12 +215,23 @@ function ResultTable({ result, theme }) {
         <div style={{ overflowX: "auto", maxHeight: 560 }}>
           <table style={{ width: "100%", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
             <colgroup>
-              {columns.map((c) => <col key={c} style={{ width: widths[c] }} />)}
+              {orderedCols.map((c) => <col key={c} style={{ width: widths[c] }} />)}
             </colgroup>
             <thead>
               <tr style={{ background: theme.surfaceAlt, position: "sticky", top: 0 }}>
-                {columns.map((c) => (
-                  <th key={c} style={{ position: "relative", textAlign: numericCols.includes(c) ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", borderBottom: `1px solid ${theme.border}` }}>
+                {orderedCols.map((c) => (
+                  <th
+                    key={c}
+                    style={{
+                      position: "relative", textAlign: numericCols.includes(c) ? "right" : "left",
+                      padding: "10px 14px", fontSize: 11, fontWeight: 600, color: theme.textMuted,
+                      textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap",
+                      borderBottom: `1px solid ${theme.border}`,
+                      background: dragOverKey === c ? theme.accentLight : undefined,
+                    }}
+                    {...dropTargetProps(c)}
+                  >
+                    <DragHandle colKey={c} dragHandleProps={dragHandleProps} theme={theme} />
                     {c}
                     <ResizeHandle colKey={c} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                   </th>
@@ -221,7 +241,7 @@ function ResultTable({ result, theme }) {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                  {columns.map((c) => <td key={c} style={{ padding: "9px 14px", color: theme.text, textAlign: numericCols.includes(c) ? "right" : "left", whiteSpace: "nowrap", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", fontVariantNumeric: "tabular-nums" }} title={typeof r[c] === "string" ? r[c] : undefined}>{fmt(r[c])}</td>)}
+                  {orderedCols.map((c) => <td key={c} style={{ padding: "9px 14px", color: theme.text, textAlign: numericCols.includes(c) ? "right" : "left", whiteSpace: "nowrap", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", fontVariantNumeric: "tabular-nums" }} title={typeof r[c] === "string" ? r[c] : undefined}>{fmt(r[c])}</td>)}
                 </tr>
               ))}
             </tbody>

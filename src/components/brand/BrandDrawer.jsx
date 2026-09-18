@@ -8,7 +8,7 @@ import { Skeleton, SkeletonStatGrid, SkeletonTable, SkeletonKeyValue } from "../
 import GrantTrialModal from "../trials/GrantTrialModal";
 import ManageBrandModal from "../users/ManageBrandModal";
 import { planLabel } from "../trials/planConfig";
-import { useColumnWidths, ResizeHandle } from "../table/tableTools";
+import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../table/tableTools";
 
 const TABS = [["overview", "Overview"], ["campaigns", "Campaigns"], ["creators", "Creators"], ["outbound", "Outbound"], ["history", "History"]];
 
@@ -269,7 +269,7 @@ function Overview({ data, theme, label, section }) {
 const th = (theme, right) => ({ textAlign: right ? "right" : "left", fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5, padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, whiteSpace: "nowrap" });
 const td = (theme, right) => ({ textAlign: right ? "right" : "left", fontSize: 13, color: theme.text, padding: "9px 10px", borderBottom: `1px solid ${theme.border}`, verticalAlign: "top" });
 
-function Table({ theme, columns, rows, empty, widths, startResize, resetWidth }) {
+function Table({ theme, columns, rows, empty, widths, startResize, resetWidth, dragHandleProps, dropTargetProps, dragOverKey }) {
   if (!rows.length) return <div style={{ padding: "18px 0", fontSize: 13, color: theme.textMuted }}>{empty}</div>;
   return (
     <div style={{ overflowX: "auto", background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12 }}>
@@ -280,8 +280,15 @@ function Table({ theme, columns, rows, empty, widths, startResize, resetWidth })
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} style={{ ...th(theme, c.right), position: "relative" }}>
-                {c.label}
+              <th
+                key={c.key}
+                style={{ ...th(theme, c.right), position: "relative", background: dragOverKey === c.key ? theme.accentLight : undefined }}
+                {...dropTargetProps(c.key)}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center" }}>
+                  <DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />
+                  {c.label}
+                </span>
                 {c.resizable !== false && (
                   <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                 )}
@@ -326,11 +333,13 @@ const CAMPAIGNS_DEFAULT_WIDTHS = Object.fromEntries(CAMPAIGNS_COLUMNS.map((c) =>
 
 function Campaigns({ data, theme }) {
   const { widths, startResize, resetWidth } = useColumnWidths("brand-drawer-campaigns", CAMPAIGNS_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("brand-drawer-campaigns", CAMPAIGNS_COLUMNS);
   return (
     <Table
       theme={theme} widths={widths} startResize={startResize} resetWidth={resetWidth}
+      dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
       empty={data.notLaunched ? `No campaign launched yet (${data.notLaunched} synced products waiting).` : "This brand has not created a campaign yet."}
-      rows={data.campaigns} columns={CAMPAIGNS_COLUMNS}
+      rows={data.campaigns} columns={orderedColumns}
     />
   );
 }
@@ -347,11 +356,13 @@ const CREATORS_DEFAULT_WIDTHS = Object.fromEntries(CREATORS_COLUMNS.map((c) => [
 
 function Creators({ data, theme }) {
   const { widths, startResize, resetWidth } = useColumnWidths("brand-drawer-creators", CREATORS_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("brand-drawer-creators", CREATORS_COLUMNS);
   return (
     <Table
       theme={theme} widths={widths} startResize={startResize} resetWidth={resetWidth}
+      dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
       empty="No creators have been invited or applied yet."
-      rows={data.creators} columns={CREATORS_COLUMNS}
+      rows={data.creators} columns={orderedColumns}
     />
   );
 }
@@ -375,7 +386,9 @@ const OUTBOUND_CONVERSATIONS_DEFAULT_WIDTHS = Object.fromEntries(OUTBOUND_CONVER
 function Outbound({ data, theme, label, section }) {
   const o = data.outbound || {};
   const sends = useColumnWidths("brand-drawer-outbound-sends", OUTBOUND_SENDS_DEFAULT_WIDTHS);
+  const sendsOrder = useColumnOrder("brand-drawer-outbound-sends", OUTBOUND_SENDS_COLUMNS);
   const conversations = useColumnWidths("brand-drawer-outbound-conversations", OUTBOUND_CONVERSATIONS_DEFAULT_WIDTHS);
+  const conversationsOrder = useColumnOrder("brand-drawer-outbound-conversations", OUTBOUND_CONVERSATIONS_COLUMNS);
   return (
     <>
       {o.error && <div style={{ padding: 12, borderRadius: 10, background: "#FEF2F2", color: "#B91C1C", fontSize: 12, marginBottom: 12 }}>Outbound history unavailable: {o.error}</div>}
@@ -388,12 +401,14 @@ function Outbound({ data, theme, label, section }) {
       <div style={{ ...label, marginTop: 4 }}>Sequence emails ({o.sends?.length || 0})</div>
       <Table
         theme={theme} widths={sends.widths} startResize={sends.startResize} resetWidth={sends.resetWidth}
-        empty="No outbound emails were sent to this address." rows={o.sends || []} columns={OUTBOUND_SENDS_COLUMNS}
+        dragHandleProps={sendsOrder.dragHandleProps} dropTargetProps={sendsOrder.dropTargetProps} dragOverKey={sendsOrder.dragOverKey}
+        empty="No outbound emails were sent to this address." rows={o.sends || []} columns={sendsOrder.orderedColumns}
       />
       <div style={{ ...label, marginTop: 16 }}>AI conversations ({o.conversations?.length || 0})</div>
       <Table
         theme={theme} widths={conversations.widths} startResize={conversations.startResize} resetWidth={conversations.resetWidth}
-        empty="No AI-handled thread with this brand." rows={o.conversations || []} columns={OUTBOUND_CONVERSATIONS_COLUMNS}
+        dragHandleProps={conversationsOrder.dragHandleProps} dropTargetProps={conversationsOrder.dropTargetProps} dragOverKey={conversationsOrder.dragOverKey}
+        empty="No AI-handled thread with this brand." rows={o.conversations || []} columns={conversationsOrder.orderedColumns}
       />
     </>
   );
@@ -410,6 +425,7 @@ const ORDERS_DEFAULT_WIDTHS = Object.fromEntries(ORDERS_COLUMNS.map((c) => [c.ke
 function History({ data, theme, label, section }) {
   const h = data.history || {};
   const { widths, startResize, resetWidth } = useColumnWidths("brand-drawer-orders", ORDERS_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("brand-drawer-orders", ORDERS_COLUMNS);
   return (
     <>
       <div style={section}>
@@ -439,7 +455,8 @@ function History({ data, theme, label, section }) {
         <div style={label}>Recent orders</div>
         <Table
           theme={theme} widths={widths} startResize={startResize} resetWidth={resetWidth}
-          empty="No orders attributed to this brand's links." rows={data.orders.items} columns={ORDERS_COLUMNS}
+          dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
+          empty="No orders attributed to this brand's links." rows={data.orders.items} columns={orderedColumns}
         />
       </div>
     </>

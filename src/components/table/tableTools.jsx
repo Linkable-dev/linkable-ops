@@ -1,12 +1,19 @@
 // Shared building blocks for the app's data tables: drag-resizable column
-// widths (persisted per table in localStorage), sortable header cells, and
-// debounced per-column filter inputs that drive SERVER-side filtering.
+// widths (persisted per table in localStorage), drag-to-reorder columns
+// (same persistence shape), sortable header cells, and debounced per-column
+// filter inputs that drive SERVER-side filtering.
 //
 // These are retrofit primitives, not a monolithic <DataTable>: each page keeps
 // its own markup (real <table> or CSS-grid divs) and behavior (row clicks,
 // pills, expanders) and only swaps in the pieces it needs. Grid pages drive
 // gridTemplateColumns from useColumnWidths; <table> pages feed the same widths
 // into a <colgroup>.
+//
+// Reordering is real DOM order, not a CSS trick: a <table> lays out <td>s in
+// document order regardless of any `order` style (that's a flex/grid-only
+// property), so a page that wants its columns to actually move has to render
+// both its header AND its body cells from the same `orderedColumns` array —
+// see useColumnOrder's own doc comment below.
 
 /* eslint-disable react-refresh/only-export-components -- shared table
    primitives: hooks + tiny components belong together; no fast-refresh need */
@@ -109,6 +116,148 @@ export function gridTemplate(columns, widths) {
   return columns
     .map((c) => (c.fill ? `minmax(${widths[c.key]}px, 1fr)` : `${widths[c.key]}px`))
     .join(" ");
+}
+
+const ORDER_STORE_PREFIX = "ops.tableOrder.";
+
+function loadStoredOrder(tableId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ORDER_STORE_PREFIX + tableId));
+    return Array.isArray(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+// Column order, drag-to-reorder, persisted per table the same way widths are.
+// `columns` is the full list in its built-in (code) order; `fixedKeys` (a
+// checkbox or an actions column, say) are excluded from dragging and always
+// re-pinned at their original index — so renaming/adding/removing a column
+// in code, or a stale localStorage snapshot from before a column existed,
+// can never strand a fixed column mid-table or drop an unknown key.
+//
+// Returns `orderedColumns` — the ONLY thing a caller should ever map over
+// for both its header row and its body rows. A <table> lays cells out in
+// document order; there's no CSS way to visually reorder a <td> the way
+// `order` reorders a flex/grid item. Mapping the header from orderedColumns
+// but the body from the original `columns` (or from hardcoded JSX) renders a
+// table whose header lies about what's under it the moment a column moves.
+export function useColumnOrder(tableId, columns, fixedKeys = EMPTY_KEYS) {
+  const keys = columns.map((c) => c.key);
+  const keysSig = keys.join("␟"); // an ASCII separator no real column key would contain
+
+  const seed = useCallback(() => {
+    const fixedSet = new Set(fixedKeys);
+    const draggableDefault = keys.filter((k) => !fixedSet.has(k));
+    const stored = loadStoredOrder(tableId);
+    let draggableOrder = draggableDefault;
+    if (stored) {
+      const known = new Set(draggableDefault);
+      const kept = stored.filter((k) => known.has(k));
+      const missing = draggableDefault.filter((k) => !kept.includes(k));
+      draggableOrder = [...kept, ...missing];
+    }
+    let di = 0;
+    return keys.map((k) => (fixedSet.has(k) ? k : draggableOrder[di++]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId, keysSig, fixedKeys]);
+
+  const [order, setOrder] = useState(seed);
+  useEffect(() => {
+    setOrder(seed());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId, keysSig]);
+
+  const persist = useCallback((next) => {
+    try {
+      const fixedSet = new Set(fixedKeys);
+      localStorage.setItem(ORDER_STORE_PREFIX + tableId, JSON.stringify(next.filter((k) => !fixedSet.has(k))));
+    } catch { /* private mode etc. — reordering still works for the session */ }
+  }, [tableId, fixedKeys]);
+
+  // A ref, not state: the dragged key only ever needs to be read inside a
+  // drop/dragover handler, and putting it in state would re-render every
+  // header cell on every pixel the pointer crosses while dragging.
+  const draggingRef = useRef(null);
+  const [dragOverKey, setDragOverKey] = useState(null);
+
+  // Spread onto the small grip icon in the header, not the whole cell — the
+  // cell already owns click-to-sort and a resize drag, and stacking a third
+  // gesture on the same surface is how a click meant to sort ends up
+  // reordering columns instead.
+  const dragHandleProps = useCallback((key) => ({
+    draggable: true,
+    onDragStart: (e) => {
+      draggingRef.current = key;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", key); // Firefox won't start a drag without this
+    },
+    onDragEnd: () => {
+      draggingRef.current = null;
+      setDragOverKey(null);
+    },
+  }), []);
+
+  // Spread onto the <th> itself: the drop target is the whole header cell,
+  // not just the grip, because hitting a coin-sized grip exactly on drop
+  // would make this fiddly rather than forgiving.
+  const dropTargetProps = useCallback((key) => ({
+    onDragOver: (e) => {
+      if (!draggingRef.current || draggingRef.current === key) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOverKey((cur) => (cur === key ? cur : key));
+    },
+    onDragLeave: (e) => {
+      if (e.currentTarget.contains(e.relatedTarget)) return; // still inside, e.g. over the grip
+      setDragOverKey((cur) => (cur === key ? null : cur));
+    },
+    onDrop: (e) => {
+      e.preventDefault();
+      const from = draggingRef.current;
+      draggingRef.current = null;
+      setDragOverKey(null);
+      if (!from || from === key || fixedKeys.includes(key)) return;
+      setOrder((cur) => {
+        const next = cur.filter((k) => k !== from);
+        next.splice(next.indexOf(key), 0, from);
+        persist(next);
+        return next;
+      });
+    },
+  }), [persist, fixedKeys]);
+
+  const orderedColumns = order.map((k) => columns.find((c) => c.key === k)).filter(Boolean);
+  return { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey };
+}
+
+// The small drag-to-reorder grip. Same invisible-until-hovered treatment as
+// ResizeHandle, but a distinct affordance (grip glyph vs. an edge strip) so
+// the two gestures a header supports don't look like the same control.
+export function DragHandle({ colKey, dragHandleProps, theme }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <span
+      {...dragHandleProps(colKey)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onMouseDown={(e) => e.stopPropagation()} // don't let a grab start the header's onClick sort
+      onClick={(e) => e.stopPropagation()}
+      title="Drag to reorder"
+      style={{
+        display: "inline-flex", alignItems: "center", flexShrink: 0,
+        cursor: "grab", marginRight: 2,
+        color: theme?.text || "#888",
+        opacity: hover ? 0.7 : 0.3, transition: "opacity 0.12s",
+      }}
+    >
+      <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true">
+        <circle cx="2" cy="2" r="1.2" /><circle cx="6" cy="2" r="1.2" />
+        <circle cx="2" cy="6" r="1.2" /><circle cx="6" cy="6" r="1.2" />
+        <circle cx="2" cy="10" r="1.2" /><circle cx="6" cy="10" r="1.2" />
+      </svg>
+    </span>
+  );
 }
 
 // Thin invisible-until-hovered drag strip on a header cell's right edge.
