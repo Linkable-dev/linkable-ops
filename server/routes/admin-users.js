@@ -281,6 +281,20 @@ async function wipeBrand(userId, admin, dbTarget) {
     // products, brand and user. `products WHERE user_id` subquery resolves for
     // every product step because products themselves are deleted only at #18.
     const steps = [
+      // Sourcing first, and before `links`: none of these cascade (every
+      // product_id and user_id here is NO ACTION, and
+      // sourcing_candidates.application_link_id points at links), so a brand
+      // that has ever had sourcing run on a campaign failed the whole wipe
+      // with a foreign key violation at the products step.
+      ["sourcing_outreach_events", "DELETE FROM sourcing_outreach_events WHERE product_id IN (SELECT id FROM products WHERE user_id = $1) OR sourcing_candidate_id IN (SELECT id FROM sourcing_candidates WHERE product_id IN (SELECT id FROM products WHERE user_id = $1))"],
+      ["sourcing_replies", "DELETE FROM sourcing_replies WHERE product_id IN (SELECT id FROM products WHERE user_id = $1) OR sourcing_candidate_id IN (SELECT id FROM sourcing_candidates WHERE product_id IN (SELECT id FROM products WHERE user_id = $1))"],
+      ["sourcing_agent_events", "DELETE FROM sourcing_agent_events WHERE product_id IN (SELECT id FROM products WHERE user_id = $1) OR sourcing_agent_id IN (SELECT id FROM sourcing_agents WHERE product_id IN (SELECT id FROM products WHERE user_id = $1))"],
+      ["sourcing_contact_log", "DELETE FROM sourcing_contact_log WHERE product_id IN (SELECT id FROM products WHERE user_id = $1) OR sourcing_run_id IN (SELECT id FROM sourcing_runs WHERE product_id IN (SELECT id FROM products WHERE user_id = $1))"],
+      ["sourcing_candidates", "DELETE FROM sourcing_candidates WHERE user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["sourcing_agents", "DELETE FROM sourcing_agents WHERE created_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["sourcing_runs", "DELETE FROM sourcing_runs WHERE created_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["sourcing_plans", "DELETE FROM sourcing_plans WHERE updated_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["sourcing_email_notifications", "DELETE FROM sourcing_email_notifications WHERE brand_user_id = $1"],
       ["campaign_matches", "DELETE FROM campaign_matches WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["product_variants", "DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["product_files", "DELETE FROM product_files WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
