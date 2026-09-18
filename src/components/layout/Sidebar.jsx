@@ -25,7 +25,7 @@ const icon = (paths, width = 16) => (
 
 const homeIcon = icon(<path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5z" />, 18);
 
-// --- Marketplace ---------------------------------------------------------
+// --- Product ---------------------------------------------------------
 // A shopping bag for the section: this is the product brands and creators are
 // inside, as opposed to how they got here.
 const marketIcon = icon(<>
@@ -253,10 +253,10 @@ export default function Sidebar() {
         <div style={{ paddingTop: 8 }}>
           {navItem("/", "Home", path === "/", homeIcon)}
         </div>
-        {/* Marketplace — the product itself: who is in it, what they are
+        {/* Product — the product itself: who is in it, what they are
             running, and whether it is going well. */}
         <div style={{ paddingTop: 4 }}>
-          {moduleHeader("Marketplace", marketIcon, marketOpen, () => setMarketOpen(!marketOpen))}
+          {moduleHeader("Product", marketIcon, marketOpen, () => setMarketOpen(!marketOpen))}
         </div>
         {(marketOpen || !sidebarOpen) && (
           <div style={{
@@ -266,23 +266,23 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {/* Ordered the way an operator's morning goes: what needs
-                attention, then the machine, then the account actions. */}
-            {navItem("/alerts", "Alerts", path.startsWith("/alerts"), alertsIcon)}
-            {navItem("/health", "Brand health", path.startsWith("/health"), healthIcon)}
-            {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
-            {/* Autopilot, by the name it has everywhere it actually runs, and
-                under the mark the brand app gives it. */}
-            {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), autopilotIcon)}
-            {navItem("/ops/costs", "Costs & margin", path.startsWith("/ops/costs"), costsIcon)}
+            {/* Alphabetical — a fixed, predictable order beats a curated one
+                once there's no single "operator's morning" story to order by. */}
             {/* The roster every brand generates with — ours to cast, not any
                 one brand's. */}
             {navItem("/ops/ai-creators", "AI creators", path.startsWith("/ops/ai-creators"), aiCreatorsIcon)}
+            {navItem("/alerts", "Alerts", path.startsWith("/alerts"), alertsIcon)}
+            {/* Autopilot, by the name it has everywhere it actually runs, and
+                under the mark the brand app gives it. */}
+            {navItem("/ops/autopilot", "Autopilot", path.startsWith("/ops/autopilot"), autopilotIcon)}
+            {navItem("/health", "Brand health", path.startsWith("/health"), healthIcon)}
             {/* What real creators sent back, which until now only the brand
                 that received it could see. */}
             {navItem("/ops/content", "Campaign content", path.startsWith("/ops/content"), contentIcon)}
-            {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
+            {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
+            {navItem("/ops/costs", "Costs & margin", path.startsWith("/ops/costs"), costsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
+            {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
           </div>
         )}
 
