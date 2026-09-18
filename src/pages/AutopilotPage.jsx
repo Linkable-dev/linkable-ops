@@ -7,7 +7,7 @@ import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
 import { ColumnFilter, describeFilter, SortLabel, nextSort } from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
-import { ago, whenNext } from "../lib/relativeTime";
+import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
 
 /**
  * Autopilot — the recruiting machine, watched from here.
@@ -477,6 +477,9 @@ export default function AutopilotPage() {
                             </div>
                           )}
                         </td>
+                        <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
+                          {friendlyDate(r.enrolled_at)}
+                        </td>
                         <td style={num}>{r.found}</td>
                         <td style={num}>{r.contactable}</td>
                         <td style={num}>
@@ -516,9 +519,6 @@ export default function AutopilotPage() {
                               brand {r.searches_used}/{r.search_allowance}
                             </div>
                           )}
-                        </td>
-                        <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                          {ago(r.enrolled_at)}
                         </td>
                         <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
                           {ago(r.last_event_at)}

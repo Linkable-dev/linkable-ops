@@ -17,6 +17,23 @@ export function ago(raw) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** A calendar date, for a fact worth reading precisely rather than relatively
+ *  -- "17 Sep 2026", not "13h ago". The year is dropped for anything in the
+ *  last 11 months, since a launch date that recent reads faster without it and
+ *  the month alone is enough to place it. */
+export function friendlyDate(raw) {
+  if (!raw) return "—";
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) return "—";
+  const sameYear = at.getFullYear() === new Date().getFullYear();
+  const recent = Date.now() - at.getTime() < 330 * 24 * 60 * 60 * 1000;
+  return at.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: sameYear && recent ? undefined : "numeric",
+  });
+}
+
 /** How long until something will happen, for a timestamp in the future. */
 export function whenNext(raw) {
   if (!raw) return "—";
