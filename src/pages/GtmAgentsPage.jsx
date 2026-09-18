@@ -6,7 +6,7 @@ import { Card } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
-import { useColumnWidths, ResizeHandle } from "../components/table/tableTools";
+import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../components/table/tableTools";
 
 /**
  * GTM outreach, as agents.
@@ -74,6 +74,103 @@ const GTM_AGENT_COLUMNS = [
   { key: "actions", label: "", width: 230, resizable: false },
 ];
 const GTM_AGENT_DEFAULT_WIDTHS = Object.fromEntries(GTM_AGENT_COLUMNS.map((c) => [c.key, c.width]));
+// The chevron and the button group are controls, not data — pinned at their
+// original ends rather than draggable into the middle of the table.
+const GTM_AGENT_FIXED_KEYS = ["expand", "actions"];
+
+// One switch, not eleven inline <td>s — so the body can map over whatever
+// order the header is currently in instead of a column count that has to
+// stay in lockstep with it by hand. Each case is exactly what used to sit
+// directly in the JSX for that column.
+function renderAgentCell(key, a, ctx) {
+  const { theme, pill, busy, setMode, runNow, openId, button } = ctx;
+  switch (key) {
+    case "expand":
+      return openId === a.id ? "▾" : "▸";
+    case "agent":
+      return (
+        <>
+          {a.name}
+          <div style={{ color: theme.textMuted, fontWeight: 400, fontSize: 12 }}>
+            {a.email_campaigns?.id ? (
+              <Link
+                to={`/ai/campaigns/${a.email_campaigns.id}`}
+                onClick={(e) => e.stopPropagation()}
+                style={{ color: theme.textMuted }}
+                title="Templates, senders and slots"
+              >
+                {a.email_campaigns.name}
+              </Link>
+            ) : (
+              "no campaign"
+            )}
+          </div>
+        </>
+      );
+    case "audience":
+      return a.audience_type;
+    case "mode":
+      return pill(a.mode);
+    case "state":
+      return (
+        <>
+          {pill(a.status)}
+          {a.stopped_reason && (
+            <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 3 }}>
+              {a.stopped_reason}
+            </div>
+          )}
+        </>
+      );
+    case "contacted":
+      return (
+        <>
+          {a.contacted}
+          <span style={{ color: theme.textMuted }}>/{a.max_prospects}</span>
+        </>
+      );
+    case "replied":
+      return (
+        <>
+          {a.replied}
+          <span style={{ color: theme.textMuted, fontWeight: 400 }}>/{a.goal_replies}</span>
+        </>
+      );
+    case "daily_cap":
+      return a.daily_cap;
+    case "last_did":
+      return ago(a.last_acted_at);
+    case "next":
+      return a.mode === "off" || ["done", "failed"].includes(a.status) ? "—" : when(a.next_action_at);
+    case "actions":
+      return (
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          {a.mode === "off" ? (
+            <button style={button} disabled={busy === a.id} onClick={() => setMode(a.id, "autonomous")}>
+              Start
+            </button>
+          ) : (
+            <button style={button} disabled={busy === a.id} onClick={() => setMode(a.id, "off")}>
+              Stop
+            </button>
+          )}
+          <button
+            style={button}
+            disabled={busy === a.id || a.mode === "off"}
+            onClick={() => runNow(a.id, true)}
+            title="One pass, sending nothing"
+          >
+            Dry run
+          </button>
+          <button style={button} disabled={busy === a.id || a.mode === "off"} onClick={() => runNow(a.id, false)}>
+            Run now
+          </button>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
 
 // One input style, so the form reads as one control rather than six.
 function field(theme) {
@@ -122,6 +219,11 @@ export default function GtmAgentsPage() {
   });
 
   const { widths, startResize, resetWidth } = useColumnWidths("gtm-agents", GTM_AGENT_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder(
+    "gtm-agents",
+    GTM_AGENT_COLUMNS,
+    GTM_AGENT_FIXED_KEYS,
+  );
 
   const load = useCallback(
     () =>
@@ -292,6 +394,32 @@ export default function GtmAgentsPage() {
     whiteSpace: "nowrap",
   };
 
+  // Per-column <td> style — the same per-column look the cells had when they
+  // were hardcoded, now keyed off the column rather than its position.
+  const cellStyle = (key) => {
+    switch (key) {
+      case "expand":
+        return { ...td, color: theme.textMuted, cursor: "pointer" };
+      case "agent":
+        return { ...td, fontWeight: 600, cursor: "pointer" };
+      case "audience":
+        return { ...td, color: theme.textMuted };
+      case "contacted":
+      case "daily_cap":
+        return num;
+      case "replied":
+        return { ...num, fontWeight: 600 };
+      case "last_did":
+      case "next":
+        return { ...td, color: theme.textMuted, whiteSpace: "nowrap" };
+      case "actions":
+        return { ...td, whiteSpace: "nowrap" };
+      default:
+        return td;
+    }
+  };
+  const cellCtx = { theme, pill, busy, setMode, runNow, openId, button };
+
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>Outbound</h1>
@@ -443,17 +571,26 @@ export default function GtmAgentsPage() {
             }}
           >
             <colgroup>
-              {GTM_AGENT_COLUMNS.map((col) => (
+              {orderedColumns.map((col) => (
                 <col key={col.key} style={{ width: widths[col.key] }} />
               ))}
             </colgroup>
             <thead>
               <tr>
-                {GTM_AGENT_COLUMNS.map((col) => (
+                {orderedColumns.map((col) => (
                   <th
                     key={col.key}
-                    style={{ ...th, ...(col.right ? { textAlign: "right" } : {}), position: "relative" }}
+                    style={{
+                      ...th,
+                      ...(col.right ? { textAlign: "right" } : {}),
+                      position: "relative",
+                      background: dragOverKey === col.key ? theme.accentLight : undefined,
+                    }}
+                    {...dropTargetProps(col.key)}
                   >
+                    {!GTM_AGENT_FIXED_KEYS.includes(col.key) && (
+                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+                    )}
                     {col.label}
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
@@ -463,11 +600,11 @@ export default function GtmAgentsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <SkeletonTableRows rows={4} cols={GTM_AGENT_COLUMNS.length} />}
+              {loading && <SkeletonTableRows rows={4} cols={orderedColumns.length} />}
 
               {!loading && agents.length === 0 && (
                 <tr>
-                  <td style={{ ...td, color: theme.textMuted }} colSpan={GTM_AGENT_COLUMNS.length}>
+                  <td style={{ ...td, color: theme.textMuted }} colSpan={orderedColumns.length}>
                     No agents yet. One points at an existing campaign and decides when it runs.
                   </td>
                 </tr>
@@ -477,101 +614,24 @@ export default function GtmAgentsPage() {
                 agents.map((a) => (
                   <Fragment key={a.id}>
                     <tr>
-                      <td
-                        style={{ ...td, color: theme.textMuted, cursor: "pointer" }}
-                        onClick={() => openAgent(a.id)}
-                      >
-                        {openId === a.id ? "▾" : "▸"}
-                      </td>
-                      <td style={{ ...td, fontWeight: 600, cursor: "pointer" }} onClick={() => openAgent(a.id)}>
-                        {a.name}
-                        <div style={{ color: theme.textMuted, fontWeight: 400, fontSize: 12 }}>
-                          {a.email_campaigns?.id ? (
-                            <Link
-                              to={`/ai/campaigns/${a.email_campaigns.id}`}
-                              onClick={(e) => e.stopPropagation()}
-                              style={{ color: theme.textMuted }}
-                              title="Templates, senders and slots"
-                            >
-                              {a.email_campaigns.name}
-                            </Link>
-                          ) : (
-                            "no campaign"
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ ...td, color: theme.textMuted }}>{a.audience_type}</td>
-                      <td style={td}>{pill(a.mode)}</td>
-                      <td style={td}>
-                        {pill(a.status)}
-                        {a.stopped_reason && (
-                          <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 3 }}>
-                            {a.stopped_reason}
-                          </div>
-                        )}
-                      </td>
-                      <td style={num}>
-                        {a.contacted}
-                        <span style={{ color: theme.textMuted }}>/{a.max_prospects}</span>
-                      </td>
-                      {/* The number it exists to produce, against the goal that
-                          stops it. */}
-                      <td style={{ ...num, fontWeight: 600 }}>
-                        {a.replied}
-                        <span style={{ color: theme.textMuted, fontWeight: 400 }}>
-                          /{a.goal_replies}
-                        </span>
-                      </td>
-                      <td style={num}>{a.daily_cap}</td>
-                      <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                        {ago(a.last_acted_at)}
-                      </td>
-                      <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                        {a.mode === "off" || ["done", "failed"].includes(a.status)
-                          ? "—"
-                          : when(a.next_action_at)}
-                      </td>
-                      <td style={{ ...td, whiteSpace: "nowrap" }}>
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          {a.mode === "off" ? (
-                            <button
-                              style={button}
-                              disabled={busy === a.id}
-                              onClick={() => setMode(a.id, "autonomous")}
-                            >
-                              Start
-                            </button>
-                          ) : (
-                            <button
-                              style={button}
-                              disabled={busy === a.id}
-                              onClick={() => setMode(a.id, "off")}
-                            >
-                              Stop
-                            </button>
-                          )}
-                          <button
-                            style={button}
-                            disabled={busy === a.id || a.mode === "off"}
-                            onClick={() => runNow(a.id, true)}
-                            title="One pass, sending nothing"
-                          >
-                            Dry run
-                          </button>
-                          <button
-                            style={button}
-                            disabled={busy === a.id || a.mode === "off"}
-                            onClick={() => runNow(a.id, false)}
-                          >
-                            Run now
-                          </button>
-                        </div>
-                      </td>
+                      {orderedColumns.map((col) => (
+                        <td
+                          key={col.key}
+                          style={cellStyle(col.key)}
+                          onClick={
+                            col.key === "expand" || col.key === "agent"
+                              ? () => openAgent(a.id)
+                              : undefined
+                          }
+                        >
+                          {renderAgentCell(col.key, a, cellCtx)}
+                        </td>
+                      ))}
                     </tr>
 
                     {openId === a.id && (
                       <tr>
-                        <td style={{ ...td, background: theme.bg }} colSpan={GTM_AGENT_COLUMNS.length}>
+                        <td style={{ ...td, background: theme.bg }} colSpan={orderedColumns.length}>
                           {/* The six metric tiles and the log beneath them,
                               in outline, so the row keeps its height while it
                               fills. */}

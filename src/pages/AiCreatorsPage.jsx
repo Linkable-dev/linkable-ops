@@ -5,7 +5,7 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle } from "../components/table/tableTools";
+import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../components/table/tableTools";
 
 /**
  * The synthetic creator roster.
@@ -41,6 +41,76 @@ const ROSTER_COLUMNS = [
   { key: "actions",   label: "Actions",   width: 200, resizable: false },
 ];
 const ROSTER_DEFAULT_WIDTHS = Object.fromEntries(ROSTER_COLUMNS.map((c) => [c.key, c.width]));
+// The two action buttons, not a column of data — stays put rather than being
+// draggable somewhere into the middle of the table.
+const ROSTER_FIXED_KEYS = ["actions"];
+
+// One switch, not five inline <td>s — so the body can map over whatever order
+// the header is currently in instead of a column count that has to stay in
+// lockstep with it by hand. Each case is exactly what used to sit directly in
+// the JSX for that column.
+function renderRosterCell(key, a, ctx) {
+  const { theme, pill, offered, openSheet, setOpenSheet, setConfirmRender, busy, render } = ctx;
+  switch (key) {
+    case "name":
+      return (
+        <>
+          {a.name}
+          {a.identity_sheet?.age && (
+            <span style={{ color: theme.textMuted, fontWeight: 400 }}>
+              , {a.identity_sheet.age} · {a.identity_sheet.gender}
+            </span>
+          )}
+        </>
+      );
+    case "archetype":
+      return a.archetype || "—";
+    case "status":
+      return offered(a)
+        ? pill("Offered to brands", "good")
+        : pill(a.status, a.status === "failed" ? "bad" : "idle");
+    case "plates":
+      return a.plate_urls?.length ? (
+        <div style={{ display: "flex", gap: 4 }}>
+          {a.plate_urls.map((url, i) => (
+            <img
+              key={url}
+              src={url}
+              alt={`Reference plate ${i + 1} for ${a.name}`}
+              style={{ width: 44, height: 44, borderRadius: 6, objectFit: "cover" }}
+            />
+          ))}
+        </div>
+      ) : (
+        <span style={{ color: theme.textMuted }}>none</span>
+      );
+    case "actions":
+      return (
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <Btn
+            size="sm"
+            variant="outline"
+            onClick={() => setOpenSheet(openSheet === a.id ? "" : a.id)}
+          >
+            {openSheet === a.id ? "Hide sheet" : "Sheet"}
+          </Btn>
+          {/* Re-rendering changes the face on everything already
+              generated with this creator, so it asks first. A
+              first render has nothing to overwrite and does not. */}
+          <Btn
+            size="sm"
+            loading={busy === a.id}
+            disabled={a.status === "rendering"}
+            onClick={() => (a.plate_count ? setConfirmRender(a.id) : render(a.id))}
+          >
+            {a.plate_count ? "Re-render" : "Render plates"}
+          </Btn>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
 
 export default function AiCreatorsPage() {
   const { theme, mode } = useTheme();
@@ -56,6 +126,7 @@ export default function AiCreatorsPage() {
   const [note, setNote] = useState("");
 
   const { widths, startResize, resetWidth } = useColumnWidths("ai-creators-roster", ROSTER_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("ai-creators-roster", ROSTER_COLUMNS, ROSTER_FIXED_KEYS);
 
   const load = () =>
     api
@@ -230,18 +301,26 @@ export default function AiCreatorsPage() {
             borderCollapse: "collapse", tableLayout: "fixed",
           }}>
             <colgroup>
-              {ROSTER_COLUMNS.map((col) => (
+              {orderedColumns.map((col) => (
                 <col key={col.key} style={{ width: widths[col.key] }} />
               ))}
             </colgroup>
             <thead>
               <tr>
-                {ROSTER_COLUMNS.map((col) => (
-                  <th key={col.key} style={{
-                    ...th,
-                    position: "relative",
-                    ...(col.key === "actions" ? { textAlign: "right" } : {}),
-                  }}>
+                {orderedColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{
+                      ...th,
+                      position: "relative",
+                      ...(col.key === "actions" ? { textAlign: "right" } : {}),
+                      background: dragOverKey === col.key ? theme.accentLight : undefined,
+                    }}
+                    {...dropTargetProps(col.key)}
+                  >
+                    {!ROSTER_FIXED_KEYS.includes(col.key) && (
+                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+                    )}
                     {col.label}
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
@@ -251,11 +330,11 @@ export default function AiCreatorsPage() {
               </tr>
             </thead>
             <tbody>
-              {!data && <SkeletonTableRows rows={4} cols={5} />}
+              {!data && <SkeletonTableRows rows={4} cols={orderedColumns.length} />}
 
               {data && (data.avatars || []).length === 0 && (
                 <tr>
-                  <td style={{ ...td, color: theme.textMuted }} colSpan={5}>
+                  <td style={{ ...td, color: theme.textMuted }} colSpan={orderedColumns.length}>
                     {data.configured
                       ? "Nobody cast yet. Cast one above — it costs a model call and renders nothing."
                       : "Nothing to show until the gateway secret is set."}
@@ -266,63 +345,25 @@ export default function AiCreatorsPage() {
               {(data?.avatars || []).map((a) => (
                 <Fragment key={a.id}>
                   <tr>
-                    <td style={{ ...td, fontWeight: 600 }}>
-                      {a.name}
-                      {a.identity_sheet?.age && (
-                        <span style={{ color: theme.textMuted, fontWeight: 400 }}>
-                          , {a.identity_sheet.age} · {a.identity_sheet.gender}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ ...td, color: theme.textMuted }}>{a.archetype || "—"}</td>
-                    <td style={td}>
-                      {offered(a)
-                        ? pill("Offered to brands", "good")
-                        : pill(a.status, a.status === "failed" ? "bad" : "idle")}
-                    </td>
-                    <td style={td}>
-                      {a.plate_urls?.length ? (
-                        <div style={{ display: "flex", gap: 4 }}>
-                          {a.plate_urls.map((url, i) => (
-                            <img
-                              key={url}
-                              src={url}
-                              alt={`Reference plate ${i + 1} for ${a.name}`}
-                              style={{ width: 44, height: 44, borderRadius: 6, objectFit: "cover" }}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <span style={{ color: theme.textMuted }}>none</span>
-                      )}
-                    </td>
-                    <td style={td}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <Btn
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setOpenSheet(openSheet === a.id ? "" : a.id)}
-                        >
-                          {openSheet === a.id ? "Hide sheet" : "Sheet"}
-                        </Btn>
-                        {/* Re-rendering changes the face on everything already
-                            generated with this creator, so it asks first. A
-                            first render has nothing to overwrite and does not. */}
-                        <Btn
-                          size="sm"
-                          loading={busy === a.id}
-                          disabled={a.status === "rendering"}
-                          onClick={() => (a.plate_count ? setConfirmRender(a.id) : render(a.id))}
-                        >
-                          {a.plate_count ? "Re-render" : "Render plates"}
-                        </Btn>
-                      </div>
-                    </td>
+                    {orderedColumns.map((col) => (
+                      <td
+                        key={col.key}
+                        style={{
+                          ...td,
+                          ...(col.key === "name" ? { fontWeight: 600 } : {}),
+                          ...(col.key === "archetype" ? { color: theme.textMuted } : {}),
+                        }}
+                      >
+                        {renderRosterCell(col.key, a, {
+                          theme, pill, offered, openSheet, setOpenSheet, confirmRender, setConfirmRender, busy, render,
+                        })}
+                      </td>
+                    ))}
                   </tr>
 
                   {confirmRender === a.id && (
                     <tr>
-                      <td style={{ ...td, background: theme.bg }} colSpan={5}>
+                      <td style={{ ...td, background: theme.bg }} colSpan={orderedColumns.length}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                           <span style={{ fontSize: 13, flex: "1 1 420px" }}>
                             Re-render {a.name}? The new plates replace these ones, and every image
@@ -343,7 +384,7 @@ export default function AiCreatorsPage() {
 
                   {openSheet === a.id && (
                     <tr>
-                      <td style={{ ...td, background: theme.bg }} colSpan={5}>
+                      <td style={{ ...td, background: theme.bg }} colSpan={orderedColumns.length}>
                         {a.identity_sheet ? (
                           <>
                             <div style={{

@@ -11,7 +11,7 @@ import { api, friendlyDate } from "../../lib/api";
 import { Card } from "../ui/Card";
 import { Btn } from "../ui/Button";
 import { Skeleton } from "../ui/Skeleton";
-import { useColumnWidths, ResizeHandle } from "../table/tableTools";
+import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../table/tableTools";
 
 const SPLITS = [
   ["byGroup", "Segment"],
@@ -28,6 +28,21 @@ const ATTRIBUTION_COLUMNS = [
   { key: "mrr", label: "MRR", width: 100 },
 ];
 const ATTRIBUTION_DEFAULT_WIDTHS = Object.fromEntries(ATTRIBUTION_COLUMNS.map((c) => [c.key, c.width]));
+
+// One switch, not a fixed-order array — so the body can map over whatever
+// order the header is currently in. Each case is exactly the value
+// expression that used to sit at that fixed position in the row.
+function renderAttributionCell(key, r) {
+  switch (key) {
+    case "name": return r.key;
+    case "sends": return r.sends.toLocaleString();
+    case "signups": return r.signups;
+    case "rate": return `${r.signupRate}%`;
+    case "paying": return r.paying;
+    case "mrr": return `$${r.mrr}`;
+    default: return null;
+  }
+}
 
 export default function AttributionPanel() {
   const { theme } = useTheme();
@@ -52,6 +67,7 @@ export default function AttributionPanel() {
   const t = data?.totals;
   const rows = (data?.[split] || []).filter((r) => r.sends > 0).slice(0, 8);
   const { widths, startResize, resetWidth } = useColumnWidths("attribution-panel", ATTRIBUTION_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("attribution-panel", ATTRIBUTION_COLUMNS);
 
   const stat = (label, value, sub, accent) => (
     <div key={label} style={{ minWidth: 0 }}>
@@ -118,12 +134,21 @@ export default function AttributionPanel() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", tableLayout: "fixed", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", fontSize: 12 }}>
                 <colgroup>
-                  {ATTRIBUTION_COLUMNS.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}
+                  {orderedColumns.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}
                 </colgroup>
                 <thead>
                   <tr style={{ color: theme.textMuted }}>
-                    {ATTRIBUTION_COLUMNS.map((c, i) => (
-                      <th key={c.key} style={{ position: "relative", textAlign: i === 0 ? "left" : "right", padding: "4px 8px", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                    {orderedColumns.map((c) => (
+                      <th
+                        key={c.key}
+                        style={{
+                          position: "relative", textAlign: c.key === "name" ? "left" : "right", padding: "4px 8px",
+                          fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4,
+                          background: dragOverKey === c.key ? theme.accentLight : undefined,
+                        }}
+                        {...dropTargetProps(c.key)}
+                      >
+                        <DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />
                         {c.label}
                         <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                       </th>
@@ -133,9 +158,12 @@ export default function AttributionPanel() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.key} style={{ borderTop: `1px solid ${theme.border}` }}>
-                      <td style={{ padding: "6px 8px", color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.key}</td>
-                      {[r.sends.toLocaleString(), r.signups, `${r.signupRate}%`, r.paying, `$${r.mrr}`].map((v, i) => (
-                        <td key={i} style={{ padding: "6px 8px", textAlign: "right", color: theme.textMid, fontVariantNumeric: "tabular-nums" }}>{v}</td>
+                      {orderedColumns.map((c) => (
+                        <td key={c.key} style={c.key === "name"
+                          ? { padding: "6px 8px", color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+                          : { padding: "6px 8px", textAlign: "right", color: theme.textMid, fontVariantNumeric: "tabular-nums" }}>
+                          {renderAttributionCell(c.key, r)}
+                        </td>
                       ))}
                     </tr>
                   ))}

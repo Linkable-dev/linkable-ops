@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useDbTarget } from "../contexts/DbTargetContext";
 import { api, friendlyDate, friendlyNumber } from "../lib/api";
@@ -16,6 +16,7 @@ import ManageBrandModal from "../components/users/ManageBrandModal";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import {
   useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
+  useColumnOrder, DragHandle,
 } from "../components/table/tableTools";
 
 const TABS = [["brands", "Brands"], ["creators", "Creators"], ["deleted", "Deleted"]];
@@ -146,12 +147,17 @@ export default function UsersPage() {
   // "deleted" is a list of brands, but labelled distinctly in empty/footer copy.
   const tabLabel = tab === "deleted" ? "deleted brands" : tab;
   const showFilterRow = columns.some((c) => c.filter);
+  // Avatar/actions columns are icon-only or buttons, not draggable data — kept
+  // out of resize's stored-width override AND pinned at their original index
+  // for reorder, the same list doing both jobs.
+  const fixedColumnKeys = useMemo(() => columns.filter((c) => c.resizable === false).map((c) => c.key), [columns]);
   const { widths, startResize, resetWidth } = useColumnWidths(
     `admin-${tab}`,
     useMemo(() => Object.fromEntries(columns.map((c) => [c.key, c.width])), [columns]),
-    useMemo(() => columns.filter((c) => c.resizable === false).map((c) => c.key), [columns]),
+    fixedColumnKeys,
   );
-  const template = gridTemplate(columns, widths);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder(`admin-${tab}`, columns, fixedColumnKeys);
+  const template = gridTemplate(orderedColumns, widths);
   // Grid rows are plain divs, so horizontal overflow needs an explicit
   // min-width on a shared scroll body: sum of column widths + gaps + padding.
   const totalWidth = columns.reduce((s, c) => s + (widths[c.key] || c.width), 0)
@@ -372,8 +378,18 @@ export default function UsersPage() {
           fontSize: 11, fontWeight: 600, textTransform: "uppercase",
           letterSpacing: 0.5, color: theme.textMuted,
         }}>
-          {columns.map((col) => (
-            <div key={col.key} style={{ position: "relative", minWidth: 0, whiteSpace: "nowrap" }}>
+          {orderedColumns.map((col) => (
+            <div
+              key={col.key}
+              {...dropTargetProps(col.key)}
+              style={{
+                position: "relative", minWidth: 0, whiteSpace: "nowrap",
+                background: dragOverKey === col.key ? theme.accentLight : undefined,
+              }}
+            >
+              {!fixedColumnKeys.includes(col.key) && (
+                <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+              )}
               {col.sortable ? (
                 <SortLabel
                   theme={theme}
@@ -410,7 +426,7 @@ export default function UsersPage() {
         {loading ? (
           <SkeletonGridRows
             template={template}
-            columns={columns.map((col) => ({ key: col.key, kind: SKELETON_KIND[col.key] || "text" }))}
+            columns={orderedColumns.map((col) => ({ key: col.key, kind: SKELETON_KIND[col.key] || "text" }))}
             rows={8}
           />
         ) : error ? (
@@ -430,6 +446,7 @@ export default function UsersPage() {
               row={row}
               theme={theme}
               template={template}
+              orderedColumns={orderedColumns}
               busy={restoring === row.user_id}
               onRestore={() => handleRestore(row)}
             />
@@ -442,6 +459,7 @@ export default function UsersPage() {
               tab={tab}
               theme={theme}
               template={template}
+              orderedColumns={orderedColumns}
               busy={impersonating === row.user_id}
               disqualifyBusy={disqualifying === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
@@ -491,13 +509,158 @@ export default function UsersPage() {
   );
 }
 
-function UserRow({ row, tab, theme, template, busy, disqualifyBusy, onImpersonate, onManage, onDisqualify }) {
+// One switch, not a fixed sequence of inline cells per tab — so the body can
+// map over whatever order the header is currently in. Each case is exactly
+// what used to sit directly in the JSX for that column (brands and creators
+// share the "avatar" / "email" / "last_sign_in" / "actions" cases; the rest
+// are tab-specific and only ever appear in that tab's own column list).
+function renderUserCell(key, row, ctx) {
+  const {
+    tab, theme, avatar, initials, showImg, onImgError,
+    busy, disqualifyBusy, onImpersonate, onManage, onDisqualify,
+  } = ctx;
+  switch (key) {
+    case "avatar":
+      return (
+        <div style={{
+          width: 32, height: 32, borderRadius: "50%",
+          background: theme.surfaceAlt, color: theme.text,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, fontWeight: 700, overflow: "hidden",
+        }}>
+          {showImg
+            ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={onImgError} />
+            : initials
+          }
+        </div>
+      );
+    case "store_name":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <BrandLink userId={row.user_id}>{row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}</BrandLink>
+            </span>
+            {/* brands.hidden — kept out of Discover / the campaign feed by ops.
+                Mirrors the HIDDEN pill in ManageBrandModal so the state is
+                visible in the list, not only after opening Manage. */}
+            {row.hidden && <HiddenPill />}
+          </span>
+          {row.store_website && (
+            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {row.store_website}
+            </div>
+          )}
+        </div>
+      );
+    case "owner_name":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {[row.first_name, row.last_name].filter(Boolean).join(" ") || <span style={{ color: theme.textMuted }}>—</span>}
+        </div>
+      );
+    case "user_created":
+      return (
+        <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {friendlyDate(row.user_created)}
+        </div>
+      );
+    case "subscription":
+      return <SubscriptionCell row={row} theme={theme} />;
+    case "creator_name":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {[row.first_name, row.last_name].filter(Boolean).join(" ")
+            || row.instagram_name
+            || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+          {(row.location_country || row.location_city) && (
+            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {[row.location_city, row.location_country].filter(Boolean).join(", ")}
+            </div>
+          )}
+        </div>
+      );
+    case "instagram_username":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {row.instagram_username
+            ? <span>@{row.instagram_username.replace(/^@+/, "")}</span>
+            : <span style={{ color: theme.textMuted }}>—</span>
+          }
+        </div>
+      );
+    case "instagram_followers_count":
+      return (
+        <div style={{ fontSize: 12, color: theme.textMid, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {row.instagram_followers_count && row.instagram_followers_count !== "undefined"
+            ? friendlyNumber(row.instagram_followers_count)
+            : <span style={{ color: theme.textMuted }}>—</span>}
+        </div>
+      );
+    case "email":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {row.email}
+        </div>
+      );
+    case "last_sign_in":
+      return (
+        <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
+        </div>
+      );
+    case "actions":
+      return (
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
+          {tab === "creators" && (
+            <Btn
+              size="sm"
+              variant={row.disqualified_at ? "solid" : "outline"}
+              color={row.disqualified_at ? "#DC2626" : undefined}
+              onClick={onDisqualify}
+              loading={disqualifyBusy}
+              title={row.disqualified_at
+                ? `Ruled out: ${row.disqualified_reason || "no reason recorded"} — click to lift`
+                : "Stop this creator applying to campaigns"}
+            >
+              {row.disqualified_at ? "Ruled out" : "Rule out"}
+            </Btn>
+          )}
+          {tab === "brands" && (
+            <Btn
+              size="sm"
+              variant={row.startup_programme ? "solid" : "outline"}
+              onClick={onManage}
+              title={row.startup_programme
+                ? "Enrolled in the Startup Programme — manage programme & trials"
+                : "Manage Startup Programme enrollment & trials"}
+            >
+              Manage
+            </Btn>
+          )}
+          <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
+            View ↗
+          </Btn>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, onImpersonate, onManage, onDisqualify }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
   const [imgFailed, setImgFailed] = useState(false);
   const showImg = avatar && !imgFailed;
 
+  const ctx = {
+    tab, theme, avatar, initials, showImg,
+    onImgError: () => setImgFailed(true),
+    busy, disqualifyBusy, onImpersonate, onManage, onDisqualify,
+  };
+
   return (
     <div style={{
       display: "grid",
@@ -507,126 +670,86 @@ function UserRow({ row, tab, theme, template, busy, disqualifyBusy, onImpersonat
       borderBottom: `1px solid ${theme.border}`,
       gap: 8,
     }}>
-      {/* Avatar */}
-      <div style={{
-        width: 32, height: 32, borderRadius: "50%",
-        background: theme.surfaceAlt, color: theme.text,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 11, fontWeight: 700, overflow: "hidden",
-      }}>
-        {showImg
-          ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
-          : initials
-        }
-      </div>
-
-      {tab === "brands" ? (
-        <>
-          <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                <BrandLink userId={row.user_id}>{row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}</BrandLink>
-              </span>
-              {/* brands.hidden — kept out of Discover / the campaign feed by ops.
-                  Mirrors the HIDDEN pill in ManageBrandModal so the state is
-                  visible in the list, not only after opening Manage. */}
-              {row.hidden && <HiddenPill />}
-            </span>
-            {row.store_website && (
-              <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {row.store_website}
-              </div>
-            )}
-          </div>
-          <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {row.email}
-          </div>
-          <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {[row.first_name, row.last_name].filter(Boolean).join(" ") || <span style={{ color: theme.textMuted }}>—</span>}
-          </div>
-          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {friendlyDate(row.user_created)}
-          </div>
-          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
-          </div>
-          <SubscriptionCell row={row} theme={theme} />
-        </>
-      ) : (
-        <>
-          <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {[row.first_name, row.last_name].filter(Boolean).join(" ")
-              || row.instagram_name
-              || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
-            {(row.location_country || row.location_city) && (
-              <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {[row.location_city, row.location_country].filter(Boolean).join(", ")}
-              </div>
-            )}
-          </div>
-          <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {row.email}
-          </div>
-          <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {row.instagram_username
-              ? <span>@{row.instagram_username.replace(/^@+/, "")}</span>
-              : <span style={{ color: theme.textMuted }}>—</span>
-            }
-          </div>
-          <div style={{ fontSize: 12, color: theme.textMid, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {row.instagram_followers_count && row.instagram_followers_count !== "undefined"
-              ? friendlyNumber(row.instagram_followers_count)
-              : <span style={{ color: theme.textMuted }}>—</span>}
-          </div>
-          <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {row.last_sign_in ? friendlyDate(row.last_sign_in) : <span style={{ fontStyle: "italic" }}>never</span>}
-          </div>
-        </>
-      )}
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
-        {tab === "creators" && (
-          <Btn
-            size="sm"
-            variant={row.disqualified_at ? "solid" : "outline"}
-            color={row.disqualified_at ? "#DC2626" : undefined}
-            onClick={onDisqualify}
-            loading={disqualifyBusy}
-            title={row.disqualified_at
-              ? `Ruled out: ${row.disqualified_reason || "no reason recorded"} — click to lift`
-              : "Stop this creator applying to campaigns"}
-          >
-            {row.disqualified_at ? "Ruled out" : "Rule out"}
-          </Btn>
-        )}
-        {tab === "brands" && (
-          <Btn
-            size="sm"
-            variant={row.startup_programme ? "solid" : "outline"}
-            onClick={onManage}
-            title={row.startup_programme
-              ? "Enrolled in the Startup Programme — manage programme & trials"
-              : "Manage Startup Programme enrollment & trials"}
-          >
-            Manage
-          </Btn>
-        )}
-        <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
-          View ↗
-        </Btn>
-      </div>
+      {orderedColumns.map((col) => (
+        <Fragment key={col.key}>{renderUserCell(col.key, row, ctx)}</Fragment>
+      ))}
     </div>
   );
 }
 
+// One switch per deleted-brand column, mirroring renderUserCell above, so the
+// body can map over whatever order the header is currently in.
+function renderDeletedCell(key, row, ctx) {
+  const { theme, avatar, initials, showImg, onImgError, busy, onRestore } = ctx;
+  switch (key) {
+    case "avatar":
+      return (
+        <div style={{
+          width: 32, height: 32, borderRadius: "50%",
+          background: theme.surfaceAlt, color: theme.text,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, fontWeight: 700, overflow: "hidden",
+        }}>
+          {showImg
+            ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={onImgError} />
+            : initials}
+        </div>
+      );
+    case "store_name":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <BrandLink userId={row.user_id}>{row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}</BrandLink>
+          {row.store_website && (
+            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {row.store_website}
+            </div>
+          )}
+        </div>
+      );
+    case "email":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {row.email}
+        </div>
+      );
+    case "owner_name":
+      return (
+        <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {[row.first_name, row.last_name].filter(Boolean).join(" ") || <span style={{ color: theme.textMuted }}>—</span>}
+        </div>
+      );
+    case "user_deleted":
+      return (
+        <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          title={row.user_deleted ? new Date(row.user_deleted).toLocaleString() : ""}>
+          {row.user_deleted ? friendlyDate(row.user_deleted) : "—"}
+        </div>
+      );
+    case "purge":
+      return <PurgeCell row={row} theme={theme} />;
+    case "actions":
+      return (
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
+          <Btn size="sm" color="#10B981" onClick={onRestore} loading={busy}>
+            Restore
+          </Btn>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
 // One soft-deleted brand row. No impersonate/manage — a deleted account can't
 // be opened; the only action is to bring it back before the nightly purge.
-function DeletedBrandRow({ row, theme, template, busy, onRestore }) {
+function DeletedBrandRow({ row, theme, template, orderedColumns, busy, onRestore }) {
   const avatar = avatarFor(row, "brand");
   const initials = initialsFor(row, "brand");
   const [imgFailed, setImgFailed] = useState(false);
   const showImg = avatar && !imgFailed;
 
+  const ctx = { theme, avatar, initials, showImg, onImgError: () => setImgFailed(true), busy, onRestore };
+
   return (
     <div style={{
       display: "grid",
@@ -636,42 +759,9 @@ function DeletedBrandRow({ row, theme, template, busy, onRestore }) {
       borderBottom: `1px solid ${theme.border}`,
       gap: 8,
     }}>
-      <div style={{
-        width: 32, height: 32, borderRadius: "50%",
-        background: theme.surfaceAlt, color: theme.text,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 11, fontWeight: 700, overflow: "hidden",
-      }}>
-        {showImg
-          ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
-          : initials}
-      </div>
-
-      <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        <BrandLink userId={row.user_id}>{row.store_name || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}</BrandLink>
-        {row.store_website && (
-          <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {row.store_website}
-          </div>
-        )}
-      </div>
-      <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {row.email}
-      </div>
-      <div style={{ minWidth: 0, fontSize: 13, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {[row.first_name, row.last_name].filter(Boolean).join(" ") || <span style={{ color: theme.textMuted }}>—</span>}
-      </div>
-      <div style={{ fontSize: 12, color: theme.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-        title={row.user_deleted ? new Date(row.user_deleted).toLocaleString() : ""}>
-        {row.user_deleted ? friendlyDate(row.user_deleted) : "—"}
-      </div>
-      <PurgeCell row={row} theme={theme} />
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
-        <Btn size="sm" color="#10B981" onClick={onRestore} loading={busy}>
-          Restore
-        </Btn>
-      </div>
+      {orderedColumns.map((col) => (
+        <Fragment key={col.key}>{renderDeletedCell(col.key, row, ctx)}</Fragment>
+      ))}
     </div>
   );
 }

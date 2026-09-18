@@ -13,7 +13,7 @@ import { Skeleton, SkeletonRow, SkeletonStat, SkeletonStatGrid, SkeletonTableRow
 import { TabBar } from "../components/ui/TabBar";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { Pagination } from "../components/ui/Pagination";
-import { useColumnWidths, ResizeHandle, SortLabel, nextSort } from "../components/table/tableTools";
+import { useColumnWidths, ResizeHandle, SortLabel, nextSort, useColumnOrder, DragHandle } from "../components/table/tableTools";
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },
@@ -434,11 +434,19 @@ function TableColGroup({ cols, widths }) {
   );
 }
 
-function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidth, theme }) {
+// `cols` is expected to already be in the caller's `orderedColumns` order
+// (from useColumnOrder) — this only renders what it's given, in that order,
+// for both the header and (via the caller's own body .map) the row cells.
+function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidth, theme, dragHandleProps, dropTargetProps, dragOverKey }) {
   return (
     <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
       {cols.map((c) => (
-        <th key={c.key} style={{ ...thStyle, position: "relative" }}>
+        <th
+          key={c.key}
+          style={{ ...thStyle, position: "relative", background: dragOverKey === c.key ? theme.accentLight : undefined }}
+          {...dropTargetProps(c.key)}
+        >
+          <DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />
           {c.sortable ? (
             <SortLabel
               label={c.label}
@@ -468,6 +476,85 @@ const SEND_COLS = [
 ];
 const SEND_COL_WIDTHS = Object.fromEntries(SEND_COLS.map((c) => [c.key, c.width]));
 
+// One switch, not seven inline <td>s — so the body can map over whatever
+// order the header is currently in instead of a column count that has to
+// stay in lockstep with it by hand. Each case is exactly what used to sit
+// directly in the JSX for that column.
+function renderSendCell(key, r, { theme, setPreviewId, ask, runStop, stopBusy }) {
+  switch (key) {
+    case "scheduled_at":
+      return (
+        <span style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>
+          {friendlyDate(
+            r.status === "sent" ? r.sent_at
+              : r.status === "cancelled" ? (r.cancelled_at || r.scheduled_at)
+              : r.scheduled_at
+          )}
+        </span>
+      );
+    case "brand_group":
+      return <Pill tint={GROUP_TINTS[r.brand_group] || {}}>{r.brand_group || "—"}</Pill>;
+    case "touch_number":
+      return <>T+{r.touch_number === 1 ? "0" : r.touch_number === 2 ? "3" : r.touch_number === 3 ? "7" : "?"}</>;
+    case "to_email":
+      return (
+        <>
+          <div style={{ color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.to_name || "—"}</div>
+          <div style={{ color: theme.textMuted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.to_email}</div>
+        </>
+      );
+    case "subject":
+      return (
+        <span style={{ display: "block", color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {r.subject}
+        </span>
+      );
+    case "status": {
+      const ds = sendDisplayStatus(r);
+      return (
+        <>
+          <Pill tint={SEND_STATUS_TINTS[ds] || {}}>{ds}</Pill>
+          {r.cancel_reason && (
+            <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{r.cancel_reason}</div>
+          )}
+        </>
+      );
+    }
+    case "actions":
+      return (
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <button
+            onClick={() => setPreviewId(r.id)}
+            style={iconBtn(theme)}
+            title="Preview email"
+            aria-label="Preview email"
+          >
+            <EyeIcon />
+          </button>
+          {(r.status === "pending" || r.status === "scheduled") && (
+            <button
+              onClick={async () => {
+                const ok = await ask({
+                  title: "Stop pending emails?",
+                  body: `Stop all pending emails to ${r.to_email}? This suppresses the address for this campaign.`,
+                  confirmLabel: "Stop", danger: true,
+                });
+                if (ok) runStop([r.to_email], "replied");
+              }}
+              disabled={stopBusy}
+              style={miniBtn(theme)}
+              title="Cancel this row + all other pending touches for this address"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
 function SendsTab({ campaign, theme }) {
   const [stats, setStats] = useState(null);
   const [rows, setRows] = useState([]);
@@ -491,6 +578,7 @@ function SendsTab({ campaign, theme }) {
   // Server-side sort + drag-resizable columns (persisted per table).
   const [sort, setSort] = useState({ sortBy: "scheduled_at", sortDir: "desc" });
   const { widths, startResize, resetWidth } = useColumnWidths("ai-sends", SEND_COL_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("ai-sends", SEND_COLS);
   const handleSort = useCallback((key, defaultDir) => setSort((s) => nextSort(s, key, defaultDir)), []);
 
   const [stopText, setStopText] = useState("");
@@ -710,15 +798,16 @@ function SendsTab({ campaign, theme }) {
       {loading && rows.length === 0 ? (
         <Card style={{ padding: 0, overflow: "auto" }}>
           <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
-            <TableColGroup cols={SEND_COLS} widths={widths} />
+            <TableColGroup cols={orderedColumns} widths={widths} />
             <thead>
               <SortableHeaderRow
-                cols={SEND_COLS} thStyle={sendTh} sort={sort} onSort={handleSort}
+                cols={orderedColumns} thStyle={sendTh} sort={sort} onSort={handleSort}
                 startResize={startResize} resetWidth={resetWidth} theme={theme}
+                dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
               />
             </thead>
             <tbody>
-              <SkeletonTableRows rows={6} cols={SEND_COLS.map((col) => ({ key: col.key, kind: col.key === "status" ? "pill" : col.key === "actions" ? "actions" : col.key === "brand_group" || col.key === "touch_number" ? "num" : "text" }))} theme={theme} />
+              <SkeletonTableRows rows={6} cols={orderedColumns.map((col) => ({ key: col.key, kind: col.key === "status" ? "pill" : col.key === "actions" ? "actions" : col.key === "brand_group" || col.key === "touch_number" ? "num" : "text" }))} theme={theme} />
             </tbody>
           </table>
         </Card>
@@ -727,70 +816,22 @@ function SendsTab({ campaign, theme }) {
       ) : (
         <Card style={{ padding: 0, overflow: "auto" }}>
           <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
-            <TableColGroup cols={SEND_COLS} widths={widths} />
+            <TableColGroup cols={orderedColumns} widths={widths} />
             <thead>
               <SortableHeaderRow
-                cols={SEND_COLS} thStyle={sendTh} sort={sort} onSort={handleSort}
+                cols={orderedColumns} thStyle={sendTh} sort={sort} onSort={handleSort}
                 startResize={startResize} resetWidth={resetWidth} theme={theme}
+                dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
               />
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                  <td style={{ ...sendTd, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                    {friendlyDate(
-                      r.status === "sent" ? r.sent_at
-                        : r.status === "cancelled" ? (r.cancelled_at || r.scheduled_at)
-                        : r.scheduled_at
-                    )}
-                  </td>
-                  <td style={sendTd}><Pill tint={GROUP_TINTS[r.brand_group] || {}}>{r.brand_group || "—"}</Pill></td>
-                  <td style={sendTd}>T+{r.touch_number === 1 ? "0" : r.touch_number === 2 ? "3" : r.touch_number === 3 ? "7" : "?"}</td>
-                  <td style={sendTd}>
-                    <div style={{ color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.to_name || "—"}</div>
-                    <div style={{ color: theme.textMuted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.to_email}</div>
-                  </td>
-                  <td style={{ ...sendTd, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {r.subject}
-                  </td>
-                  <td style={sendTd}>
-                    {(() => {
-                      const ds = sendDisplayStatus(r);
-                      return <Pill tint={SEND_STATUS_TINTS[ds] || {}}>{ds}</Pill>;
-                    })()}
-                    {r.cancel_reason && (
-                      <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{r.cancel_reason}</div>
-                    )}
-                  </td>
-                  <td style={sendTd}>
-                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                      <button
-                        onClick={() => setPreviewId(r.id)}
-                        style={iconBtn(theme)}
-                        title="Preview email"
-                        aria-label="Preview email"
-                      >
-                        <EyeIcon />
-                      </button>
-                      {(r.status === "pending" || r.status === "scheduled") && (
-                        <button
-                          onClick={async () => {
-                            const ok = await ask({
-                              title: "Stop pending emails?",
-                              body: `Stop all pending emails to ${r.to_email}? This suppresses the address for this campaign.`,
-                              confirmLabel: "Stop", danger: true,
-                            });
-                            if (ok) runStop([r.to_email], "replied");
-                          }}
-                          disabled={stopBusy}
-                          style={miniBtn(theme)}
-                          title="Cancel this row + all other pending touches for this address"
-                        >
-                          Stop
-                        </button>
-                      )}
-                    </div>
-                  </td>
+                  {orderedColumns.map((c) => (
+                    <td key={c.key} style={sendTd}>
+                      {renderSendCell(c.key, r, { theme, setPreviewId, ask, runStop, stopBusy })}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -1539,6 +1580,59 @@ const LEAD_COLS = [
 ];
 const LEAD_COL_WIDTHS = Object.fromEntries(LEAD_COLS.map((c) => [c.key, c.width]));
 
+// One switch, not seven inline <td>s — so the body can map over whatever
+// order the header is currently in instead of a column count that has to
+// stay in lockstep with it by hand. Each case is exactly what used to sit
+// directly in the JSX for that column.
+function renderLeadCell(key, r, { theme }) {
+  switch (key) {
+    case "domain":
+      return (
+        <a
+          href={`https://${r.domain}`} target="_blank" rel="noreferrer"
+          style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: theme.text, fontWeight: 500, textDecoration: "none" }}
+        >
+          {r.domain}
+        </a>
+      );
+    case "contact_first_name": {
+      const fullName = [r.contact_first_name, r.contact_last_name].filter(Boolean).join(" ");
+      return (
+        <>
+          <div style={{ color: theme.text }}>{fullName || "—"}</div>
+          {r.contact_position && <div style={{ fontSize: 11, color: theme.textMuted }}>{r.contact_position}</div>}
+        </>
+      );
+    }
+    case "email":
+      return (
+        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: r.email ? theme.text : theme.textMuted }}>
+          {r.email || "—"}
+        </span>
+      );
+    case "country_code":
+      return <span style={{ color: theme.textMuted }}>{r.country_code || "—"}</span>;
+    case "categories":
+      return (
+        <span style={{ color: theme.textMuted, fontSize: 11 }}>
+          {(r.categories || []).slice(0, 2).map((c) => c.split("/").pop()).join(", ") || "—"}
+        </span>
+      );
+    case "lead_status": {
+      const skipReason = r.raw_data?._disqualify_reason;
+      return r.emailed
+        ? <Pill tint={{ bg: "#D1FAE5", fg: "#065F46" }}>contacted</Pill>
+        : skipReason
+          ? <Pill tint={{ bg: "#FEE2E2", fg: "#991B1B" }} title={skipReason}>skipped</Pill>
+          : <Pill tint={{ bg: "#DBEAFE", fg: "#1E40AF" }}>queued</Pill>;
+    }
+    case "imported_at":
+      return <span style={{ color: theme.textMuted, whiteSpace: "nowrap" }}>{shortDate(r.imported_at)}</span>;
+    default:
+      return null;
+  }
+}
+
 function LeadPoolPanel({ theme, campaign }) {
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState(null);
@@ -1552,6 +1646,7 @@ function LeadPoolPanel({ theme, campaign }) {
   // Server-side sort + drag-resizable columns (persisted per table).
   const [sort, setSort] = useState({ sortBy: "imported_at", sortDir: "desc" });
   const { widths, startResize, resetWidth } = useColumnWidths("ai-leads", LEAD_COL_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("ai-leads", LEAD_COLS);
   // Anything that changes the result set sends you back to page 1.
   const handleSort = useCallback((key, defaultDir) => { setPage(1); setSort((s) => nextSort(s, key, defaultDir)); }, []);
   const changeQ = (v) => { setPage(1); setQ(v); };
@@ -1640,42 +1735,24 @@ function LeadPoolPanel({ theme, campaign }) {
       ) : (
         <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
-          <TableColGroup cols={LEAD_COLS} widths={widths} />
+          <TableColGroup cols={orderedColumns} widths={widths} />
           <thead>
             <SortableHeaderRow
-              cols={LEAD_COLS} thStyle={runTh} sort={sort} onSort={handleSort}
+              cols={orderedColumns} thStyle={runTh} sort={sort} onSort={handleSort}
               startResize={startResize} resetWidth={resetWidth} theme={theme}
+              dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
             />
           </thead>
           <tbody>
-            {rows.map((r) => {
-              const skipReason = r.raw_data?._disqualify_reason;
-              const fullName = [r.contact_first_name, r.contact_last_name].filter(Boolean).join(" ");
-              return (
-                <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                  <td style={{ ...runTd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    <a href={`https://${r.domain}`} target="_blank" rel="noreferrer" style={{ color: theme.text, fontWeight: 500, textDecoration: "none" }}>{r.domain}</a>
+            {rows.map((r) => (
+              <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                {orderedColumns.map((c) => (
+                  <td key={c.key} style={runTd}>
+                    {renderLeadCell(c.key, r, { theme })}
                   </td>
-                  <td style={runTd}>
-                    <div style={{ color: theme.text }}>{fullName || "—"}</div>
-                    {r.contact_position && <div style={{ fontSize: 11, color: theme.textMuted }}>{r.contact_position}</div>}
-                  </td>
-                  <td style={{ ...runTd, color: r.email ? theme.text : theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.email || "—"}</td>
-                  <td style={{ ...runTd, color: theme.textMuted }}>{r.country_code || "—"}</td>
-                  <td style={{ ...runTd, color: theme.textMuted, fontSize: 11 }}>
-                    {(r.categories || []).slice(0, 2).map((c) => c.split("/").pop()).join(", ") || "—"}
-                  </td>
-                  <td style={runTd}>
-                    {r.emailed
-                      ? <Pill tint={{ bg: "#D1FAE5", fg: "#065F46" }}>contacted</Pill>
-                      : skipReason
-                        ? <Pill tint={{ bg: "#FEE2E2", fg: "#991B1B" }} title={skipReason}>skipped</Pill>
-                        : <Pill tint={{ bg: "#DBEAFE", fg: "#1E40AF" }}>queued</Pill>}
-                  </td>
-                  <td style={{ ...runTd, color: theme.textMuted, whiteSpace: "nowrap" }}>{shortDate(r.imported_at)}</td>
-                </tr>
-              );
-            })}
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
         </div>

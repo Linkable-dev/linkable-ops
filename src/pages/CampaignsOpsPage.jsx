@@ -5,7 +5,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle, ColumnFilter } from "../components/table/tableTools";
+import { useColumnWidths, useColumnOrder, ResizeHandle, DragHandle, ColumnFilter } from "../components/table/tableTools";
 import CreatorMatchesModal from "../components/campaigns/CreatorMatchesModal";
 
 const STATUS_COLORS = {
@@ -24,23 +24,6 @@ const STAGES = ["Invited", "Applied", "Accepted", "Sample Accepted", "Shipped", 
 
 const PAGE_SIZE = 25;
 
-// Default column widths in px (roughly the old percent layout at ~1200px).
-// The expand-chevron column is fixed — not resizable.
-const COLUMNS = [
-  { key: "expand",            width: 28, resizable: false },
-  { key: "campaign_name",     width: 200, fill: true },
-  { key: "brand_name",        width: 160 },
-  { key: "creators_invited",  width: 100 },
-  { key: "creators_applied",  width: 100 },
-  { key: "creators_accepted", width: 90 },
-  { key: "samples_accepted",  width: 100 },
-  { key: "products_shipped",  width: 85 },
-  { key: "clicks",            width: 80 },
-  { key: "sales",             width: 80 },
-  { key: "bottleneck",        width: 180, fill: true },
-];
-const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
-
 // The exact bottleneck_label values the campaigns query emits, so the filter
 // matches whole labels rather than substrings. "empty" is the healthy case
 // (no bottleneck label at all).
@@ -53,6 +36,88 @@ const BOTTLENECK_OPTIONS = [
   { value: "is:Content: no sales",           label: "No sales" },
   { value: "empty",                          label: "No bottleneck" },
 ];
+
+// Default column widths in px (roughly the old percent layout at ~1200px).
+// The expand-chevron column is fixed — not resizable, and (below) not
+// draggable either: it's a row-expand affordance tied to its leading
+// position, not a data column someone would want to move.
+const COLUMNS = [
+  { key: "expand",            width: 28, resizable: false },
+  { key: "campaign_name",     label: "Campaign", width: 200, fill: true, sortKey: "campaign_name", filter: { type: "text", extra: { placeholder: "Campaign name…" } } },
+  { key: "brand_name",        label: "Brand", width: 160, sortKey: "brand_name", filter: { type: "text", extra: { placeholder: "Brand name…" } } },
+  { key: "creators_invited",  label: "Invited", width: 100, num: true, sortKey: "creators_invited", filter: { type: "number" } },
+  { key: "creators_applied",  label: "Applied", width: 100, num: true, sortKey: "creators_applied", filter: { type: "number" } },
+  { key: "creators_accepted", label: "Accepted", width: 90, num: true, sortKey: "creators_accepted", filter: { type: "number" } },
+  { key: "samples_accepted",  label: "Sample acc.", width: 100, num: true, sortKey: "samples_accepted", filter: { type: "number", label: "Samples accepted" } },
+  { key: "products_shipped",  label: "Shipped", width: 85, num: true, sortKey: "products_shipped", filter: { type: "number" } },
+  { key: "clicks",            label: "Clicks", width: 80, num: true, sortKey: "clicks", filter: { type: "number" } },
+  { key: "sales",             label: "Sales", width: 80, num: true, sortKey: "sales", filter: { type: "number" } },
+  { key: "bottleneck",        label: "Bottleneck", width: 180, fill: true, sortKey: "bottleneck", filter: { type: "select", extra: { options: BOTTLENECK_OPTIONS } } },
+];
+const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
+// The expand-chevron is the only column pinned out of dragging — see comment above.
+const CAMPAIGNS_FIXED_KEYS = ["expand"];
+
+// One switch, not eleven inline <Td>s — so the row body can map over
+// whatever order the header is currently in instead of a hardcoded sequence
+// that has to stay in lockstep with it by hand. Each case is exactly what
+// used to sit directly in the JSX for that column.
+function renderCampaignCell(key, c, { theme, mode, isOpen, bottleneck, setMatchesFor }) {
+  switch (key) {
+    case "expand":
+      return (
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" style={{ transition: "transform 0.15s", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>
+          <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+    case "campaign_name":
+      return c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>;
+    case "brand_name":
+      return <BrandLink userId={c.brand_user_id}>{c.brand_name || "—"}</BrandLink>;
+    case "creators_invited":
+      return <SplitCount theme={theme} total={c.creators_invited} ext={c.externals_invited} />;
+    case "creators_applied":
+      return <SplitCount theme={theme} total={c.creators_applied} ext={c.externals_applied} />;
+    case "creators_accepted":
+      return friendlyNumber(c.creators_accepted);
+    case "samples_accepted":
+      return friendlyNumber(c.samples_accepted);
+    case "products_shipped":
+      return friendlyNumber(c.products_shipped);
+    case "clicks":
+      return friendlyNumber(c.clicks);
+    case "sales":
+      return friendlyNumber(c.sales);
+    case "bottleneck":
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {bottleneck ? <BottleneckBadge theme={theme} mode={mode} label={bottleneck.label} tone={bottleneck.tone} /> : <span style={{ color: theme.textMuted }}>—</span>}
+          <button
+            onClick={(e) => { e.stopPropagation(); setMatchesFor(c); }}
+            title="Rank the creator base against this campaign"
+            style={{
+              height: 22, padding: "0 8px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+              fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+              border: `1px solid ${theme.border}`, background: theme.surface, color: theme.textMid,
+            }}
+          >Find creators</button>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+// Per-column cell style overrides that used to be written inline at each
+// <Td> call site; everything not listed here keeps Td's default styling.
+function campaignCellStyle(key, c, theme) {
+  switch (key) {
+    case "expand": return { width: 28, color: theme.textMuted };
+    case "campaign_name": return { fontWeight: 500, color: theme.text };
+    case "sales": return { fontWeight: c.sales > 0 ? 600 : 400, color: c.sales > 0 ? theme.text : theme.textMuted };
+    default: return undefined;
+  }
+}
 
 export default function CampaignsOpsPage() {
   const { theme, mode } = useTheme();
@@ -74,6 +139,7 @@ export default function CampaignsOpsPage() {
   const [matchesFor, setMatchesFor] = useState(null); // campaign whose creator shortlist is open
 
   const { widths, startResize, resetWidth } = useColumnWidths("ops-campaigns", DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("ops-campaigns", COLUMNS, CAMPAIGNS_FIXED_KEYS);
   // Fixed columns keep their width; the two `fill` columns share whatever is
   // left, so the table fits the card and only scrolls when it really must.
   const totalWidth = COLUMNS.reduce((sum, c) => sum + (c.fill ? 140 : (widths[c.key] || c.width)), 0);
@@ -209,23 +275,28 @@ export default function CampaignsOpsPage() {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", minWidth: totalWidth, borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
             <colgroup>
-              {COLUMNS.map((c) => (
+              {orderedColumns.map((c) => (
                 <col key={c.key} style={c.fill ? { minWidth: 140 } : { width: widths[c.key] || c.width }} />
               ))}
             </colgroup>
             <thead>
               <tr style={{ background: theme.bg }}>
-                <Th theme={theme}></Th>
-                <Th theme={theme} sortKey="campaign_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "campaign_name", startResize, resetWidth }} filter={colFilter("campaign_name", "text", "Campaign", { placeholder: "Campaign name…" })}>Campaign</Th>
-                <Th theme={theme} sortKey="brand_name"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "brand_name", startResize, resetWidth }} filter={colFilter("brand_name", "text", "Brand", { placeholder: "Brand name…" })}>Brand</Th>
-                <Th theme={theme} num sortKey="creators_invited"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_invited", startResize, resetWidth }} filter={colFilter("creators_invited", "number", "Invited")}>Invited</Th>
-                <Th theme={theme} num sortKey="creators_applied"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_applied", startResize, resetWidth }} filter={colFilter("creators_applied", "number", "Applied")}>Applied</Th>
-                <Th theme={theme} num sortKey="creators_accepted" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "creators_accepted", startResize, resetWidth }} filter={colFilter("creators_accepted", "number", "Accepted")}>Accepted</Th>
-                <Th theme={theme} num sortKey="samples_accepted"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "samples_accepted", startResize, resetWidth }} filter={colFilter("samples_accepted", "number", "Samples accepted")}>Sample acc.</Th>
-                <Th theme={theme} num sortKey="products_shipped"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "products_shipped", startResize, resetWidth }} filter={colFilter("products_shipped", "number", "Shipped")}>Shipped</Th>
-                <Th theme={theme} num sortKey="clicks"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "clicks", startResize, resetWidth }} filter={colFilter("clicks", "number", "Clicks")}>Clicks</Th>
-                <Th theme={theme} num sortKey="sales"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "sales", startResize, resetWidth }} filter={colFilter("sales", "number", "Sales")}>Sales</Th>
-                <Th theme={theme}     sortKey="bottleneck"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} resize={{ colKey: "bottleneck", startResize, resetWidth }} filter={colFilter("bottleneck", "select", "Bottleneck", { options: BOTTLENECK_OPTIONS })}>Bottleneck</Th>
+                {orderedColumns.map((col) => (
+                  <Th
+                    key={col.key}
+                    theme={theme}
+                    num={col.num}
+                    sortKey={col.sortKey}
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                    resize={col.resizable === false ? undefined : { colKey: col.key, startResize, resetWidth }}
+                    filter={col.filter ? colFilter(col.key, col.filter.type, col.filter.label || col.label, col.filter.extra) : undefined}
+                    dragHandle={!CAMPAIGNS_FIXED_KEYS.includes(col.key) ? <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} /> : undefined}
+                    dropTarget={dropTargetProps(col.key)}
+                    highlight={dragOverKey === col.key}
+                  >{col.label}</Th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -249,34 +320,11 @@ export default function CampaignsOpsPage() {
                       onMouseEnter={(e) => { if (!isOpen) e.currentTarget.style.background = theme.accentLight; }}
                       onMouseLeave={(e) => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}
                     >
-                      <Td theme={theme} style={{ width: 28, color: theme.textMuted }}>
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" style={{ transition: "transform 0.15s", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>
-                          <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </Td>
-                      <Td theme={theme} style={{ fontWeight: 500, color: theme.text }}>{c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>}</Td>
-                      <Td theme={theme}><BrandLink userId={c.brand_user_id}>{c.brand_name || "—"}</BrandLink></Td>
-                      <Td theme={theme} num><SplitCount theme={theme} total={c.creators_invited} ext={c.externals_invited} /></Td>
-                      <Td theme={theme} num><SplitCount theme={theme} total={c.creators_applied} ext={c.externals_applied} /></Td>
-                      <Td theme={theme} num>{friendlyNumber(c.creators_accepted)}</Td>
-                      <Td theme={theme} num>{friendlyNumber(c.samples_accepted)}</Td>
-                      <Td theme={theme} num>{friendlyNumber(c.products_shipped)}</Td>
-                      <Td theme={theme} num>{friendlyNumber(c.clicks)}</Td>
-                      <Td theme={theme} num style={{ fontWeight: c.sales > 0 ? 600 : 400, color: c.sales > 0 ? theme.text : theme.textMuted }}>{friendlyNumber(c.sales)}</Td>
-                      <Td theme={theme}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                          {bottleneck ? <BottleneckBadge theme={theme} mode={mode} label={bottleneck.label} tone={bottleneck.tone} /> : <span style={{ color: theme.textMuted }}>—</span>}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setMatchesFor(c); }}
-                            title="Rank the creator base against this campaign"
-                            style={{
-                              height: 22, padding: "0 8px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
-                              fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
-                              border: `1px solid ${theme.border}`, background: theme.surface, color: theme.textMid,
-                            }}
-                          >Find creators</button>
-                        </div>
-                      </Td>
+                      {orderedColumns.map((col) => (
+                        <Td key={col.key} theme={theme} num={col.num} style={campaignCellStyle(col.key, c, theme)}>
+                          {renderCampaignCell(col.key, c, { theme, mode, isOpen, bottleneck, setMatchesFor })}
+                        </Td>
+                      ))}
                     </tr>
                     {isOpen && (
                       <tr>
@@ -579,7 +627,7 @@ function SampleStatus({ theme, v }) {
   return <span style={{ color: theme.text, fontWeight: 500 }}>{label}</span>;
 }
 
-function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resize, filter }) {
+function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resize, filter, dragHandle, dropTarget, highlight }) {
   const isSortable = !!sortKey && !!onSort;
   const isActive = isSortable && sortBy === sortKey;
   const arrow = !isActive ? "" : (sortDir === "asc" ? " ↑" : " ↓");
@@ -593,6 +641,7 @@ function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resiz
     cursor: isSortable ? "pointer" : "default",
     userSelect: "none",
     whiteSpace: "nowrap",
+    background: highlight ? theme.accentLight : undefined,
   };
   return (
     <th
@@ -600,7 +649,9 @@ function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resiz
       onClick={isSortable ? () => onSort(sortKey) : undefined}
       onMouseEnter={isSortable ? (e) => { e.currentTarget.style.color = theme.text; } : undefined}
       onMouseLeave={isSortable ? (e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; } : undefined}
+      {...dropTarget}
     >
+      {dragHandle}
       {children}{arrow}
       {filter}
       {resize && (

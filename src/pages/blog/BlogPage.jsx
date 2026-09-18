@@ -10,7 +10,7 @@ import { Input } from "../../components/ui/Input";
 import { Label } from "../../components/ui/Label";
 import { Tag } from "../../components/ui/Tag";
 import { SkeletonTable } from "../../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle } from "../../components/table/tableTools";
+import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../../components/table/tableTools";
 
 // Where articles are served. Switch to https://www.linkable.link once the
 // domain points at the Vercel project.
@@ -29,6 +29,60 @@ const BLOG_COLUMNS = [
   { key: "actions",   label: "",          width: 260, resizable: false },
 ];
 const BLOG_DEFAULT_WIDTHS = Object.fromEntries(BLOG_COLUMNS.map((c) => [c.key, c.width]));
+// The actions buttons, not a column of data — stays put rather than being
+// draggable somewhere into the middle of the table.
+const BLOG_FIXED_KEYS = ["actions"];
+
+// Per-column <td> style, matching what each column used to hardcode inline.
+function blogCellStyle(key, td, t) {
+  switch (key) {
+    case "article": return { ...td, maxWidth: 460 };
+    case "length": return { ...td, whiteSpace: "nowrap", color: t.textMid };
+    case "published": return { ...td, whiteSpace: "nowrap", color: t.textMid };
+    case "updated": return { ...td, whiteSpace: "nowrap", color: t.textMuted };
+    case "actions": return { ...td, whiteSpace: "nowrap" };
+    default: return td;
+  }
+}
+
+// One switch, not seven inline <td>s — so the body can map over whatever
+// order the header is currently in. Each case is exactly what used to sit
+// directly in the JSX for that column.
+function renderBlogCell(key, p, { t, navigate, busy, togglePublish, setDeleteConfirm, link }) {
+  switch (key) {
+    case "article":
+      return (
+        <>
+          <div style={{ fontWeight: 600, marginBottom: 3 }}>{p.title}</div>
+          <div style={{ fontSize: 12, color: t.textMuted, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span>/blog/{p.slug}</span>
+            {p.category && <Tag color={t.textMid}>{p.category}</Tag>}
+          </div>
+        </>
+      );
+    case "status":
+      return <Tag color={STATUS_COLOR[p.status] || t.textMuted}>{p.status}</Tag>;
+    case "source":
+      return <span style={{ color: t.textMid }}>{SOURCE_LABEL[p.source] || p.source}</span>;
+    case "length":
+      return p.word_count ? `${p.word_count} words · ${p.read_minutes} min` : "";
+    case "published":
+      return p.published_at ? friendlyDate(p.published_at) : "";
+    case "updated":
+      return friendlyDate(p.updated_at);
+    case "actions":
+      return (
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <button style={link} onClick={() => navigate(`/blog/${p.id}`)}>{p.source === "framer" ? "Details" : "Edit"}</button>
+          {p.status === "published" && <a style={link} href={`${SITE_URL}/blog/${p.slug}`} target="_blank" rel="noopener noreferrer">View</a>}
+          {p.source !== "framer" && <button style={link} disabled={busy === p.id} onClick={() => togglePublish(p)}>{p.status === "published" ? "Unpublish" : "Publish"}</button>}
+          {p.source !== "framer" && <button style={{ ...link, color: "#B91C1C" }} onClick={() => setDeleteConfirm(p)}>Delete</button>}
+        </div>
+      );
+    default:
+      return null;
+  }
+}
 
 export default function BlogPage() {
   const { theme: t } = useTheme();
@@ -45,6 +99,7 @@ export default function BlogPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
   const { widths, startResize, resetWidth } = useColumnWidths("blog-posts", BLOG_DEFAULT_WIDTHS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("blog-posts", BLOG_COLUMNS, BLOG_FIXED_KEYS);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,13 +185,20 @@ export default function BlogPage() {
               borderCollapse: "collapse", tableLayout: "fixed",
             }}>
               <colgroup>
-                {BLOG_COLUMNS.map((col) => (
+                {orderedColumns.map((col) => (
                   <col key={col.key} style={{ width: widths[col.key] }} />
                 ))}
               </colgroup>
               <thead><tr>
-                {BLOG_COLUMNS.map((col) => (
-                  <th key={col.key} style={th}>
+                {orderedColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{ ...th, background: dragOverKey === col.key ? t.accentLight : undefined }}
+                    {...dropTargetProps(col.key)}
+                  >
+                    {!BLOG_FIXED_KEYS.includes(col.key) && (
+                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
+                    )}
                     {col.label}
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
@@ -145,29 +207,14 @@ export default function BlogPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {visible.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={BLOG_COLUMNS.length}>No articles here yet.</td></tr>}
+                {visible.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={orderedColumns.length}>No articles here yet.</td></tr>}
                 {visible.map((p) => (
                   <tr key={p.id}>
-                    <td style={{ ...td, maxWidth: 460 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 3 }}>{p.title}</div>
-                      <div style={{ fontSize: 12, color: t.textMuted, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <span>/blog/{p.slug}</span>
-                        {p.category && <Tag color={t.textMid}>{p.category}</Tag>}
-                      </div>
-                    </td>
-                    <td style={td}><Tag color={STATUS_COLOR[p.status] || t.textMuted}>{p.status}</Tag></td>
-                    <td style={td}><span style={{ color: t.textMid }}>{SOURCE_LABEL[p.source] || p.source}</span></td>
-                    <td style={{ ...td, whiteSpace: "nowrap", color: t.textMid }}>{p.word_count ? `${p.word_count} words · ${p.read_minutes} min` : ""}</td>
-                    <td style={{ ...td, whiteSpace: "nowrap", color: t.textMid }}>{p.published_at ? friendlyDate(p.published_at) : ""}</td>
-                    <td style={{ ...td, whiteSpace: "nowrap", color: t.textMuted }}>{friendlyDate(p.updated_at)}</td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <button style={link} onClick={() => navigate(`/blog/${p.id}`)}>{p.source === "framer" ? "Details" : "Edit"}</button>
-                        {p.status === "published" && <a style={link} href={`${SITE_URL}/blog/${p.slug}`} target="_blank" rel="noopener noreferrer">View</a>}
-                        {p.source !== "framer" && <button style={link} disabled={busy === p.id} onClick={() => togglePublish(p)}>{p.status === "published" ? "Unpublish" : "Publish"}</button>}
-                        {p.source !== "framer" && <button style={{ ...link, color: "#B91C1C" }} onClick={() => setDeleteConfirm(p)}>Delete</button>}
-                      </div>
-                    </td>
+                    {orderedColumns.map((col) => (
+                      <td key={col.key} style={blogCellStyle(col.key, td, t)}>
+                        {renderBlogCell(col.key, p, { t, navigate, busy, togglePublish, setDeleteConfirm, link })}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

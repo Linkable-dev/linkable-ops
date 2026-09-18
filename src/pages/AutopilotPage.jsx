@@ -8,6 +8,7 @@ import { SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
 import {
   ColumnFilter, describeFilter, SortLabel, nextSort, useColumnWidths, ResizeHandle,
+  useColumnOrder, DragHandle,
 } from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
 import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
@@ -70,6 +71,119 @@ const AGENT_DEFAULT_WIDTHS = Object.fromEntries(AGENT_COLUMNS.map((c) => [c.key,
 // The leading expand/collapse chevron column: fixed width, never resized.
 const TOGGLE_COL_WIDTH = 28;
 
+// The <td> style for a given column, so the body can map over whatever order
+// the header is currently in instead of a fixed sequence of inline <td>s.
+// Mirrors exactly what used to sit directly on each column's <td>.
+function agentCellStyle(col, { td, num, theme }) {
+  switch (col.key) {
+    case "campaign_name":
+      return { ...td, fontWeight: 600 };
+    case "brand_name":
+      return { ...td, color: theme.textMuted };
+    case "enrolled_at":
+    case "last_event_at":
+    case "next_action_at":
+      return { ...td, color: theme.textMuted, whiteSpace: "nowrap" };
+    case "applied":
+      return { ...num, fontWeight: 600 };
+    case "found":
+    case "contactable":
+    case "emailed":
+    case "replied":
+    case "runs_used":
+      return num;
+    default:
+      return td;
+  }
+}
+
+// One switch, not a dozen inline <td>s — so the body can map over whatever
+// order the header is currently in. Each case is exactly what used to sit
+// directly in the JSX for that column.
+function renderAgentCell(key, r, { theme, pill }) {
+  switch (key) {
+    case "campaign_name":
+      return (
+        <>
+          {r.campaign_name || "Untitled"}
+          {r.run_in_flight && (
+            <span style={{ color: theme.textMuted, fontWeight: 400 }}> · searching</span>
+          )}
+        </>
+      );
+    case "brand_name":
+      return r.brand_name || "—";
+    case "mode":
+      return pill(r.mode, STATUS_COLORS);
+    case "status":
+      return (
+        <>
+          {pill(r.status, STATUS_COLORS)}
+          {r.stopped_reason && (
+            <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 3 }}>
+              {r.stopped_reason}
+            </div>
+          )}
+        </>
+      );
+    case "enrolled_at":
+      return friendlyDate(r.enrolled_at);
+    case "found":
+      return r.found;
+    case "contactable":
+      return r.contactable;
+    case "emailed":
+      return (
+        <>
+          {r.emailed}
+          {!r.has_sequence && r.found > 0 && (
+            <div style={{ color: theme.textMuted, fontSize: 11 }}>no sequence</div>
+          )}
+        </>
+      );
+    case "replied":
+      return r.replied;
+    case "applied":
+      // The number the whole machine exists to produce, next to the goal it
+      // was given.
+      return (
+        <>
+          {r.applied}
+          <span style={{ color: theme.textMuted, fontWeight: 400 }}>/{r.goal_applications}</span>
+        </>
+      );
+    case "runs_used":
+      return (
+        <>
+          {r.runs_used}/{r.max_runs}
+          {/* The agent's own budget above; the brand's month below. An agent
+              parked on the second while the first is untouched is the state
+              that read as a stall — "searches: none yet" and "this month's
+              searches are all used" are both true, about different things. */}
+          {r.search_allowance != null && (
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 400,
+                color: r.searches_used >= r.search_allowance ? "#B45309" : theme.textMuted,
+              }}
+            >
+              brand {r.searches_used}/{r.search_allowance}
+            </div>
+          )}
+        </>
+      );
+    case "last_event_at":
+      return ago(r.last_event_at);
+    case "next_action_at":
+      return r.mode === "off" || ["done", "failed"].includes(r.status)
+        ? "—"
+        : whenNext(r.next_action_at);
+    default:
+      return null;
+  }
+}
+
 // The four that can also be narrowed, with the controls each one needs.
 const FILTERS = [
   { key: "campaign_name", label: "Campaign", type: "text", placeholder: "Campaign name…" },
@@ -123,6 +237,10 @@ export default function AutopilotPage() {
   const [defaultLimit, setDefaultLimit] = useState(null);
 
   const { widths, startResize, resetWidth } = useColumnWidths("autopilot-agents", AGENT_DEFAULT_WIDTHS);
+  // The leading toggle column lives outside AGENT_COLUMNS entirely (fixed
+  // width, rendered separately below) so it never needs to be named here.
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } =
+    useColumnOrder("autopilot-agents", AGENT_COLUMNS);
 
   // Re-reads whenever a filter changes. The popover commits after a pause, so
   // there is nothing to debounce here — every change that arrives is one the
@@ -401,7 +519,7 @@ export default function AutopilotPage() {
             >
               <colgroup>
                 <col style={{ width: TOGGLE_COL_WIDTH }} />
-                {AGENT_COLUMNS.map((col) => (
+                {orderedColumns.map((col) => (
                   <col key={col.key} style={{ width: widths[col.key] }} />
                 ))}
               </colgroup>
@@ -412,7 +530,7 @@ export default function AutopilotPage() {
                       way they do on every other table here — a toolbar above
                       the table would be a second place to look for the same
                       two things. */}
-                  {AGENT_COLUMNS.map((col) => {
+                  {orderedColumns.map((col) => {
                     const f = byFilterKey[col.key];
                     return (
                       <th
@@ -420,9 +538,12 @@ export default function AutopilotPage() {
                         style={{
                           ...(col.right ? { ...th, textAlign: "right" } : th),
                           position: "relative",
+                          background: dragOverKey === col.key ? theme.accentLight : undefined,
                         }}
+                        {...dropTargetProps(col.key)}
                       >
                         <span style={{ display: "inline-flex", alignItems: "center" }}>
+                          <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
                           <SortLabel
                             theme={theme}
                             label={col.label}
@@ -453,11 +574,11 @@ export default function AutopilotPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonTableRows rows={6} cols={AGENT_COLUMNS.length + 1} />}
+                {loading && <SkeletonTableRows rows={6} cols={orderedColumns.length + 1} />}
 
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td style={{ ...td, color: theme.textMuted }} colSpan={AGENT_COLUMNS.length + 1}>
+                    <td style={{ ...td, color: theme.textMuted }} colSpan={orderedColumns.length + 1}>
                       {activeFilters.length ? (
                         <>
                           No agent matches these filters.{" "}
@@ -497,81 +618,16 @@ export default function AutopilotPage() {
                         <td style={{ ...td, color: theme.textMuted }}>
                           {openId === r.product_id ? "▾" : "▸"}
                         </td>
-                        <td style={{ ...td, fontWeight: 600 }}>
-                          {r.campaign_name || "Untitled"}
-                          {r.run_in_flight && (
-                            <span style={{ color: theme.textMuted, fontWeight: 400 }}>
-                              {" "}
-                              · searching
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ ...td, color: theme.textMuted }}>{r.brand_name || "—"}</td>
-                        <td style={td}>{pill(r.mode, STATUS_COLORS)}</td>
-                        <td style={td}>
-                          {pill(r.status, STATUS_COLORS)}
-                          {r.stopped_reason && (
-                            <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 3 }}>
-                              {r.stopped_reason}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                          {friendlyDate(r.enrolled_at)}
-                        </td>
-                        <td style={num}>{r.found}</td>
-                        <td style={num}>{r.contactable}</td>
-                        <td style={num}>
-                          {r.emailed}
-                          {!r.has_sequence && r.found > 0 && (
-                            <div style={{ color: theme.textMuted, fontSize: 11 }}>no sequence</div>
-                          )}
-                        </td>
-                        <td style={num}>{r.replied}</td>
-                        {/* The number the whole machine exists to produce, next
-                            to the goal it was given. */}
-                        <td style={{ ...num, fontWeight: 600 }}>
-                          {r.applied}
-                          <span style={{ color: theme.textMuted, fontWeight: 400 }}>
-                            /{r.goal_applications}
-                          </span>
-                        </td>
-                        <td style={num}>
-                          {r.runs_used}/{r.max_runs}
-                          {/* The agent's own budget above; the brand's month
-                              below. An agent parked on the second while the
-                              first is untouched is the state that read as a
-                              stall — "searches: none yet" and "this month's
-                              searches are all used" are both true, about
-                              different things. */}
-                          {r.search_allowance != null && (
-                            <div
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 400,
-                                color:
-                                  r.searches_used >= r.search_allowance
-                                    ? "#B45309"
-                                    : theme.textMuted,
-                              }}
-                            >
-                              brand {r.searches_used}/{r.search_allowance}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                          {ago(r.last_event_at)}
-                        </td>
-                        <td style={{ ...td, color: theme.textMuted, whiteSpace: "nowrap" }}>
-                          {r.mode === "off" || ["done", "failed"].includes(r.status)
-                            ? "—"
-                            : whenNext(r.next_action_at)}
-                        </td>
+                        {orderedColumns.map((col) => (
+                          <td key={col.key} style={agentCellStyle(col, { td, num, theme })}>
+                            {renderAgentCell(col.key, r, { theme, pill })}
+                          </td>
+                        ))}
                       </tr>
 
                       {openId === r.product_id && (
                         <tr>
-                          <td style={{ ...td, background: theme.bg }} colSpan={AGENT_COLUMNS.length + 1}>
+                          <td style={{ ...td, background: theme.bg }} colSpan={orderedColumns.length + 1}>
                             <AgentDetail
                               row={r}
                               defaultLimit={defaultLimit}
