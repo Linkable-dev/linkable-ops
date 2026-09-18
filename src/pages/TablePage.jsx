@@ -393,12 +393,22 @@ export default function TablePage() {
                     textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600,
                     color: theme.textMuted, textTransform: "capitalize", letterSpacing: 0.3,
                     cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", position: "relative",
+                    overflow: "hidden",
                     minWidth: colWidths[col.column_name] || 120,
                     maxWidth: colWidths[col.column_name] || 280,
                     width: colWidths[col.column_name] || undefined,
                   }} onClick={() => handleSort(col.column_name)}>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      {friendlyName(col.fk ? col.column_name.replace(/_id$/, "") : col.column_name)}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%" }}>
+                      {/* Truncates on its own — a long label (e.g. "Banner Pic
+                          Name") used to overflow the header's fixed maxWidth
+                          with nothing to clip it, bleeding into the next
+                          column's text instead of just running out of room. */}
+                      <span
+                        title={friendlyName(col.fk ? col.column_name.replace(/_id$/, "") : col.column_name)}
+                        style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}
+                      >
+                        {friendlyName(col.fk ? col.column_name.replace(/_id$/, "") : col.column_name)}
+                      </span>
                       {sortIcon(col.column_name)}
                       <ColumnFilter
                         theme={theme}
