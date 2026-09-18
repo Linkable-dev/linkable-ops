@@ -168,6 +168,7 @@ export const api = {
   // agent reads before it acts, not an action taken on a brand's behalf.
   // `scope` is "default" or a brand's user id.
   getAutopilotAllowances: () => request("/autopilot/allowances"),
+  getSearchEconomics: () => request("/autopilot/search-economics"),
   // The outreach knobs that used to be env vars and Go constants.
   getProviderCosts: () => request("/autopilot/provider-costs"),
   setProviderCost: (provider, data) => request(`/autopilot/provider-costs/${encodeURIComponent(provider)}`, {

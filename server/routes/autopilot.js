@@ -418,6 +418,45 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
     }
   });
 
+  // GET /api/autopilot/search-economics
+  //
+  // What one search run actually costs and finds, so the allowance is set
+  // against a real number rather than a guess. Read from `credits_spent`,
+  // which is not our estimate -- it is copied straight from the field the
+  // provider's own API returns on every enrichment call, so this is billed
+  // data. Global rather than per-brand: there are not yet enough runs on any
+  // one brand for a per-brand figure to mean anything.
+  router.get("/search-economics", async (req, res) => {
+    try {
+      const { rows } = await query(`
+        SELECT count(*) AS runs,
+               round(avg(credits_spent)::numeric, 1)         AS avg_credits,
+               round(min(credits_spent)::numeric, 1)         AS min_credits,
+               round(max(credits_spent)::numeric, 1)         AS max_credits,
+               round(sum(credits_spent)::numeric, 1)         AS total_credits,
+               round(avg(discovered_count)::numeric, 0)      AS avg_found,
+               round(avg(enriched_count)::numeric, 0)        AS avg_contactable
+          FROM sourcing_runs
+         WHERE status <> 'failed' AND discovered_count > 0`,
+      );
+      const row = rows[0] || {};
+      res.json({
+        available: true,
+        runs: Number(row.runs || 0),
+        avg_credits: row.avg_credits != null ? Number(row.avg_credits) : null,
+        min_credits: row.min_credits != null ? Number(row.min_credits) : null,
+        max_credits: row.max_credits != null ? Number(row.max_credits) : null,
+        total_credits: row.total_credits != null ? Number(row.total_credits) : null,
+        avg_found: row.avg_found != null ? Number(row.avg_found) : null,
+        avg_contactable: row.avg_contactable != null ? Number(row.avg_contactable) : null,
+      });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, runs: 0 });
+      console.error("[autopilot/search-economics]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/autopilot/allowances
   // The default, and every brand that has been given a number of its own.
   router.get("/allowances", async (req, res) => {

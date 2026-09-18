@@ -33,6 +33,7 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
   const [settings, setSettings] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [limitDraft, setLimitDraft] = useState(String(defaultLimit ?? ""));
+  const [economics, setEconomics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [available, setAvailable] = useState(true);
   const [busy, setBusy] = useState("");
@@ -62,6 +63,21 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
   // and a settings read on every visit is a query nobody asked for.
   useEffect(() => {
     if (open) load();
+  }, [open]);
+
+  // What a search actually costs and finds, loaded once per opening -- real
+  // billed data, not an estimate, so the number in the field above is set
+  // against a fact rather than a guess.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    api
+      .getSearchEconomics()
+      .then((d) => active && setEconomics(d))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [open]);
 
   async function save(key) {
@@ -239,6 +255,28 @@ export default function OutreachSettings({ defaultLimit, onDefaultLimitChange })
                   Each search spends provider credits, which is the whole reason for a limit.
                   Agents read it on their next tick, so raising one un-parks it within the hour.
                 </div>
+                {economics?.available && economics.runs > 0 && (
+                  <div
+                    style={{
+                      background: theme.bg,
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                      fontSize: 12,
+                      color: theme.textMuted,
+                      marginBottom: 10,
+                    }}
+                  >
+                    A real search costs{" "}
+                    <strong style={{ color: theme.text }}>~{economics.avg_credits} credits</strong>{" "}
+                    ({economics.min_credits}–{economics.max_credits} seen) and finds{" "}
+                    <strong style={{ color: theme.text }}>~{economics.avg_found} creators</strong>,{" "}
+                    ~{economics.avg_contactable} with an email — from {economics.runs} real run
+                    {economics.runs === 1 ? "" : "s"} so far ({economics.total_credits} credits
+                    total). This is billed data from the provider's own API, not an estimate.
+                    Credits only — see Provider costs below for what that comes to in money.
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6 }}>
                   <input
                     type="number"
