@@ -187,6 +187,9 @@ export const api = {
   // calls Claude — not just Autopilot. Reads "available: false" rather than
   // erroring when no Admin API key is configured.
   getAnthropicCost: () => request("/costs/anthropic"),
+  // The same total, one line per Anthropic Workspace (the finest split their
+  // own API offers — see anthropicCostByScope).
+  getAnthropicCostByScope: () => request("/costs/anthropic/by-scope"),
   getOutreachSettings: () => request("/autopilot/settings"),
   setOutreachSetting: (key, data) =>
     request(`/autopilot/settings/${encodeURIComponent(key)}`, {

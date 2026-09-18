@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { anthropicCostReport } from "../lib/anthropic.js";
+import { anthropicCostReport, anthropicCostByScope } from "../lib/anthropic.js";
 
 // Provider spend that doesn't fit provider_costs' credit/lead shape — no
 // quantity to multiply by a rate, because Anthropic hands back a dollar
@@ -17,6 +17,17 @@ export function costsRoutes() {
       // not something that should ever take the rest of it down with it.
       console.error("[costs/anthropic]", e);
       res.json({ available: false, amount: 0, currency: "USD" });
+    }
+  });
+
+  // The same total, split by Anthropic Workspace — the finest split their own
+  // reporting offers (see anthropicCostByScope for why it isn't per-key).
+  router.get("/anthropic/by-scope", async (_req, res) => {
+    try {
+      res.json(await anthropicCostByScope());
+    } catch (e) {
+      console.error("[costs/anthropic/by-scope]", e);
+      res.json({ available: false, scopes: [] });
     }
   });
 

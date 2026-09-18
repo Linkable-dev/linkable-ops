@@ -85,7 +85,44 @@ export function tokenStats(response) {
   };
 }
 
-const ANTHROPIC_COST_URL = "https://api.anthropic.com/v1/organizations/cost_report";
+const ANTHROPIC_ADMIN_BASE = "https://api.anthropic.com/v1/organizations";
+
+async function anthropicAdminGet(path, params, apiKey) {
+  const res = await fetch(`${ANTHROPIC_ADMIN_BASE}${path}?${params}`, {
+    headers: { "anthropic-version": "2023-06-01", "x-api-key": apiKey },
+  });
+  if (!res.ok) throw new Error(`Anthropic admin API ${path} ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// The cost_report and usage_report endpoints page with next_page/page.
+async function paginateReport(path, baseParams, apiKey, onBucket) {
+  let page;
+  do {
+    const params = new URLSearchParams(baseParams);
+    if (page) params.set("page", page);
+    const data = await anthropicAdminGet(path, params, apiKey);
+    for (const bucket of data.data || []) onBucket(bucket);
+    page = data.has_more ? data.next_page : null;
+  } while (page);
+}
+
+// workspaces/api_keys page with after_id/last_id instead.
+async function paginateList(path, baseParams, apiKey, onItem) {
+  let after;
+  do {
+    const params = new URLSearchParams(baseParams);
+    if (after) params.set("after_id", after);
+    const data = await anthropicAdminGet(path, params, apiKey);
+    for (const item of data.data || []) onItem(item);
+    after = data.has_more ? data.last_id : null;
+  } while (after);
+}
+
+function monthWindow() {
+  const now = new Date();
+  return { monthStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), now };
+}
 
 // This month's spend across the whole organization — every workspace, every
 // product that calls Claude (Autopilot's chat and plans, content generation,
@@ -99,36 +136,83 @@ const ANTHROPIC_COST_URL = "https://api.anthropic.com/v1/organizations/cost_repo
 // reporting nicety, and it must never be the reason the Costs page breaks.
 export async function anthropicCostReport({ apiKey = process.env.ANTHROPIC_ADMIN_KEY } = {}) {
   if (!apiKey) return { available: false, amount: 0, currency: "USD" };
-
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const { monthStart, now } = monthWindow();
   let total = 0;
   let currency = "USD";
-  let page;
   // One bucket per day of the month so far, well under the endpoint's own
   // 31-bucket ceiling — pagination only matters if Anthropic ever changes
   // that, so it is handled rather than assumed away.
-  do {
-    const params = new URLSearchParams({
-      starting_at: monthStart.toISOString(),
-      ending_at: now.toISOString(),
-      limit: "31",
-    });
-    if (page) params.set("page", page);
-    const res = await fetch(`${ANTHROPIC_COST_URL}?${params}`, {
-      headers: { "anthropic-version": "2023-06-01", "x-api-key": apiKey },
-    });
-    if (!res.ok) throw new Error(`Anthropic cost API ${res.status}: ${await res.text()}`);
-    const data = await res.json();
-    for (const bucket of data.data || []) {
+  await paginateReport(
+    "/cost_report",
+    { starting_at: monthStart.toISOString(), ending_at: now.toISOString(), limit: "31" },
+    apiKey,
+    (bucket) => {
       for (const r of bucket.results || []) {
         total += Number(r.amount || 0);
         currency = r.currency || currency;
       }
-    }
-    page = data.has_more ? data.next_page : null;
-  } while (page);
-
+    },
+  );
   // amount is lowest-currency-units (cents) as a decimal string — "123.45" is $1.2345.
   return { available: true, amount: total / 100, currency };
+}
+
+// This month's spend, one line per Workspace — which is how different keys
+// end up distinguishable: the Cost API only groups by workspace_id or
+// description, never by the key itself, so a key is "tracked" by whichever
+// Workspace it lives in. Each amount is real billed USD, same as above; the
+// key names are just labels fetched alongside it so a workspace ID reads as
+// "service-content" rather than "wrkspc_01Jw...". Two keys sharing one
+// Workspace still show as one combined line — Anthropic has no finer split
+// than that without estimating cost from tokens ourselves.
+export async function anthropicCostByScope({ apiKey = process.env.ANTHROPIC_ADMIN_KEY } = {}) {
+  if (!apiKey) return { available: false, scopes: [] };
+  const { monthStart, now } = monthWindow();
+
+  const workspaceNames = new Map(); // workspace_id -> name
+  await paginateList("/workspaces", { limit: "1000", include_archived: "false" }, apiKey, (w) => {
+    workspaceNames.set(w.id, w.name);
+  });
+
+  const keysByWorkspace = new Map(); // workspace_id | "" (default/no workspace) -> [key name, ...]
+  await paginateList("/api_keys", { limit: "1000", status: "active" }, apiKey, (k) => {
+    const wid = k.scope?.type === "workspace" ? k.scope.workspace_id : "";
+    if (!keysByWorkspace.has(wid)) keysByWorkspace.set(wid, []);
+    keysByWorkspace.get(wid).push(k.name);
+  });
+
+  const byWorkspace = new Map(); // workspace_id | "" -> { amount, currency }
+  await paginateReport(
+    "/cost_report",
+    {
+      starting_at: monthStart.toISOString(), ending_at: now.toISOString(),
+      limit: "31", "group_by[]": "workspace_id",
+    },
+    apiKey,
+    (bucket) => {
+      for (const r of bucket.results || []) {
+        const wid = r.workspace_id || "";
+        const prev = byWorkspace.get(wid) || { amount: 0, currency: r.currency || "USD" };
+        prev.amount += Number(r.amount || 0);
+        byWorkspace.set(wid, prev);
+      }
+    },
+  );
+
+  // Every workspace that has EITHER spend this month OR a key pointed at it —
+  // a $0 scope with a key assigned still belongs on the list, or "nothing
+  // spent yet" would be indistinguishable from "not tracked at all".
+  const ids = new Set([...byWorkspace.keys(), ...keysByWorkspace.keys()]);
+  const scopes = [...ids].map((wid) => {
+    const cost = byWorkspace.get(wid);
+    return {
+      workspace_id: wid || null,
+      label: wid ? (workspaceNames.get(wid) || wid) : "Default workspace",
+      keys: keysByWorkspace.get(wid) || [],
+      amount: (cost?.amount || 0) / 100,
+      currency: cost?.currency || "USD",
+    };
+  }).sort((a, b) => b.amount - a.amount);
+
+  return { available: true, scopes };
 }

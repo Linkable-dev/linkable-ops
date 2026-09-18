@@ -73,7 +73,7 @@ export default function CostsPage() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getHome(), api.getProviderCosts(), api.getSearchEconomics(), api.getAnthropicCost()])
+    Promise.all([api.getHome(), api.getProviderCosts(), api.getSearchEconomics(), api.getAnthropicCostByScope()])
       .then(([h, c, e, a]) => { if (alive) { setHome(h); setCosts(c); setEconomics(e); setAnthropic(a); } })
       .catch((err) => { if (alive) setError(err.message); });
     return () => { alive = false; };
@@ -118,7 +118,8 @@ export default function CostsPage() {
   const otherCurrency = providers.filter((p) => p.configured && (p.currency || "USD").toUpperCase() !== "USD");
   // Anthropic is real billed USD, not a configured rate — it goes straight
   // into the total whenever the Admin API key is set up, no "configured" step.
-  const anthropicCost = anthropic.available ? Number(anthropic.amount || 0) : 0;
+  const anthropicScopes = anthropic.scopes || [];
+  const anthropicCost = anthropic.available ? anthropicScopes.reduce((sum, s) => sum + Number(s.amount || 0), 0) : 0;
   const totalCost = usdCosted.reduce((sum, p) => sum + Number(p.estimated_cost || 0), 0) + anthropicCost;
   const margin = mrr - totalCost;
   const marginPct = mrr > 0 ? Math.round((margin / mrr) * 1000) / 10 : null;
@@ -170,11 +171,28 @@ export default function CostsPage() {
           <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 12, marginTop: 12 }}>
             <strong style={{ fontSize: 13 }}>Anthropic</strong>
             <p style={{ fontSize: 12, color: theme.textMuted }}>
-              This month's spend across the whole organization, from Anthropic's own Cost API — every
-              product that calls Claude, not just Autopilot. Billed USD directly, not usage times a rate.
+              This month's spend, from Anthropic's own Cost API — billed USD directly, not usage times a
+              rate. Split by Anthropic Workspace, which is the finest split their reporting offers: two
+              keys sharing one Workspace still show as one line below.
             </p>
             {anthropic.available ? (
-              <p style={{ fontSize: 13 }}>{money(anthropic.amount)} so far this month</p>
+              anthropicScopes.length === 0 ? (
+                <p style={{ fontSize: 13, color: theme.textMuted }}>No spend recorded yet this month.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+                  {anthropicScopes.map((s) => (
+                    <div key={s.workspace_id || "default"} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div>{s.label}</div>
+                        {s.keys.length > 0 && (
+                          <div style={{ fontSize: 11, color: theme.textMuted }}>{s.keys.join(", ")}</div>
+                        )}
+                      </div>
+                      <div style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{money(s.amount, { currency: s.currency })}</div>
+                    </div>
+                  ))}
+                </div>
+              )
             ) : (
               <p style={{ fontSize: 12, color: theme.textMuted }}>
                 Not configured — set <code>ANTHROPIC_ADMIN_KEY</code> (an Admin API key from the
