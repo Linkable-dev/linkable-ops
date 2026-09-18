@@ -183,6 +183,10 @@ export const api = {
     method: "PUT", body: JSON.stringify(data),
   }),
   clearProviderCost: (provider) => request(`/autopilot/provider-costs/${encodeURIComponent(provider)}`, { method: "DELETE" }),
+  // Anthropic's own billed cost for this month, across every product that
+  // calls Claude — not just Autopilot. Reads "available: false" rather than
+  // erroring when no Admin API key is configured.
+  getAnthropicCost: () => request("/costs/anthropic"),
   getOutreachSettings: () => request("/autopilot/settings"),
   setOutreachSetting: (key, data) =>
     request(`/autopilot/settings/${encodeURIComponent(key)}`, {

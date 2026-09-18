@@ -84,3 +84,51 @@ export function tokenStats(response) {
     cacheWrite: u.cache_creation_input_tokens || 0,
   };
 }
+
+const ANTHROPIC_COST_URL = "https://api.anthropic.com/v1/organizations/cost_report";
+
+// This month's spend across the whole organization — every workspace, every
+// product that calls Claude (Autopilot's chat and plans, content generation,
+// even the blog writer this file drives). Real billed cost straight from
+// Anthropic's own ledger, in USD already, not tokens times a rate we'd have
+// to keep in sync with theirs ourselves.
+//
+// Needs an Admin API key (sk-ant-admin01-...) — a different credential from
+// ANTHROPIC_API_KEY above; a normal API key cannot read this endpoint. An
+// unset key reads as "not configured" rather than an error: this is a
+// reporting nicety, and it must never be the reason the Costs page breaks.
+export async function anthropicCostReport({ apiKey = process.env.ANTHROPIC_ADMIN_KEY } = {}) {
+  if (!apiKey) return { available: false, amount: 0, currency: "USD" };
+
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  let total = 0;
+  let currency = "USD";
+  let page;
+  // One bucket per day of the month so far, well under the endpoint's own
+  // 31-bucket ceiling — pagination only matters if Anthropic ever changes
+  // that, so it is handled rather than assumed away.
+  do {
+    const params = new URLSearchParams({
+      starting_at: monthStart.toISOString(),
+      ending_at: now.toISOString(),
+      limit: "31",
+    });
+    if (page) params.set("page", page);
+    const res = await fetch(`${ANTHROPIC_COST_URL}?${params}`, {
+      headers: { "anthropic-version": "2023-06-01", "x-api-key": apiKey },
+    });
+    if (!res.ok) throw new Error(`Anthropic cost API ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    for (const bucket of data.data || []) {
+      for (const r of bucket.results || []) {
+        total += Number(r.amount || 0);
+        currency = r.currency || currency;
+      }
+    }
+    page = data.has_more ? data.next_page : null;
+  } while (page);
+
+  // amount is lowest-currency-units (cents) as a decimal string — "123.45" is $1.2345.
+  return { available: true, amount: total / 100, currency };
+}

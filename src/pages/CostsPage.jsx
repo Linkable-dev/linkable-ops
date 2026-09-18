@@ -68,17 +68,18 @@ export default function CostsPage() {
   const [home, setHome] = useState(null);
   const [costs, setCosts] = useState(null);
   const [economics, setEconomics] = useState(null);
+  const [anthropic, setAnthropic] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getHome(), api.getProviderCosts(), api.getSearchEconomics()])
-      .then(([h, c, e]) => { if (alive) { setHome(h); setCosts(c); setEconomics(e); } })
+    Promise.all([api.getHome(), api.getProviderCosts(), api.getSearchEconomics(), api.getAnthropicCost()])
+      .then(([h, c, e, a]) => { if (alive) { setHome(h); setCosts(c); setEconomics(e); setAnthropic(a); } })
       .catch((err) => { if (alive) setError(err.message); });
     return () => { alive = false; };
   }, []);
 
-  const loading = !error && (!home || !costs || !economics);
+  const loading = !error && (!home || !costs || !economics || !anthropic);
 
   if (loading) {
     return (
@@ -115,36 +116,47 @@ export default function CostsPage() {
   // page does not have.
   const usdCosted = providers.filter((p) => p.configured && (p.currency || "USD").toUpperCase() === "USD");
   const otherCurrency = providers.filter((p) => p.configured && (p.currency || "USD").toUpperCase() !== "USD");
-  const totalCost = usdCosted.reduce((sum, p) => sum + Number(p.estimated_cost || 0), 0);
+  // Anthropic is real billed USD, not a configured rate — it goes straight
+  // into the total whenever the Admin API key is set up, no "configured" step.
+  const anthropicCost = anthropic.available ? Number(anthropic.amount || 0) : 0;
+  const totalCost = usdCosted.reduce((sum, p) => sum + Number(p.estimated_cost || 0), 0) + anthropicCost;
   const margin = mrr - totalCost;
   const marginPct = mrr > 0 ? Math.round((margin / mrr) * 1000) / 10 : null;
   const uncosted = providers.filter((p) => !p.configured);
 
-  // One readable sentence covering all four shapes: some/none costed in USD,
-  // some/none costed in another currency (which cannot be netted against MRR).
-  // Distinct from "available: false" (e.g. prod, which has no sourcing
-  // schema) — that is not "no rates", it is "nothing to rate yet".
-  const costsSub = costs.available === false ? "not available on this database" : [
-    usdCosted.length > 0 ? usdCosted.map((p) => p.label).join(", ") : "no provider has a rate set",
-    otherCurrency.length > 0 ? `+ ${otherCurrency.map((p) => `${p.label} (${p.currency})`).join(", ")} not in USD` : null,
-  ].filter(Boolean).join(" ");
+  // Two independent sources feed this one number: the sourcing-table
+  // providers (which can be "not available on this database" — e.g. prod)
+  // and Anthropic, which is org-wide and does not depend on that schema at
+  // all. One readable sentence covering whichever of the two are actually in
+  // the total, rather than treating the whole stat as unavailable just
+  // because one of its two sources is.
+  const costsSub = [
+    costs.available === false ? "Influencers.club/Lemlist not available on this database"
+      : usdCosted.length > 0 ? usdCosted.map((p) => p.label).join(", ") : null,
+    anthropic.available ? "Anthropic" : null,
+    costs.available !== false && otherCurrency.length > 0
+      ? `+ ${otherCurrency.map((p) => `${p.label} (${p.currency})`).join(", ")} not in USD` : null,
+  ].filter(Boolean).join(", ") || "no provider has a rate set";
+  const nothingCosted = costs.available === false && !anthropic.available;
 
   return (
     <div>
       <div style={{ fontSize: 22, fontWeight: 700, color: theme.text, marginBottom: 24 }}>Costs & margin</div>
 
-      <Section title="This month" hint="MRR from Home; provider costs from the rates set below — not a full P&L">
+      <Section title="This month" hint="MRR from Home; provider costs from Anthropic's own billing plus the rates set below — not a full P&L">
         <div className="lk-grid">
           <Stat span={4} label="MRR" value={money(mrr)} sub={`${num(home.revenue?.payingBrands)} paying brand${home.revenue?.payingBrands === 1 ? "" : "s"}`} />
           <Stat span={4} label="Provider costs" value={money(totalCost)} accent={totalCost > 0 ? undefined : theme.textMuted} sub={costsSub} />
-          <Stat span={4} label="Margin" value={costs.available === false ? "—" : money(margin)}
-            accent={costs.available === false ? theme.textMuted : margin >= 0 ? GREEN : RED}
-            sub={costs.available === false ? "provider costs unavailable on this database" : marginPct != null ? `${marginPct}% of MRR` : "no MRR this month"} />
+          <Stat span={4} label="Margin" value={nothingCosted ? "—" : money(margin)}
+            accent={nothingCosted ? theme.textMuted : margin >= 0 ? GREEN : RED}
+            sub={nothingCosted ? "no provider cost available on this database" : marginPct != null ? `${marginPct}% of MRR` : "no MRR this month"} />
         </div>
         <p style={{ fontSize: 12, color: theme.textMuted, marginTop: 12 }}>
           Margin nets this month's provider costs off MRR. It does not include hosting, infrastructure,
-          payroll, or any other cost — only the providers tracked below, and only once a rate is entered for them.
+          payroll, or any other cost — only Anthropic (real billed spend, org-wide) and the providers
+          tracked below, and only once a rate is entered for them.
           {uncosted.length > 0 && ` ${uncosted.map((p) => p.label).join(", ")} ${uncosted.length === 1 ? "has" : "have"} usage but no rate set yet, so ${uncosted.length === 1 ? "it isn't" : "they aren't"} in the total.`}
+          {!anthropic.available && " Anthropic isn't in the total yet — see below."}
         </p>
       </Section>
 
@@ -155,6 +167,21 @@ export default function CostsPage() {
         <Card pad={0} style={{ padding: 16 }}>
           <ProviderCosts theme={theme}
             section={{ background: "transparent", border: "none", padding: 0, margin: 0 }} />
+          <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 12, marginTop: 12 }}>
+            <strong style={{ fontSize: 13 }}>Anthropic</strong>
+            <p style={{ fontSize: 12, color: theme.textMuted }}>
+              This month's spend across the whole organization, from Anthropic's own Cost API — every
+              product that calls Claude, not just Autopilot. Billed USD directly, not usage times a rate.
+            </p>
+            {anthropic.available ? (
+              <p style={{ fontSize: 13 }}>{money(anthropic.amount)} so far this month</p>
+            ) : (
+              <p style={{ fontSize: 12, color: theme.textMuted }}>
+                Not configured — set <code>ANTHROPIC_ADMIN_KEY</code> (an Admin API key from the
+                Anthropic Console, separate from the regular API key) to include this.
+              </p>
+            )}
+          </div>
         </Card>
       </div>
 

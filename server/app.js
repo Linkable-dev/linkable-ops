@@ -15,6 +15,7 @@ import { autopilotRoutes } from "./routes/autopilot.js";
 import { aiCreatorsRoutes } from "./routes/ai-creators.js";
 import { contentRoutes } from "./routes/content.js";
 import { blogRoutes } from "./routes/blog.js";
+import { costsRoutes } from "./routes/costs.js";
 import { dbTargetMiddleware } from "./middleware/dbTarget.js";
 
 // The API, in one place.
@@ -89,6 +90,9 @@ app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
 app.use("/api/blog", requireOpsAdmin, blogRoutes());
+// Provider spend that reads straight from the provider's own billing rather
+// than usage × a rate we'd have to keep in sync — no database involved.
+app.use("/api/costs", requireOpsAdmin, costsRoutes());
 
 // A 404 that says what Express actually saw. This is the message that finally
 // explained the missing routes, so it stays.
