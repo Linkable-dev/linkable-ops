@@ -3,6 +3,36 @@ import { cloudSqlQuery } from "../lib/cloudsql.js";
 import {
   parseColumnFilters, textFilter, numberFilter, dateFilter, boolFilter,
 } from "../lib/tableQuery.js";
+import { ENUM_LABELS } from "../lib/statusLabels.js";
+
+// Best-first guess at which column on a referenced table is fit for a human
+// to read — reused by both fk-options and resolve-fks so the two endpoints
+// can never pick a different label column for the same table.
+async function pickLabelColumn(table, pk) {
+  const { rows: cols } = await cloudSqlQuery(
+    `SELECT column_name, data_type FROM information_schema.columns
+     WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
+    [table]
+  );
+  const labelPrefs = ["name", "title", "full_name", "username", "email", "label", "display_name", "slug"];
+  for (const pref of labelPrefs) {
+    const found = cols.find((c) => c.column_name === pref || c.column_name.endsWith(`_${pref}`) || c.column_name.endsWith(`_name`));
+    if (found) return found.column_name;
+  }
+  const textCol = cols.find(
+    (c) => ["text", "character varying", "varchar"].includes(c.data_type) && c.column_name !== pk
+  );
+  return textCol?.column_name || pk;
+}
+
+// Naive but safe: only ever used when the guess lands on a real table name,
+// so a column that merely happens to end in "_id" with nothing to match is
+// left exactly as before.
+function pluralize(word) {
+  if (/[^aeiou]y$/i.test(word)) return `${word.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh)$/i.test(word)) return `${word}es`;
+  return `${word}s`;
+}
 
 export function tableRoutes() {
   const router = express.Router();
@@ -40,7 +70,7 @@ export function tableRoutes() {
   router.get("/:table/schema", async (req, res) => {
     const { table } = req.params;
     try {
-      const [colResult, fkResult] = await Promise.all([
+      const [colResult, fkResult, tableResult] = await Promise.all([
         cloudSqlQuery(
           `SELECT
             c.column_name,
@@ -78,6 +108,10 @@ export function tableRoutes() {
             AND tc.table_schema = 'public'`,
           [table]
         ),
+        cloudSqlQuery(
+          `SELECT table_name FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
+        ),
       ]);
 
       // Build FK map
@@ -85,12 +119,24 @@ export function tableRoutes() {
       for (const fk of fkResult.rows) {
         fkMap[fk.fk_column] = { refTable: fk.ref_table, refColumn: fk.ref_column };
       }
+      const tableSet = new Set(tableResult.rows.map((t) => t.table_name));
 
-      // Attach FK info to columns
-      const columns = colResult.rows.map((col) => ({
-        ...col,
-        fk: fkMap[col.column_name] || null,
-      }));
+      // Attach FK info to columns. Not every relationship is a declared
+      // constraint — some tables were added straight to Postgres without
+      // one, which used to leave a bare, unreadable id column with no way
+      // to tell what it points to. Guessed by name when nothing formal
+      // exists.
+      const columns = colResult.rows.map((col) => {
+        let fk = fkMap[col.column_name] || null;
+        if (!fk && !col.is_primary_key && col.column_name.endsWith("_id") &&
+            ["uuid", "text", "character varying"].includes(col.data_type)) {
+          const base = col.column_name.slice(0, -"_id".length);
+          const guess = pluralize(base);
+          const refTable = tableSet.has(guess) ? guess : tableSet.has(base) ? base : null;
+          if (refTable) fk = { refTable, refColumn: "id", inferred: true };
+        }
+        return { ...col, fk, enumLabels: ENUM_LABELS[`${table}.${col.column_name}`] || null };
+      });
 
       res.json(columns);
     } catch (err) {
@@ -105,25 +151,7 @@ export function tableRoutes() {
       const pk = await getPrimaryKey(table);
       if (!pk) return res.json([]);
 
-      // Find best label column: prefer name, title, username, email, label, then first text col
-      const { rows: cols } = await cloudSqlQuery(
-        `SELECT column_name, data_type FROM information_schema.columns
-         WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
-        [table]
-      );
-
-      const labelPrefs = ["name", "title", "full_name", "username", "email", "label", "display_name", "slug"];
-      let labelCol = null;
-      for (const pref of labelPrefs) {
-        const found = cols.find((c) => c.column_name === pref || c.column_name.endsWith(`_${pref}`) || c.column_name.endsWith(`_name`));
-        if (found) { labelCol = found.column_name; break; }
-      }
-      if (!labelCol) {
-        const textCol = cols.find(
-          (c) => ["text", "character varying", "varchar"].includes(c.data_type) && c.column_name !== pk
-        );
-        labelCol = textCol?.column_name || pk;
-      }
+      const labelCol = await pickLabelColumn(table, pk);
 
       const { rows } = await cloudSqlQuery(
         `SELECT "${pk}" AS id, "${labelCol}" AS label FROM "${table}" ORDER BY "${labelCol}" LIMIT 500`
@@ -145,24 +173,7 @@ export function tableRoutes() {
       const pk = await getPrimaryKey(table);
       if (!pk) return res.json({});
 
-      const { rows: cols } = await cloudSqlQuery(
-        `SELECT column_name, data_type FROM information_schema.columns
-         WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
-        [table]
-      );
-
-      const labelPrefs = ["name", "title", "full_name", "username", "email", "label", "display_name", "slug"];
-      let labelCol = null;
-      for (const pref of labelPrefs) {
-        const found = cols.find((c) => c.column_name === pref || c.column_name.endsWith(`_${pref}`) || c.column_name.endsWith(`_name`));
-        if (found) { labelCol = found.column_name; break; }
-      }
-      if (!labelCol) {
-        const textCol = cols.find(
-          (c) => ["text", "character varying", "varchar"].includes(c.data_type) && c.column_name !== pk
-        );
-        labelCol = textCol?.column_name || pk;
-      }
+      const labelCol = await pickLabelColumn(table, pk);
 
       const uniqueIds = [...new Set(ids.filter(Boolean))];
       if (uniqueIds.length === 0) return res.json({});

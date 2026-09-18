@@ -473,7 +473,9 @@ export default function TablePage() {
                       }}>
                         <CellValue
                           value={row[col.column_name]} type={col.data_type}
+                          columnName={col.column_name}
                           fk={col.fk} fkLabel={fkLabels[col.column_name]?.[String(row[col.column_name])]}
+                          enumLabel={col.enumLabels?.[String(row[col.column_name])]}
                           theme={theme} mode={mode}
                         />
                       </td>
@@ -612,10 +614,24 @@ export default function TablePage() {
   );
 }
 
+// Status/role/type-shaped text columns that carry no explicit enum map
+// (most of them — see server/lib/statusLabels.js for the numeric ones that
+// do) are still snake_case in Postgres. Title-cased for the same reason an
+// FK becomes a name instead of an id: nobody reading this table wrote the
+// column, so nobody should have to decode its spelling.
+const STATUS_LIKE_COLUMN = /(^|_)(status|role|type)$/i;
+
 // ---- Cell rendering ----
-function CellValue({ value, type, fk, fkLabel, theme }) {
+function CellValue({ value, type, columnName, fk, fkLabel, enumLabel, theme }) {
   if (value === null || value === undefined) {
     return <span style={{ color: theme.textMuted, fontStyle: "italic", fontSize: 11 }}>—</span>;
+  }
+  if (enumLabel !== undefined) {
+    return (
+      <span style={{ fontSize: 12, fontWeight: 500, color: theme.text }} title={`raw value: ${value}`}>
+        {enumLabel}
+      </span>
+    );
   }
   if (fk && fkLabel) {
     return (
@@ -668,5 +684,10 @@ function CellValue({ value, type, fk, fkLabel, theme }) {
     return <span style={{ color: theme.textMuted, fontSize: 11, fontFamily: "monospace" }} title={value}>{value.slice(0, 8)}...</span>;
   }
   const str = String(value);
+  // A bare word like "in_progress" or "PENDING_BRAND", not a sentence — a
+  // sentence has spaces already and stays exactly as written.
+  if (columnName && STATUS_LIKE_COLUMN.test(columnName) && /^[a-z0-9_]+$/i.test(str)) {
+    return <span style={{ color: theme.text }}>{friendlyName(str.toLowerCase())}</span>;
+  }
   return <span style={{ color: theme.text }} title={str.length > 50 ? str : undefined}>{str.length > 50 ? str.slice(0, 50) + "..." : str}</span>;
 }
