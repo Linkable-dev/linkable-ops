@@ -176,7 +176,15 @@ export async function anthropicCostByScope({ apiKey = process.env.ANTHROPIC_ADMI
 
   const keysByWorkspace = new Map(); // workspace_id | "" (default/no workspace) -> [key name, ...]
   await paginateList("/api_keys", { limit: "1000", status: "active" }, apiKey, (k) => {
-    const wid = k.scope?.type === "workspace" ? k.scope.workspace_id : "";
+    const rawWid = k.scope?.type === "workspace" ? k.scope.workspace_id : "";
+    // The org's implicit default Workspace never appears in /workspaces at
+    // all (confirmed live: an org with three keys all scoped to one
+    // workspace_id got back an EMPTY workspace list), but every other
+    // endpoint gives it a real, non-null ID — while the cost report calls
+    // that same workspace null. So a workspace_id this endpoint names but
+    // /workspaces never listed IS the default one, and is folded into the
+    // same "" bucket the cost report already uses for it.
+    const wid = rawWid && workspaceNames.has(rawWid) ? rawWid : "";
     if (!keysByWorkspace.has(wid)) keysByWorkspace.set(wid, []);
     keysByWorkspace.get(wid).push(k.name);
   });
