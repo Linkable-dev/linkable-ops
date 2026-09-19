@@ -7,8 +7,16 @@ import { Btn } from "../components/ui/Button";
 import { SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
 import {
-  ColumnFilter, describeFilter, SortLabel, nextSort, useColumnWidths, ResizeHandle,
-  useColumnOrder, DragHandle,
+  ColumnFilter,
+  describeFilter,
+  SortLabel,
+  nextSort,
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
 } from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
 import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
@@ -537,13 +545,15 @@ export default function AutopilotPage() {
                         key={col.key}
                         style={{
                           ...(col.right ? { ...th, textAlign: "right" } : th),
-                          position: "relative",
+                          ...headerCellStyle,
                           background: dragOverKey === col.key ? theme.accentLight : undefined,
                         }}
                         {...dropTargetProps(col.key)}
                       >
-                        <span style={{ display: "inline-flex", alignItems: "center" }}>
-                          <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+                        <HeaderCell
+                          align={col.right ? "right" : "left"}
+                          grip={<DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />}
+                        >
                           <SortLabel
                             theme={theme}
                             label={col.label}
@@ -553,18 +563,18 @@ export default function AutopilotPage() {
                             defaultDir={col.sort}
                             onSort={handleSort}
                           />
-                          {f && (
-                            <ColumnFilter
-                              theme={theme}
-                              label={f.label}
-                              type={f.type}
-                              options={f.options}
-                              placeholder={f.placeholder}
-                              value={filters[f.key] || ""}
-                              onCommit={(v) => setFilter(f.key, v)}
-                            />
-                          )}
-                        </span>
+                        </HeaderCell>
+                        {f && (
+                          <ColumnFilter
+                            theme={theme}
+                            label={f.label}
+                            type={f.type}
+                            options={f.options}
+                            placeholder={f.placeholder}
+                            value={filters[f.key] || ""}
+                            onCommit={(v) => setFilter(f.key, v)}
+                          />
+                        )}
                         {col.resizable !== false && (
                           <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                         )}

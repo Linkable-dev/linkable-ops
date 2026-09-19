@@ -8,7 +8,15 @@ import { Btn } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import { SkeletonTable } from "../components/ui/Skeleton";
 import {
-  useColumnWidths, ResizeHandle, SortLabel, nextSort, ColumnFilter, useColumnOrder, DragHandle,
+  useColumnWidths,
+  ResizeHandle,
+  SortLabel,
+  nextSort,
+  ColumnFilter,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
 } from "../components/table/tableTools";
 
 // sortKey/filterKey are the server-side ops_admins columns (allow-listed in
@@ -240,16 +248,18 @@ export default function TeamPage() {
                   <th
                     key={col.key}
                     style={{
-                      position: "relative", textAlign: "left", padding: "10px 16px",
+                      ...headerCellStyle, textAlign: "left", padding: "10px 16px",
                       fontSize: 11, fontWeight: 600, color: t.textMuted,
                       textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap",
                       background: dragOverKey === col.key ? t.accentLight : undefined,
                     }}
                     {...dropTargetProps(col.key)}
                   >
-                    {!TEAM_FIXED_KEYS.includes(col.key) && (
-                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
-                    )}
+                    <HeaderCell
+                      grip={!TEAM_FIXED_KEYS.includes(col.key) && (
+                        <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
+                      )}
+                    >
                     {col.sortKey ? (
                       <SortLabel
                         theme={t}
@@ -263,6 +273,7 @@ export default function TeamPage() {
                     ) : (
                       col.label
                     )}
+                    </HeaderCell>
                     {col.filter && (
                       <ColumnFilter
                         theme={t}

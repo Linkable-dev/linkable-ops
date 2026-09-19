@@ -10,7 +10,14 @@ import { Input } from "../../components/ui/Input";
 import { Label } from "../../components/ui/Label";
 import { Tag } from "../../components/ui/Tag";
 import { SkeletonTable } from "../../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../../components/table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../../components/table/tableTools";
 
 // Where articles are served. Switch to https://www.linkable.link once the
 // domain points at the Vercel project.
@@ -193,13 +200,16 @@ export default function BlogPage() {
                 {orderedColumns.map((col) => (
                   <th
                     key={col.key}
-                    style={{ ...th, background: dragOverKey === col.key ? t.accentLight : undefined }}
+                    style={{ ...th, ...headerCellStyle, background: dragOverKey === col.key ? t.accentLight : undefined }}
                     {...dropTargetProps(col.key)}
                   >
-                    {!BLOG_FIXED_KEYS.includes(col.key) && (
-                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
-                    )}
-                    {col.label}
+                    <HeaderCell
+                      grip={!BLOG_FIXED_KEYS.includes(col.key) && (
+                        <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
+                      )}
+                    >
+                      {col.label}
+                    </HeaderCell>
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
                     )}

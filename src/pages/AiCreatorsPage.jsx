@@ -5,7 +5,14 @@ import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../components/table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../components/table/tableTools";
 
 /**
  * The synthetic creator roster.
@@ -312,16 +319,20 @@ export default function AiCreatorsPage() {
                     key={col.key}
                     style={{
                       ...th,
-                      position: "relative",
+                      ...headerCellStyle,
                       ...(col.key === "actions" ? { textAlign: "right" } : {}),
                       background: dragOverKey === col.key ? theme.accentLight : undefined,
                     }}
                     {...dropTargetProps(col.key)}
                   >
-                    {!ROSTER_FIXED_KEYS.includes(col.key) && (
-                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
-                    )}
-                    {col.label}
+                    <HeaderCell
+                      align={col.key === "actions" ? "right" : "left"}
+                      grip={!ROSTER_FIXED_KEYS.includes(col.key) && (
+                        <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+                      )}
+                    >
+                      {col.label}
+                    </HeaderCell>
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                     )}

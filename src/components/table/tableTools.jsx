@@ -372,6 +372,40 @@ export function ResizeHandle({ colKey, startResize, resetWidth, theme }) {
   );
 }
 
+// The two halves of a header cell that every table here needs and each one
+// used to re-implement: the style the cell carries, and the layout of what
+// sits inside it.
+//
+// They exist because the bug they fix was in nine tables at once. A header
+// cell is `white-space: nowrap` and its column has a fixed width, so a heading
+// longer than its own column printed itself straight over the next column's —
+// which is what anyone dragging a column narrower sees immediately, and what
+// made the resize handle look like it was doing something wrong.
+//
+// `position: relative` is in here too because ResizeHandle is absolutely
+// positioned against the cell and silently does nothing without it.
+export const headerCellStyle = { position: "relative", overflow: "hidden" };
+
+// Grip, then a label that gives way, then anything that must keep its size —
+// a sort arrow, a filter funnel. Put the ResizeHandle after this, as a direct
+// child of the cell, so it anchors to the cell rather than to this row.
+export function HeaderCell({ children, grip, trailing, align = "left" }) {
+  return (
+    <span
+      style={{
+        display: "flex", alignItems: "center", minWidth: 0,
+        justifyContent: align === "right" ? "flex-end" : "flex-start",
+      }}
+    >
+      {grip}
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {children}
+      </span>
+      {trailing}
+    </span>
+  );
+}
+
 // Clickable sort label for a header cell. Layout-agnostic: render it inside a
 // <th> or a grid cell. `defaultDir` is the direction used on first click
 // ("asc" reads right for text, "desc" for dates/numbers).

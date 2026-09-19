@@ -6,7 +6,14 @@ import { Card } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
-import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../components/table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../components/table/tableTools";
 
 /**
  * GTM outreach, as agents.
@@ -583,15 +590,19 @@ export default function GtmAgentsPage() {
                     style={{
                       ...th,
                       ...(col.right ? { textAlign: "right" } : {}),
-                      position: "relative",
+                      ...headerCellStyle,
                       background: dragOverKey === col.key ? theme.accentLight : undefined,
                     }}
                     {...dropTargetProps(col.key)}
                   >
-                    {!GTM_AGENT_FIXED_KEYS.includes(col.key) && (
-                      <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
-                    )}
-                    {col.label}
+                    <HeaderCell
+                      align={col.right ? "right" : "left"}
+                      grip={!GTM_AGENT_FIXED_KEYS.includes(col.key) && (
+                        <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+                      )}
+                    >
+                      {col.label}
+                    </HeaderCell>
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                     )}

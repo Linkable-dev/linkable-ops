@@ -11,7 +11,14 @@ import { api, friendlyDate } from "../../lib/api";
 import { Card } from "../ui/Card";
 import { Btn } from "../ui/Button";
 import { Skeleton } from "../ui/Skeleton";
-import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../table/tableTools";
 
 const SPLITS = [
   ["byGroup", "Segment"],
@@ -142,14 +149,18 @@ export default function AttributionPanel() {
                       <th
                         key={c.key}
                         style={{
-                          position: "relative", textAlign: c.key === "name" ? "left" : "right", padding: "4px 8px",
+                          ...headerCellStyle, textAlign: c.key === "name" ? "left" : "right", padding: "4px 8px",
                           fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4,
                           background: dragOverKey === c.key ? theme.accentLight : undefined,
                         }}
                         {...dropTargetProps(c.key)}
                       >
-                        <DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />
-                        {c.label}
+                        <HeaderCell
+                          align={c.key === "name" ? "left" : "right"}
+                          grip={<DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />}
+                        >
+                          {c.label}
+                        </HeaderCell>
                         <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                       </th>
                     ))}

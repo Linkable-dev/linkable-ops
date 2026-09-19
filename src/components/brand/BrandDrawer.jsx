@@ -8,7 +8,14 @@ import { Skeleton, SkeletonStatGrid, SkeletonTable, SkeletonKeyValue } from "../
 import GrantTrialModal from "../trials/GrantTrialModal";
 import ManageBrandModal from "../users/ManageBrandModal";
 import { planLabel } from "../trials/planConfig";
-import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../table/tableTools";
 
 const TABS = [["overview", "Overview"], ["campaigns", "Campaigns"], ["creators", "Creators"], ["outbound", "Outbound"], ["history", "History"]];
 
@@ -282,13 +289,15 @@ function Table({ theme, columns, rows, empty, widths, startResize, resetWidth, d
             {columns.map((c) => (
               <th
                 key={c.key}
-                style={{ ...th(theme, c.right), position: "relative", background: dragOverKey === c.key ? theme.accentLight : undefined }}
+                style={{ ...th(theme, c.right), ...headerCellStyle, background: dragOverKey === c.key ? theme.accentLight : undefined }}
                 {...dropTargetProps(c.key)}
               >
-                <span style={{ display: "inline-flex", alignItems: "center" }}>
-                  <DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />
+                <HeaderCell
+                  align={c.right ? "right" : "left"}
+                  grip={<DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />}
+                >
                   {c.label}
-                </span>
+                </HeaderCell>
                 {c.resizable !== false && (
                   <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                 )}

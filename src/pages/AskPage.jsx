@@ -6,7 +6,14 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
-import { useColumnWidths, ResizeHandle, useColumnOrder, DragHandle } from "../components/table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../components/table/tableTools";
 
 const EXAMPLES = [
   "How many brands signed up each month this year?",
@@ -223,7 +230,7 @@ function ResultTable({ result, theme }) {
                   <th
                     key={c}
                     style={{
-                      position: "relative", textAlign: numericCols.includes(c) ? "right" : "left",
+                      ...headerCellStyle, textAlign: numericCols.includes(c) ? "right" : "left",
                       padding: "10px 14px", fontSize: 11, fontWeight: 600, color: theme.textMuted,
                       textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap",
                       borderBottom: `1px solid ${theme.border}`,
@@ -231,8 +238,12 @@ function ResultTable({ result, theme }) {
                     }}
                     {...dropTargetProps(c)}
                   >
-                    <DragHandle colKey={c} dragHandleProps={dragHandleProps} theme={theme} />
-                    {c}
+                    <HeaderCell
+                      align={numericCols.includes(c) ? "right" : "left"}
+                      grip={<DragHandle colKey={c} dragHandleProps={dragHandleProps} theme={theme} />}
+                    >
+                      {c}
+                    </HeaderCell>
                     <ResizeHandle colKey={c} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                   </th>
                 ))}

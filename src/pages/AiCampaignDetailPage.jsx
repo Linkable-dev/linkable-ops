@@ -13,7 +13,16 @@ import { Skeleton, SkeletonRow, SkeletonStat, SkeletonStatGrid, SkeletonTableRow
 import { TabBar } from "../components/ui/TabBar";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { Pagination } from "../components/ui/Pagination";
-import { useColumnWidths, ResizeHandle, SortLabel, nextSort, useColumnOrder, DragHandle } from "../components/table/tableTools";
+import {
+  useColumnWidths,
+  ResizeHandle,
+  SortLabel,
+  nextSort,
+  useColumnOrder,
+  DragHandle,
+  HeaderCell,
+  headerCellStyle,
+} from "../components/table/tableTools";
 
 const GROUP_TINTS = {
   G1: { bg: "#E0E7FF", fg: "#3730A3" },
@@ -443,21 +452,22 @@ function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidt
       {cols.map((c) => (
         <th
           key={c.key}
-          style={{ ...thStyle, position: "relative", background: dragOverKey === c.key ? theme.accentLight : undefined }}
+          style={{ ...thStyle, ...headerCellStyle, background: dragOverKey === c.key ? theme.accentLight : undefined }}
           {...dropTargetProps(c.key)}
         >
-          <DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />
-          {c.sortable ? (
-            <SortLabel
-              label={c.label}
-              colKey={c.key}
-              sortBy={sort.sortBy}
-              sortDir={sort.sortDir}
-              onSort={onSort}
-              defaultDir={c.defaultDir}
-              theme={theme}
-            />
-          ) : c.label}
+          <HeaderCell grip={<DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />}>
+            {c.sortable ? (
+              <SortLabel
+                label={c.label}
+                colKey={c.key}
+                sortBy={sort.sortBy}
+                sortDir={sort.sortDir}
+                onSort={onSort}
+                defaultDir={c.defaultDir}
+                theme={theme}
+              />
+            ) : c.label}
+          </HeaderCell>
           <ResizeHandle colKey={c.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
         </th>
       ))}
