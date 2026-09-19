@@ -32,6 +32,26 @@ function loadStoredWidths(tableId) {
   }
 }
 
+// Which columns the user has dragged, kept apart from the widths themselves
+// because the widths map is written whole (every column, default or not) and
+// so cannot say who chose what. Only `fill` columns read it — see gridTemplate.
+const SIZED_STORE_PREFIX = "ops.tableSized.";
+
+function loadStoredSized(tableId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SIZED_STORE_PREFIX + tableId));
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSized(tableId, keys) {
+  try {
+    localStorage.setItem(SIZED_STORE_PREFIX + tableId, JSON.stringify([...keys]));
+  } catch { /* private mode etc. — resizing still works for the session */ }
+}
+
 const EMPTY_KEYS = [];
 
 function applyFixed(widths, defaultWidths, fixedKeys) {
@@ -55,11 +75,23 @@ export function useColumnWidths(tableId, defaultWidths, fixedKeys = EMPTY_KEYS) 
   );
   const [widths, setWidths] = useState(seed);
   const dragRef = useRef(null);
+  // Which columns the USER has sized, as opposed to ones still on the width
+  // they were built with. Only `fill` columns care (see gridTemplate): one of
+  // those absorbs the leftover space, so until this existed, dragging the
+  // widest column on a grid table — Store or Email on /users, the first thing
+  // anyone tries — stored the new width and changed nothing on screen, because
+  // the 1fr went on filling the row regardless.
+  const sizedSeed = useCallback(
+    () => new Set(loadStoredSized(tableId).filter((k) => !fixedKeys.includes(k))),
+    [tableId, fixedKeys],
+  );
+  const [sized, setSized] = useState(sizedSeed);
 
   // Switching tabs re-mounts with a different tableId (e.g. brands↔creators
   // share the page) — re-seed from that table's stored widths.
   useEffect(() => {
     setWidths(seed());
+    setSized(sizedSeed());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId]);
 
@@ -73,11 +105,31 @@ export function useColumnWidths(tableId, defaultWidths, fixedKeys = EMPTY_KEYS) 
     e.preventDefault();
     e.stopPropagation(); // don't trigger the header's sort onClick
     const startX = e.clientX;
-    dragRef.current = { key, startX, startW: null, min };
-    setWidths((w) => {
-      dragRef.current.startW = w[key];
-      return w;
+    // Measure what the column is actually RENDERED at, which is not always its
+    // stored width: a fill column is stretched by its 1fr, and a fixed-layout
+    // <table> spreads leftover space across every column. Starting the drag
+    // from the stored number made the column jump to it on the first pixel.
+    const cell = e.currentTarget?.parentElement;
+    const rendered = cell ? Math.round(cell.getBoundingClientRect().width) : 0;
+    dragRef.current = { key, startX, startW: rendered || null, min };
+    // Marked on the way IN, not on mouseup: a fill column has to stop
+    // absorbing the leftover space as the drag happens, or the whole gesture
+    // looks inert until you let go.
+    setSized((cur) => {
+      if (cur.has(key)) return cur;
+      const next = new Set(cur).add(key);
+      persistSized(tableId, next);
+      return next;
     });
+    if (!rendered) {
+      // No cell to measure (a caller that puts the handle somewhere else):
+      // fall back to the stored width, read through an updater because that is
+      // the only way to see the current state from inside the handler.
+      setWidths((w) => {
+        dragRef.current.startW = w[key];
+        return w;
+      });
+    }
     const onMove = (ev) => {
       const d = dragRef.current;
       if (!d || d.startW == null) return;
@@ -96,7 +148,7 @@ export function useColumnWidths(tableId, defaultWidths, fixedKeys = EMPTY_KEYS) 
     document.addEventListener("mouseup", onUp);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-  }, [persist]);
+  }, [persist, tableId]);
 
   const resetWidth = useCallback((key) => {
     setWidths((w) => {
@@ -104,17 +156,29 @@ export function useColumnWidths(tableId, defaultWidths, fixedKeys = EMPTY_KEYS) 
       persist(next);
       return next;
     });
+    // A column put back to its default is one the user has NOT sized, which is
+    // what hands a fill column its leftover space again.
+    setSized((cur) => {
+      if (!cur.has(key)) return cur;
+      const next = new Set(cur);
+      next.delete(key);
+      persistSized(tableId, next);
+      return next;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persist, tableId]);
 
-  return { widths, startResize, resetWidth };
+  return { widths, sized, startResize, resetWidth };
 }
 
-// gridTemplateColumns for CSS-grid tables. The `fill` column absorbs leftover
-// space (its width acts as a minimum) so the table always spans its container.
-export function gridTemplate(columns, widths) {
+// gridTemplateColumns for CSS-grid tables. A `fill` column absorbs the leftover
+// space (its width acts as a minimum) so the table always spans its container —
+// until the user drags it, after which the width they chose is the width they
+// get. `sized` is useColumnWidths' set of user-sized keys; without it a fill
+// column silently ignores every resize.
+export function gridTemplate(columns, widths, sized) {
   return columns
-    .map((c) => (c.fill ? `minmax(${widths[c.key]}px, 1fr)` : `${widths[c.key]}px`))
+    .map((c) => (c.fill && !sized?.has(c.key) ? `minmax(${widths[c.key]}px, 1fr)` : `${widths[c.key]}px`))
     .join(" ");
 }
 
@@ -219,10 +283,28 @@ export function useColumnOrder(tableId, columns, fixedKeys = EMPTY_KEYS) {
       setDragOverKey(null);
       if (!from || from === key || fixedKeys.includes(key)) return;
       setOrder((cur) => {
+        const fromIndex = cur.indexOf(from);
+        const toIndex = cur.indexOf(key);
+        if (fromIndex < 0 || toIndex < 0) return cur;
         const next = cur.filter((k) => k !== from);
-        next.splice(next.indexOf(key), 0, from);
-        persist(next);
-        return next;
+        // The dropped column takes the target's place, which means landing
+        // AFTER it when the drag went rightwards and before it when it went
+        // left. Always inserting before the target made the obvious gesture —
+        // drag a column onto its right-hand neighbour to swap the two — lift
+        // the column out and put it straight back where it was, so the header
+        // didn't move and the feature read as broken; a drag to the far right
+        // landed one column short of where it was dropped.
+        const at = next.indexOf(key) + (fromIndex < toIndex ? 1 : 0);
+        next.splice(at, 0, from);
+        // Fixed columns (a checkbox, an actions column) stay at the index they
+        // were built at — the same re-pinning `seed` does, applied here too so
+        // what the drop renders is what a reload will show.
+        const fixedSet = new Set(fixedKeys);
+        const draggable = next.filter((k) => !fixedSet.has(k));
+        let di = 0;
+        const settled = cur.map((k) => (fixedSet.has(k) ? k : draggable[di++]));
+        persist(settled);
+        return settled;
       });
     },
   }), [persist, fixedKeys]);
@@ -272,7 +354,11 @@ export function ResizeHandle({ colKey, startResize, resetWidth, theme }) {
       onMouseLeave={() => setHover(false)}
       title="Drag to resize · double-click to reset"
       style={{
-        position: "absolute", top: 0, right: -5, bottom: 0, width: 10,
+        // Fully INSIDE the cell. It used to straddle the edge (right: -5), and
+        // a header cell that clips its content — which they now do, so a
+        // squeezed column stops bleeding over its neighbour — clipped half the
+        // grab strip away with it.
+        position: "absolute", top: 0, right: 0, bottom: 0, width: 10,
         cursor: "col-resize", zIndex: 2,
         display: "flex", alignItems: "stretch", justifyContent: "center",
       }}
@@ -299,9 +385,16 @@ export function SortLabel({ label, colKey, sortBy, sortDir, onSort, defaultDir =
   return (
     <span
       onClick={() => onSort(colKey, defaultDir)}
-      title={isActive ? undefined : "Sort by " + label}
+      // Always titled now: a narrow column truncates its label, and "Sort by
+      // X" is no help when what you want to know is which column X is.
+      title={isActive ? label : "Sort by " + label}
       style={{
+        // Shrinkable and bounded by its cell: a header wider than the column
+        // it sits over used to run straight across the next one's label, and
+        // the narrower you dragged a column the further it bled. The label is
+        // the part that gives way; the sort arrow keeps its size.
         display: "inline-flex", alignItems: "center", gap: 3,
+        minWidth: 0, maxWidth: "100%",
         cursor: "pointer", userSelect: "none",
         color: isActive ? theme.text : theme.textMuted,
         transition: "color 0.12s",
@@ -309,8 +402,10 @@ export function SortLabel({ label, colKey, sortBy, sortDir, onSort, defaultDir =
       onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; }}
       onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; }}
     >
-      {label}
-      <span style={{ fontSize: 10, opacity: isActive ? 1 : 0.45 }}>{indicator}</span>
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 10, opacity: isActive ? 1 : 0.45, flexShrink: 0 }}>{indicator}</span>
     </span>
   );
 }

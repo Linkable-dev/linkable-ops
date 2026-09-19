@@ -141,6 +141,13 @@ export default function TablePage() {
   );
   const visibleCols = orderedColumns.slice(0, 10);
   const hasMore = orderedColumns.length > 10;
+  // One default, used by the <colgroup> and by the resize drag alike: two
+  // different fallbacks meant grabbing a never-resized column jumped it to
+  // whatever the other number was on the first pixel of the drag.
+  const colWidth = (name) => colWidths[name] || 160;
+  const totalWidth =
+    (pk ? 36 : 0) + visibleCols.reduce((sum, c) => sum + colWidth(c.column_name), 0)
+    + (hasMore ? 60 : 0) + 90;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -265,7 +272,11 @@ export default function TablePage() {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
-    const startW = colWidths[colName] || 160;
+    // The width the column is actually rendered at, not the one it was stored
+    // at: the table spreads any leftover space across its columns, so starting
+    // from the stored number made the column jump on the drag's first pixel.
+    const cell = e.currentTarget?.parentElement;
+    const startW = Math.round(cell?.getBoundingClientRect().width) || colWidth(colName);
     const onMove = (ev) => {
       const diff = ev.clientX - startX;
       setColWidths((prev) => ({ ...prev, [colName]: Math.max(80, startW + diff) }));
@@ -383,7 +394,23 @@ export default function TablePage() {
         borderRadius: 10, overflow: "hidden", boxShadow: theme.shadow,
       }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 13, width: "max-content", minWidth: "100%" }}>
+          {/* Fixed layout + a <colgroup>, the same shape every other real
+              <table> in the app uses. Under the browser's AUTO layout the
+              widths below were only ever a suggestion — the longest cell in a
+              column set its width — so dragging the resize handle moved the
+              handle and nothing else. */}
+          <table style={{
+            borderCollapse: "collapse", fontSize: 13,
+            width: "100%", minWidth: totalWidth, tableLayout: "fixed",
+          }}>
+            <colgroup>
+              {pk && <col style={{ width: 36 }} />}
+              {visibleCols.map((col) => (
+                <col key={col.column_name} style={{ width: colWidth(col.column_name) }} />
+              ))}
+              {hasMore && <col style={{ width: 60 }} />}
+              <col style={{ width: 90 }} />
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${theme.border}`, background: theme.surfaceAlt }}>
                 {pk && (
@@ -402,9 +429,6 @@ export default function TablePage() {
                     color: theme.textMuted, textTransform: "capitalize", letterSpacing: 0.3,
                     cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", position: "relative",
                     overflow: "hidden",
-                    minWidth: colWidths[col.column_name] || 120,
-                    maxWidth: colWidths[col.column_name] || 280,
-                    width: colWidths[col.column_name] || undefined,
                     background: dragOverKey === col.column_name ? theme.accentLight : undefined,
                   }} onClick={() => handleSort(col.column_name)} {...dropTargetProps(col.column_name)}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%" }}>
@@ -488,8 +512,6 @@ export default function TablePage() {
                     {visibleCols.map((col) => (
                       <td key={col.column_name} style={{
                         padding: "10px 14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        minWidth: colWidths[col.column_name] || 120,
-                        maxWidth: colWidths[col.column_name] || 280,
                       }}>
                         <CellValue
                           value={row[col.column_name]} type={col.data_type}

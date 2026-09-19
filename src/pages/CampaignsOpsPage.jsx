@@ -641,6 +641,9 @@ function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resiz
     cursor: isSortable ? "pointer" : "default",
     userSelect: "none",
     whiteSpace: "nowrap",
+    // Clipped: the columns have fixed widths, so a heading longer than its own
+    // column printed itself over the next one's.
+    overflow: "hidden",
     background: highlight ? theme.accentLight : undefined,
   };
   return (
@@ -651,9 +654,18 @@ function Th({ children, theme, num, sub, sortKey, sortBy, sortDir, onSort, resiz
       onMouseLeave={isSortable ? (e) => { e.currentTarget.style.color = isActive ? theme.text : theme.textMuted; } : undefined}
       {...dropTarget}
     >
-      {dragHandle}
-      {children}{arrow}
-      {filter}
+      {/* The grip, the sort arrow and the funnel keep their size; the label is
+          what gives way when the column is dragged narrow. */}
+      <span style={{
+        display: "flex", alignItems: "center", minWidth: 0,
+        justifyContent: num ? "flex-end" : "flex-start",
+      }}>
+        {dragHandle}
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {children}{arrow}
+        </span>
+        {filter}
+      </span>
       {resize && (
         /* Swallow clicks from the handle so drag/reset never triggers the header sort. */
         <span onClick={(e) => e.stopPropagation()}>

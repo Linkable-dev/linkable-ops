@@ -151,13 +151,13 @@ export default function UsersPage() {
   // out of resize's stored-width override AND pinned at their original index
   // for reorder, the same list doing both jobs.
   const fixedColumnKeys = useMemo(() => columns.filter((c) => c.resizable === false).map((c) => c.key), [columns]);
-  const { widths, startResize, resetWidth } = useColumnWidths(
+  const { widths, sized, startResize, resetWidth } = useColumnWidths(
     `admin-${tab}`,
     useMemo(() => Object.fromEntries(columns.map((c) => [c.key, c.width])), [columns]),
     fixedColumnKeys,
   );
   const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder(`admin-${tab}`, columns, fixedColumnKeys);
-  const template = gridTemplate(orderedColumns, widths);
+  const template = gridTemplate(orderedColumns, widths, sized);
   // Grid rows are plain divs, so horizontal overflow needs an explicit
   // min-width on a shared scroll body: sum of column widths + gaps + padding.
   const totalWidth = columns.reduce((s, c) => s + (widths[c.key] || c.width), 0)
@@ -384,6 +384,11 @@ export default function UsersPage() {
               {...dropTargetProps(col.key)}
               style={{
                 position: "relative", minWidth: 0, whiteSpace: "nowrap",
+                // Clipped, and laid out so the LABEL is what gives way: the
+                // grip, the sort arrow and the filter funnel keep their size.
+                // Without this a column dragged narrower than its own heading
+                // printed that heading straight over the next column's.
+                display: "flex", alignItems: "center", overflow: "hidden",
                 background: dragOverKey === col.key ? theme.accentLight : undefined,
               }}
             >
