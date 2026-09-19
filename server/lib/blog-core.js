@@ -156,7 +156,12 @@ export async function proposeTopics(count = 10) {
   const res = await client.messages.parse({
     model: model(), max_tokens: 4000, thinking: { type: "adaptive" },
     output_config: { effort: "medium", format: zodOutputFormat(TopicSchema) },
-    system: cfg.style + "\n\n" + cfg.facts,
+    // Same bytes as the article writer's system prompt below, and marked the
+    // same way on purpose: the daily job proposes topics and then writes,
+    // so whichever runs first should be the one that pays to fill the cache.
+    // Left as a plain string, this call wrote nothing and read nothing, and
+    // the writer paid the fill premium on a prefix that was already in hand.
+    system: [{ type: "text", text: cfg.style + "\n\n" + cfg.facts, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: `Propose ${count} new blog topics for the Linkable blog. Each needs a search keyword phrase a Shopify brand owner would type (lower case, 4 to 8 words), a one-sentence angle that is specific and opinionated, and a category (Sourcing, Strategy, Playbook, Measurement or "By category"). Avoid anything close to these existing titles and keywords:\n${posts.map((p) => `- ${p.title} (${p.keyword || "no keyword"})`).join("\n")}\n${(topics || []).map((t) => `- ${t.keyword}`).join("\n")}` }],
   });
   const existing = [...posts.map((p) => p.title), ...posts.map((p) => p.keyword), ...(topics || []).map((t) => t.keyword)].filter(Boolean);
