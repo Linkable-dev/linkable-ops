@@ -96,10 +96,14 @@ const gtmIcon = icon(<>
   <polyline points="17 6 23 6 23 12" />
 </>);
 const sendIcon = icon(<path d="M3 11l18-8-5 18-4-7-9-3z" />);
-const prospectIcon = icon(<>
-  <circle cx="12" cy="12" r="8" />
-  <circle cx="12" cy="12" r="3" />
-  <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+const brandsIcon = icon(<>
+  <path d="M3 21h18" />
+  <path d="M5 21V8l7-5 7 5v13" />
+  <path d="M10 21v-6h4v6" />
+</>);
+const creatorsIcon = icon(<>
+  <circle cx="12" cy="8" r="3.5" />
+  <path d="M5 20a7 7 0 0 1 14 0" />
 </>);
 const inboxIcon = icon(<>
   <path d="M22 12h-6l-2 3h-4l-2-3H2" />
@@ -303,9 +307,10 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
-            {navItem("/ai/prospecting", "Prospecting", path.startsWith("/ai/prospecting"), prospectIcon)}
-            {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), sendIcon)}
-            {navItem("/ai/inbox", "Replies", path.startsWith("/ai/inbox"), inboxIcon)}
+            {navItem("/gtm/brands", "Brands",
+                     path.startsWith("/gtm/brands") || path.startsWith("/ai/prospecting") ||
+                     path.startsWith("/ai/agents") || path.startsWith("/ai/inbox"), brandsIcon)}
+            {navItem("/gtm/creators", "Creators", path.startsWith("/gtm/creators"), creatorsIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
           </div>
         )}

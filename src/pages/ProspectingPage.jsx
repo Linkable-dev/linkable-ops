@@ -6,6 +6,7 @@ import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
+import { GtmTabs, BRAND_TABS } from "../components/gtm/GtmTabs";
 
 /**
  * Outbound prospecting: Shopify brands that look like candidates to install
@@ -120,13 +121,15 @@ export default function ProspectingPage() {
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Prospecting</h1>
+        <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Brands</h1>
         <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 680 }}>
           Shopify brands with creators posting about them. Tier A have no affiliate app,
-          so they cannot attribute any of it. Decide here — hold and hide stop the email
+          so they cannot attribute any of it. Decide here: hold and hide stop the email
           being sent, they do not just tidy the list.
         </p>
       </div>
+
+      <GtmTabs tabs={BRAND_TABS} />
 
       {problem && (
         <Card>
