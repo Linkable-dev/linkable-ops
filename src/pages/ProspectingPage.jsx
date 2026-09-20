@@ -287,24 +287,22 @@ function Campaigns({ theme }) {
   }
 
   if (problem) return null;
-  if (!campaigns.length) {
-    return (
-      <Card>
-        <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
-          No campaigns yet. Create one with{" "}
-          <code style={{ color: theme.text }}>prospector campaign new "UK skincare"</code>.
-        </div>
-      </Card>
-    );
-  }
 
   return (
     <Card>
+      <NewCampaign theme={theme} onCreated={load} />
+      {!campaigns.length && (
+        <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
+          No campaigns yet. A campaign is a goal and a budget: it runs until it has the
+          leads it was asked for or has spent what it was given.
+        </div>
+      )}
       <div style={{ padding: "12px 14px", borderBottom: `1px solid ${theme.border}`,
                     color: theme.textMuted, fontSize: 12 }}>
         Campaigns — each has a goal and a budget, and stops itself when it has one or
         has spent the other.
       </div>
+      {campaigns.length > 0 && (
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
@@ -361,7 +359,108 @@ function Campaigns({ theme }) {
           })}
         </tbody>
       </table>
+      )}
     </Card>
+  );
+}
+
+/**
+ * Naming a campaign is choosing what to spend and when to stop, so the form
+ * asks for exactly that and nothing else. Source, hashtags and countries have
+ * sensible defaults; a goal and a budget do not, because they are the decision.
+ *
+ * It is created switched off. A campaign that starts the moment it is named
+ * spends before anyone has read back what they typed.
+ */
+function NewCampaign({ theme, onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [form, setForm] = useState({
+    name: "", goal_leads: 20, goal_tiers: "A", budget_usd: 5,
+    source: "creator_calls", hashtags: "", countries: "",
+  });
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const field = {
+    padding: "6px 10px", borderRadius: 8, border: `1px solid ${theme.border}`,
+    background: theme.inputBg, color: theme.text, fontSize: 13,
+  };
+
+  async function create() {
+    setBusy(true); setError(null);
+    try {
+      await api.createProspectingCampaign({
+        ...form,
+        goal_leads: Number(form.goal_leads),
+        budget_usd: Number(form.budget_usd),
+        hashtags: form.hashtags || null,
+        countries: form.countries || null,
+      });
+      setForm((f) => ({ ...f, name: "", hashtags: "" }));
+      setOpen(false);
+      await onCreated();
+    } catch (err) {
+      setError(err?.error || err?.message || "could not create it");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div style={{ padding: "12px 14px", borderBottom: `1px solid ${theme.border}`,
+                    display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ color: theme.textMuted, fontSize: 12 }}>
+          Campaigns — each has a goal and a budget, and stops itself when it has one or
+          has spent the other.
+        </span>
+        <Btn onClick={() => setOpen(true)}>New campaign</Btn>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 14, borderBottom: `1px solid ${theme.border}`,
+                  display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <Labelled label="Name" theme={theme} width={190}>
+        <input value={form.name} onChange={set("name")} placeholder="UK skincare"
+               style={{ ...field, width: "100%" }} />
+      </Labelled>
+      <Labelled label="Leads wanted" theme={theme} width={110}>
+        <input type="number" min="1" value={form.goal_leads} onChange={set("goal_leads")}
+               style={{ ...field, width: "100%" }} />
+      </Labelled>
+      <Labelled label="Tiers" theme={theme} width={90}>
+        <input value={form.goal_tiers} onChange={set("goal_tiers")} placeholder="A"
+               style={{ ...field, width: "100%" }} />
+      </Labelled>
+      <Labelled label="Budget ($)" theme={theme} width={100}>
+        <input type="number" min="0.5" step="0.5" value={form.budget_usd} onChange={set("budget_usd")}
+               style={{ ...field, width: "100%" }} />
+      </Labelled>
+      <Labelled label="Hashtags" theme={theme} width={220}>
+        <input value={form.hashtags} onChange={set("hashtags")}
+               placeholder="ugccreatorwanted, creatorswanted"
+               style={{ ...field, width: "100%" }} />
+      </Labelled>
+      <Btn onClick={create} disabled={busy || !form.name.trim()}>Create</Btn>
+      <Btn variant="secondary" onClick={() => { setOpen(false); setError(null); }}>Cancel</Btn>
+      <div style={{ width: "100%", color: theme.textMuted, fontSize: 11 }}>
+        {error
+          ? <span style={{ color: theme.danger }}>{error}</span>
+          : "Created switched off. Press Start when you want it running."}
+      </div>
+    </div>
+  );
+}
+
+function Labelled({ label, width, theme, children }) {
+  return (
+    <div style={{ width }}>
+      <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
   );
 }
 

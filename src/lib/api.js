@@ -50,6 +50,8 @@ export const api = {
     }),
 
   getProspectingCampaigns: () => request("/prospecting/campaigns"),
+  createProspectingCampaign: (data) =>
+    request("/prospecting/campaigns", { method: "POST", body: JSON.stringify(data) }),
   getProspectingCampaignRuns: (name) =>
     request(`/prospecting/campaigns/${encodeURIComponent(name)}/runs`),
   setProspectingCampaignState: (name, desired_state) =>

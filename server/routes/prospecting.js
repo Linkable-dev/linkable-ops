@@ -170,6 +170,38 @@ export function prospectingRoutes() {
     res.json({ runs: data || [] });
   });
 
+  router.post("/campaigns", async (req, res) => {
+    const { name, goal_leads, goal_tiers, budget_usd, source, hashtags, countries } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "a campaign needs a name" });
+    }
+    const budget = Number(budget_usd);
+    if (!Number.isFinite(budget) || budget <= 0) {
+      return res.status(400).json({ error: "budget must be a positive number of dollars" });
+    }
+    // Created switched off. A campaign that starts the moment it is named
+    // spends before anyone has read back what they typed.
+    const row = {
+      name: String(name).trim(),
+      desired_state: "off",
+      state: "off",
+      goal_leads: Number(goal_leads) > 0 ? Number(goal_leads) : 20,
+      goal_tiers: (goal_tiers || "A").toUpperCase(),
+      budget_usd: budget,
+      source: source || "creator_calls",
+      hashtags: hashtags || null,
+      countries: countries || null,
+    };
+    const { data, error } = await supabase.from(CAMPAIGNS).insert(row).select("*").maybeSingle();
+    if (error) {
+      if (error.code === "23505") {
+        return res.status(409).json({ error: `there is already a campaign called ${row.name}` });
+      }
+      return handleError(res, error, "creating campaign");
+    }
+    res.status(201).json(data);
+  });
+
   router.post("/campaigns/:name/state", async (req, res) => {
     const wanted = String(req.body?.desired_state || "").toLowerCase();
     if (!["off", "running"].includes(wanted)) {
