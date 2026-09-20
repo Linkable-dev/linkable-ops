@@ -49,6 +49,14 @@ export const api = {
       method: "POST", body: JSON.stringify({ handles, decision, note }),
     }),
 
+  getProspectingCampaigns: () => request("/prospecting/campaigns"),
+  getProspectingCampaignRuns: (name) =>
+    request(`/prospecting/campaigns/${encodeURIComponent(name)}/runs`),
+  setProspectingCampaignState: (name, desired_state) =>
+    request(`/prospecting/campaigns/${encodeURIComponent(name)}/state`, {
+      method: "POST", body: JSON.stringify({ desired_state }),
+    }),
+
   // Blog (articles on www.linkable.link)
   getBlogPosts: ({ status, limit = 25, offset = 0, q } = {}) => request(`/blog/posts?${buildQs({ status, limit, offset, q })}`),
   searchBlogImages: (q) => request(`/blog/images/search?q=${encodeURIComponent(q)}`),

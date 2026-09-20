@@ -131,6 +131,8 @@ export default function ProspectingPage() {
 
       <GtmTabs tabs={BRAND_TABS} />
 
+      <Campaigns theme={theme} />
+
       {problem && (
         <Card>
           <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
@@ -243,6 +245,123 @@ export default function ProspectingPage() {
         and a button that quietly bills is worse than no button.
       </p>
     </div>
+  );
+}
+
+/**
+ * Campaigns: a goal, a budget, and the opinion to stop.
+ *
+ * Two state columns, not one. The campaign reports `state`; a person sets
+ * `desired_state`. The runner lives elsewhere and on its own clock, so if this
+ * page wrote `state` directly, a pass finishing a second later would overwrite
+ * the instruction it was meant to be following.
+ *
+ * Which is also why Start reads as "asked to start" until the runner agrees.
+ * Anything else would be this page claiming something it cannot know.
+ */
+function Campaigns({ theme }) {
+  const [campaigns, setCampaigns] = useState([]);
+  const [busy, setBusy] = useState(null);
+  const [problem, setProblem] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { campaigns: rows } = await api.getProspectingCampaigns();
+      setCampaigns(rows || []);
+      setProblem(null);
+    } catch (err) {
+      setProblem(err?.hint || err?.message || "could not load campaigns");
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function setState(name, desired) {
+    setBusy(name);
+    try {
+      await api.setProspectingCampaignState(name, desired);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (problem) return null;
+  if (!campaigns.length) {
+    return (
+      <Card>
+        <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
+          No campaigns yet. Create one with{" "}
+          <code style={{ color: theme.text }}>prospector campaign new "UK skincare"</code>.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div style={{ padding: "12px 14px", borderBottom: `1px solid ${theme.border}`,
+                    color: theme.textMuted, fontSize: 12 }}>
+        Campaigns — each has a goal and a budget, and stops itself when it has one or
+        has spent the other.
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
+            {["Campaign", "State", "Progress", "Spent", "Passes", ""].map((h) => (
+              <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 500 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {campaigns.map((c) => {
+            const asked = c.desired_state === "running";
+            const actually = c.state === "running";
+            return (
+              <tr key={c.name} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                <td style={{ padding: "8px 12px", color: theme.text }}>
+                  {c.name}
+                  <div style={{ color: theme.textMuted, fontSize: 11 }}>
+                    tier {c.goal_tiers} · {c.source}
+                  </div>
+                </td>
+                <td style={{ padding: "8px 12px" }}>
+                  <span style={{ color: actually ? theme.success : theme.textMuted }}>
+                    {c.state}
+                  </span>
+                  {asked && !actually && (
+                    <div style={{ color: theme.textMuted, fontSize: 11 }}>asked to start</div>
+                  )}
+                  {c.stopped_reason && (
+                    <div style={{ color: theme.textMuted, fontSize: 11 }}>{c.stopped_reason}</div>
+                  )}
+                  {c.last_error && (
+                    <div style={{ color: theme.danger, fontSize: 11 }}>{c.last_error}</div>
+                  )}
+                </td>
+                <td style={{ padding: "8px 12px", color: theme.text }}>
+                  {c.leads_found}/{c.goal_leads}
+                </td>
+                <td style={{ padding: "8px 12px", color: theme.text }}>
+                  ${Number(c.spent_usd || 0).toFixed(2)}
+                  <span style={{ color: theme.textMuted }}> of ${Number(c.budget_usd).toFixed(2)}</span>
+                </td>
+                <td style={{ padding: "8px 12px", color: theme.textMuted }}>{c.passes}</td>
+                <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                  <Btn
+                    variant={asked ? "secondary" : "primary"}
+                    disabled={busy === c.name}
+                    onClick={() => setState(c.name, asked ? "off" : "running")}
+                  >
+                    {asked ? "Hold" : "Start"}
+                  </Btn>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 

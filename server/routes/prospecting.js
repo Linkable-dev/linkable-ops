@@ -16,6 +16,8 @@ import express from "express";
 import { supabase } from "../lib/supabase.js";
 
 const TABLE = "prospector_leads";
+const CAMPAIGNS = "prospector_campaigns";
+const RUNS = "prospector_campaign_runs";
 const DECISIONS = ["pending", "send", "hold", "hide"];
 
 // Columns the list needs. Kept explicit rather than select(*) so adding a
@@ -142,6 +144,43 @@ export function prospectingRoutes() {
       .select("handle,decision");
     if (error) return handleError(res, error, "saving decisions");
     res.json({ updated: (data || []).length });
+  });
+
+  // --- campaigns ----------------------------------------------------------
+  //
+  // A campaign reports `state` and a person sets `desired_state`. Two columns
+  // rather than one, because the runner is elsewhere and on its own clock: if
+  // the page wrote `state` directly, a pass finishing a second later would
+  // overwrite the instruction it was meant to be following.
+
+  router.get("/campaigns", async (_req, res) => {
+    const { data, error } = await supabase
+      .from(CAMPAIGNS).select("*").order("id", { ascending: false });
+    if (error) return handleError(res, error, "listing campaigns");
+    res.json({ campaigns: data || [] });
+  });
+
+  router.get("/campaigns/:name/runs", async (req, res) => {
+    const { data, error } = await supabase
+      .from(RUNS).select("*")
+      .eq("campaign_name", req.params.name)
+      .order("started_at", { ascending: false })
+      .limit(25);
+    if (error) return handleError(res, error, "listing runs");
+    res.json({ runs: data || [] });
+  });
+
+  router.post("/campaigns/:name/state", async (req, res) => {
+    const wanted = String(req.body?.desired_state || "").toLowerCase();
+    if (!["off", "running"].includes(wanted)) {
+      return res.status(400).json({ error: "desired_state must be off or running" });
+    }
+    const { data, error } = await supabase
+      .from(CAMPAIGNS).update({ desired_state: wanted })
+      .eq("name", req.params.name).select("*").maybeSingle();
+    if (error) return handleError(res, error, "setting campaign state");
+    if (!data) return res.status(404).json({ error: "no such campaign" });
+    res.json(data);
   });
 
   return router;
