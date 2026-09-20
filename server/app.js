@@ -7,6 +7,7 @@ import { adminUsersRoutes } from "./routes/admin-users.js";
 import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import { conversationsRoutes, conversationsWebhookRoutes } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
+import { prospectingRoutes } from "./routes/prospecting.js";
 import { outboundRoutes } from "./routes/outbound.js";
 import { outboundCampaignsRoutes } from "./routes/outbound-campaigns.js";
 import { outboundAgentsRoutes } from "./routes/outbound-agents.js";
@@ -87,6 +88,7 @@ app.use("/api/content", dbTargetMiddleware, requireOpsAdmin, contentRoutes());
 // GTM outreach as agents: a goal, a budget and a clock — see lib/outbound-agent.js.
 app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
+app.use("/api/prospecting", requireOpsAdmin, prospectingRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
 app.use("/api/blog", requireOpsAdmin, blogRoutes());
