@@ -36,6 +36,19 @@ function buildQs(params) {
 }
 
 export const api = {
+  // Prospecting (outbound leads from the linkable-prospector pipeline)
+  getProspectingLeads: (params = {}) => request(`/prospecting/leads?${buildQs(params)}`),
+  getProspectingStats: () => request("/prospecting/stats"),
+  getProspectingLead: (handle) => request(`/prospecting/leads/${encodeURIComponent(handle)}`),
+  setProspectingDecision: (handle, decision, note) =>
+    request(`/prospecting/leads/${encodeURIComponent(handle)}/decision`, {
+      method: "POST", body: JSON.stringify({ decision, note }),
+    }),
+  setProspectingDecisions: (handles, decision, note) =>
+    request("/prospecting/leads/decision", {
+      method: "POST", body: JSON.stringify({ handles, decision, note }),
+    }),
+
   // Blog (articles on www.linkable.link)
   getBlogPosts: ({ status, limit = 25, offset = 0, q } = {}) => request(`/blog/posts?${buildQs({ status, limit, offset, q })}`),
   searchBlogImages: (q) => request(`/blog/images/search?q=${encodeURIComponent(q)}`),
