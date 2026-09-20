@@ -29,9 +29,9 @@ import { Pagination } from "../components/ui/Pagination";
 
 const TIERS = [
   { value: "", label: "All tiers" },
-  { value: "A", label: "A — creators, no tracking" },
-  { value: "B", label: "B — competitor installed" },
-  { value: "C", label: "C — mature, quiet" },
+  { value: "A", label: "Tier A" },
+  { value: "B", label: "Tier B" },
+  { value: "C", label: "Tier C" },
 ];
 
 const DECISIONS = [
@@ -139,19 +139,35 @@ export default function ProspectingPage() {
       <StatTiles stats={stats} loading={loading && !stats} theme={theme} />
 
       <Card>
-        <div style={{ display: "flex", gap: 8, padding: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <Select value={tier} onChange={(v) => { setTier(v); setPage(0); }} options={TIERS} />
-          <Select value={decision} onChange={(v) => { setDecision(v); setPage(0); }} options={DECISIONS} />
+        {/* Filters sized to their contents, like everywhere else in ops: a
+            full-width select reads as a form, and this is a toolbar. */}
+        <div style={{
+          display: "flex", gap: 10, padding: 12, flexWrap: "wrap", alignItems: "center",
+          borderBottom: `1px solid ${theme.border}`,
+        }}>
+          <div style={{ width: 150 }}>
+            <Select value={tier} onChange={(v) => { setTier(v); setPage(0); }}
+                    options={TIERS} ariaLabel="Tier" size="sm" />
+          </div>
+          <div style={{ width: 150 }}>
+            <Select value={decision} onChange={(v) => { setDecision(v); setPage(0); }}
+                    options={DECISIONS} ariaLabel="Decision" size="sm" />
+          </div>
           <input
             value={q}
             onChange={(e) => { setQ(e.target.value); setPage(0); }}
-            placeholder="brand, domain or email"
+            placeholder="Search"
+            aria-label="Search leads"
             style={{
-              flex: "1 1 220px", minWidth: 180, padding: "8px 10px", borderRadius: 8,
-              border: `1px solid ${theme.border}`, background: theme.inputBg, color: theme.text,
-              fontSize: 13,
+              width: 200, padding: "6px 10px", borderRadius: 8,
+              border: `1px solid ${theme.border}`, background: theme.inputBg,
+              color: theme.text, fontSize: 13,
             }}
           />
+          <div style={{ flex: 1 }} />
+          <span style={{ color: theme.textMuted, fontSize: 12 }}>
+            {total} lead{total === 1 ? "" : "s"}
+          </span>
           {selected.size > 0 && (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <span style={{ color: theme.textMuted, fontSize: 12 }}>{selected.size} selected</span>
