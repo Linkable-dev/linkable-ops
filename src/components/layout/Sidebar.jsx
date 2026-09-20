@@ -96,6 +96,11 @@ const gtmIcon = icon(<>
   <polyline points="17 6 23 6 23 12" />
 </>);
 const sendIcon = icon(<path d="M3 11l18-8-5 18-4-7-9-3z" />);
+const prospectIcon = icon(<>
+  <circle cx="12" cy="12" r="8" />
+  <circle cx="12" cy="12" r="3" />
+  <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+</>);
 const inboxIcon = icon(<>
   <path d="M22 12h-6l-2 3h-4l-2-3H2" />
   <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
@@ -298,6 +303,7 @@ export default function Sidebar() {
             borderLeft: sidebarOpen ? `1px solid ${theme.border}` : "none",
             marginTop: 4, marginBottom: 6,
           }}>
+            {navItem("/ai/prospecting", "Prospecting", path.startsWith("/ai/prospecting"), prospectIcon)}
             {navItem("/ai/agents", "Outbound", path.startsWith("/ai/agents"), sendIcon)}
             {navItem("/ai/inbox", "Replies", path.startsWith("/ai/inbox"), inboxIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
