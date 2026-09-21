@@ -553,6 +553,22 @@ export default function AutopilotPage() {
                         <HeaderCell
                           align={col.right ? "right" : "left"}
                           grip={<DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />}
+                          // The funnel belongs in the trailing slot, beside the
+                          // label. HeaderCell is a flex container that fills the
+                          // cell, so a filter rendered after it as a sibling
+                          // wrapped onto a second line and made every header two
+                          // rows tall for the sake of one icon.
+                          trailing={f && (
+                            <ColumnFilter
+                              theme={theme}
+                              label={f.label}
+                              type={f.type}
+                              options={f.options}
+                              placeholder={f.placeholder}
+                              value={filters[f.key] || ""}
+                              onCommit={(v) => setFilter(f.key, v)}
+                            />
+                          )}
                         >
                           <SortLabel
                             theme={theme}
@@ -564,17 +580,6 @@ export default function AutopilotPage() {
                             onSort={handleSort}
                           />
                         </HeaderCell>
-                        {f && (
-                          <ColumnFilter
-                            theme={theme}
-                            label={f.label}
-                            type={f.type}
-                            options={f.options}
-                            placeholder={f.placeholder}
-                            value={filters[f.key] || ""}
-                            onCommit={(v) => setFilter(f.key, v)}
-                          />
-                        )}
                         {col.resizable !== false && (
                           <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                         )}

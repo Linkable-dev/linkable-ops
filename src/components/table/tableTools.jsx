@@ -401,7 +401,9 @@ export function HeaderCell({ children, grip, trailing, align = "left" }) {
       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {children}
       </span>
-      {trailing}
+      {/* Never squashed by a long label: the label is the part that gives way,
+          which is what its overflow rules are for. */}
+      {trailing && <span style={{ flexShrink: 0, display: "inline-flex" }}>{trailing}</span>}
     </span>
   );
 }

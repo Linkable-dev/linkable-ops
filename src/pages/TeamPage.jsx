@@ -259,6 +259,18 @@ export default function TeamPage() {
                       grip={!TEAM_FIXED_KEYS.includes(col.key) && (
                         <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
                       )}
+                      // Beside the label, not under it: HeaderCell fills the
+                      // cell, so a sibling filter wraps to a second line.
+                      trailing={col.filter && (
+                        <ColumnFilter
+                          theme={t}
+                          label={col.label}
+                          type={col.filter.type}
+                          placeholder={col.filter.placeholder}
+                          value={filters[col.filterKey] || ""}
+                          onCommit={(v) => handleFilter(col.filterKey, v)}
+                        />
+                      )}
                     >
                     {col.sortKey ? (
                       <SortLabel
@@ -274,16 +286,6 @@ export default function TeamPage() {
                       col.label
                     )}
                     </HeaderCell>
-                    {col.filter && (
-                      <ColumnFilter
-                        theme={t}
-                        label={col.label}
-                        type={col.filter.type}
-                        placeholder={col.filter.placeholder}
-                        value={filters[col.filterKey] || ""}
-                        onCommit={(v) => handleFilter(col.filterKey, v)}
-                      />
-                    )}
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />
                     )}
