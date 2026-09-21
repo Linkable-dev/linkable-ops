@@ -186,7 +186,13 @@ export function prospectingRoutes() {
     // invite them. Without this a creator found by search shows invite / hold
     // / hide, somebody clicks invite, and nothing happens - ever, and with
     // nothing anywhere saying why.
-    const creators = (data || []).map((c) => ({ ...c, blocked: inviteBlockedReason(c) }));
+    const creators = (data || []).map((c) => ({
+      ...c,
+      blocked: inviteBlockedReason(c),
+      // Which of the two invites they would get, so the weaker one is never
+      // a surprise.
+      invite: c.example_brand && c.example_post_url ? "warm" : "cold",
+    }));
     res.json({ creators, total: count ?? (data || []).length });
   });
 
@@ -197,13 +203,12 @@ export function prospectingRoutes() {
     if (["hold", "hide"].includes(c.decision)) return null;   // that is the point of holding
     if (c.status !== "qualified") return "not qualified yet - run creators qualify";
     if (!c.contact_email) return "no email in their bio";
-    // The invite opens "saw your post about X". Without an X there is nothing
-    // true to say, and it becomes the mailshot this was built not to be.
-    if (!c.example_brand || !c.example_post_url) {
-      return c.source === "influencers_club"
-        ? "found by search, so we have not seen them post about a brand - the invite has no true opening line"
-        : "no observed post to open with";
-    }
+    // A creator with no observed post is not blocked any more - they get the
+    // cold sequence, which opens by saying we were looking for creators in
+    // their niche, because we were. Worth saying which one they will get:
+    // the cold email is the weaker of the two and it should be obvious when
+    // one is about to go.
+    if (!c.example_brand || !c.example_post_url) return null;
     return null;
   }
 
