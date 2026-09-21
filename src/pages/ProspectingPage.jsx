@@ -44,6 +44,17 @@ const DECISIONS = [
 
 const PAGE_SIZE = 50;
 
+// "Tier A (11)" rather than a tile saying 11 somewhere else on the page. A
+// count is most useful attached to the thing it counts, where it also tells you
+// whether a filter is worth clicking before you click it.
+function withCounts(options, counts) {
+  if (!counts) return options;
+  return options.map((o) => {
+    const n = o.value ? counts[o.value] : null;
+    return n ? { ...o, label: `${o.label} (${n})` } : o;
+  });
+}
+
 export default function ProspectingPage() {
   const { theme } = useTheme();
   const [leads, setLeads] = useState([]);
@@ -128,9 +139,6 @@ export default function ProspectingPage() {
         </p>
       </div>
 
-
-      <Campaigns theme={theme} />
-
       {problem && (
         <Card>
           <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
@@ -150,11 +158,11 @@ export default function ProspectingPage() {
         }}>
           <div style={{ width: 150 }}>
             <Select value={tier} onChange={(v) => { setTier(v); setPage(0); }}
-                    options={TIERS} ariaLabel="Tier" size="sm" />
+                    options={withCounts(TIERS, stats?.byTier)} ariaLabel="Tier" size="sm" />
           </div>
-          <div style={{ width: 150 }}>
+          <div style={{ width: 170 }}>
             <Select value={decision} onChange={(v) => { setDecision(v); setPage(0); }}
-                    options={DECISIONS} ariaLabel="Decision" size="sm" />
+                    options={withCounts(DECISIONS, stats?.byDecision)} ariaLabel="Decision" size="sm" />
           </div>
           <input
             value={q}
@@ -194,8 +202,15 @@ export default function ProspectingPage() {
                     }
                   />
                 </th>
-                {["Tier", "Brand", "Creators", "Affiliate app", "Email", "Decision", ""].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 500 }}>{h}</th>
+                {[
+                  ["Tier", "left"], ["Brand", "left"], ["Creators", "right"],
+                  ["Affiliate app", "left"], ["Email", "left"],
+                  ["Decision", "left"], ["Actions", "left"],
+                ].map(([h, align]) => (
+                  <th key={h} style={{
+                    padding: "8px 10px", textAlign: align, fontWeight: 500,
+                    whiteSpace: "nowrap",
+                  }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -236,6 +251,11 @@ export default function ProspectingPage() {
           onPageChange={setPage}
         />
       </Card>
+
+      {/* Below the leads, deliberately. This page is for the decision, and the
+          decision is the table: campaigns are what produced it, which is
+          context rather than the job. */}
+      <Campaigns theme={theme} />
 
       <p style={{ color: theme.textMuted, fontSize: 12, margin: 0 }}>
         Leads are produced by the linkable-prospector pipeline, which runs outside this app
@@ -457,13 +477,22 @@ function Labelled({ label, width, theme, children }) {
   );
 }
 
+/**
+ * Three numbers, not five.
+ *
+ * Tier A and Tier B were two of them, and both were already a column in the
+ * table and an option in the tier filter - so the page said the same thing
+ * three times before showing a single lead. They are counts on the filter now,
+ * where they are useful as a label rather than as a headline.
+ *
+ * What is left is the three that describe work: how many could be written to,
+ * how many nobody has ruled on, how many have gone.
+ */
 function StatTiles({ stats, loading, theme }) {
   const tiles = [
-    { label: "Tier A", value: stats?.byTier?.A ?? 0, hint: "creators, no tracking" },
-    { label: "Tier B", value: stats?.byTier?.B ?? 0, hint: "competitor installed" },
     { label: "Ready to contact", value: stats?.contactable ?? 0, hint: "routed, with an email, not held" },
-    { label: "Already sent", value: stats?.sent ?? 0, hint: "handed to Lemlist" },
     { label: "Undecided", value: stats?.byDecision?.pending ?? 0, hint: "waiting on a call" },
+    { label: "Already sent", value: stats?.sent ?? 0, hint: "handed to Lemlist" },
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
@@ -510,36 +539,89 @@ function LeadRow({ lead, theme, selected, onToggle, onOpen, onDecide, saving, ex
           {lead.domain || `@${lead.handle}`}
         </a>
       </td>
-      <td style={{ padding: "8px 10px", color: theme.text }}>
-        {lead.distinct_creators_90d ?? 0}
-        <span style={{ color: theme.textMuted, fontSize: 12 }}>
-          {" "}({(lead.creator_activity_score ?? 0).toFixed(2)})
-        </span>
-      </td>
-      <td style={{ padding: "8px 10px", color: theme.text }}>
-        {lead.affiliate_app && lead.affiliate_app !== "none" ? lead.affiliate_app : "—"}
-      </td>
-      <td style={{ padding: "8px 10px", color: lead.contact_email ? theme.text : theme.textMuted }}>
-        {lead.contact_email || "none found"}
-      </td>
-      <td style={{ padding: "8px 10px" }}>
-        <div style={{ display: "flex", gap: 4 }}>
-          {["send", "hold", "hide"].map((d) => (
-            <Btn
-              key={d}
-              variant={lead.decision === d ? "primary" : "secondary"}
-              disabled={saving}
-              onClick={() => onDecide(lead.handle, lead.decision === d ? "pending" : d)}
-            >
-              {d}
-            </Btn>
-          ))}
+      {/* Right-aligned and stacked: two numbers side by side in one cell read
+          as one number with a bracket after it, and neither could be compared
+          down the column. */}
+      <td style={{ padding: "6px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+        <div style={{ color: theme.text, fontVariantNumeric: "tabular-nums" }}>
+          {lead.distinct_creators_90d ?? 0}
+        </div>
+        <div style={{ color: theme.textMuted, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+          {(lead.creator_activity_score ?? 0).toFixed(2)}
         </div>
       </td>
-      <td style={{ padding: "8px 10px", textAlign: "right" }}>
-        <Btn variant="secondary" onClick={onOpen}>{expanded ? "Less" : "Details"}</Btn>
+      <td style={{ padding: "6px 10px", color: theme.text }}>
+        {lead.affiliate_app && lead.affiliate_app !== "none"
+          ? lead.affiliate_app
+          : <span style={{ color: theme.textMuted }}>none</span>}
+      </td>
+      <td style={{
+        padding: "6px 10px", maxWidth: 220, overflow: "hidden",
+        textOverflow: "ellipsis", whiteSpace: "nowrap",
+        color: lead.contact_email ? theme.text : theme.textMuted,
+      }} title={lead.contact_email || ""}>
+        {lead.contact_email || "none found"}
+      </td>
+      <td style={{ padding: "6px 10px" }}>
+        <Decision lead={lead} theme={theme} saving={saving} onDecide={onDecide} />
+      </td>
+      {/* Actions: header left, content grouped right. */}
+      <td style={{ padding: "6px 10px" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Btn variant="secondary" size="sm" onClick={onOpen}>
+            {expanded ? "Less" : "Details"}
+          </Btn>
+        </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Three small buttons instead of three large ones, and only the chosen one is
+ * filled.
+ *
+ * At full size this was three pill buttons on every row - eighty-one of them
+ * on a screen of twenty-seven leads - and they were the loudest thing on the
+ * page by a distance. The table became a wall of identical controls with the
+ * brands hidden between them, which is the opposite of what a page for
+ * deciding needs: you have to be able to read the row before you can decide
+ * anything about it.
+ *
+ * Clicking the current decision clears it back to undecided, which is why the
+ * chosen one stays a button rather than becoming a label.
+ */
+function Decision({ lead, theme, saving, onDecide }) {
+  const options = [
+    ["send", theme.success],
+    ["hold", theme.warning],
+    ["hide", theme.textMuted],
+  ];
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {options.map(([value, colour]) => {
+        const chosen = lead.decision === value;
+        return (
+          <Btn
+            key={value}
+            size="sm"
+            variant={chosen ? "solid" : "secondary"}
+            color={chosen ? colour : undefined}
+            disabled={saving}
+            title={chosen ? `${value} - click to undo` : `Mark ${value}`}
+            style={{
+              padding: "4px 12px", fontSize: 12,
+              // A row nobody has decided on should not look like three
+              // rejected options. Quiet until it means something.
+              opacity: chosen || lead.decision === "pending" || !lead.decision ? 1 : 0.5,
+            }}
+            onClick={() => onDecide(lead.handle, chosen ? "pending" : value)}
+          >
+            {value}
+          </Btn>
+        );
+      })}
+    </div>
   );
 }
 
