@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Skeleton } from "../components/ui/Skeleton";
+import { Btn } from "../components/ui/Button";
 
 /**
  * What came back after the send — the only page in GTM showing a fact rather
@@ -24,6 +25,10 @@ export default function ProspectingRepliesPage({ kind = "brand" }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState(null);
+  // Drafts are per reply and never stored: they exist for as long as somebody
+  // is looking at them. A saved draft is a draft somebody sends later without
+  // reading, which is the failure this is trying to avoid.
+  const [drafts, setDrafts] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,6 +43,19 @@ export default function ProspectingRepliesPage({ kind = "brand" }) {
   }, [kind]);
 
   useEffect(() => { load(); }, [load]);
+
+  const draft = useCallback(async (activityId) => {
+    setDrafts((d) => ({ ...d, [activityId]: { loading: true } }));
+    try {
+      const out = await api.draftProspectingReply(activityId);
+      setDrafts((d) => ({ ...d, [activityId]: out }));
+    } catch (err) {
+      setDrafts((d) => ({
+        ...d,
+        [activityId]: { error: err?.hint || err?.message || "could not draft" },
+      }));
+    }
+  }, []);
 
   const f = data?.funnel || {};
   const replied = (f.replied || 0) + (f.interested || 0);
@@ -123,6 +141,13 @@ export default function ProspectingRepliesPage({ kind = "brand" }) {
                   </td>
                   <td style={{ padding: "8px 12px", color: theme.textMuted }}>
                     {e.preview || e.subject || "—"}
+                    {TONE[e.event] === "good" && (
+                      <DraftBlock
+                        theme={theme}
+                        state={drafts[e.activity_id]}
+                        onDraft={() => draft(e.activity_id)}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -161,5 +186,49 @@ function Pill({ event, theme }) {
     }}>
       {String(event).replace("_", " ")}
     </span>
+  );
+}
+
+
+// Only offered on a reply somebody actually wrote something in, and only for
+// the ones worth answering. A bounce has nobody on the other end.
+function DraftBlock({ state, onDraft, theme }) {
+  if (!state) {
+    return (
+      <div style={{ marginTop: 6 }}>
+        <Btn onClick={onDraft} style={{ fontSize: 12, padding: "3px 8px" }}>
+          Draft a reply
+        </Btn>
+      </div>
+    );
+  }
+  if (state.loading) {
+    return <div style={{ marginTop: 6 }}><Skeleton style={{ height: 40 }} /></div>;
+  }
+  if (state.error) {
+    return (
+      <div style={{ marginTop: 6, color: "#dc2626", fontSize: 12 }}>{state.error}</div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{
+        whiteSpace: "pre-wrap",
+        background: theme.bg,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 6,
+        padding: 10,
+        color: theme.text,
+        fontSize: 13,
+      }}>{state.draft}</div>
+      {state.issues?.length ? (
+        <div style={{ color: "#b45309", fontSize: 11, marginTop: 4 }}>
+          Reads like a machine wrote it: {state.issues.join(", ")}
+        </div>
+      ) : null}
+      <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 4 }}>
+        A draft. Nothing here sends it — copy it into Lemlist once you have read it.
+      </div>
+    </div>
   );
 }

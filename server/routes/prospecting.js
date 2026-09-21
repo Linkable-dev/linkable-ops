@@ -14,6 +14,8 @@
 
 import express from "express";
 import { supabase } from "../lib/supabase.js";
+import { claudeMessage, cachedSystem } from "../lib/anthropic.js";
+import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
 
 const TABLE = "prospector_leads";
 const CAMPAIGNS = "prospector_campaigns";
@@ -296,6 +298,109 @@ export function prospectingRoutes() {
       },
       contacted: contacted.slice(0, 200),
     });
+  });
+
+  // --- drafting a reply ----------------------------------------------------
+  //
+  // Drafts only. Nothing here sends: the whole pipeline hands sending to
+  // Lemlist, and a reply to a real person is exactly the wrong place to make
+  // the first exception. The draft is shown, copied by a human, and sent by a
+  // human who has read it.
+  //
+  // It reuses `claudeMessage` and the style sanitiser the AI inbox already
+  // uses, so a drafted reply sounds like the rest of the outbound rather than
+  // like a second system that learned English separately.
+
+  // Whoever the Lemlist mailbox sends as. Not a guess, and not a variable the
+  // model gets to fill in.
+  const SENDER_NAME = process.env.PROSPECTOR_SENDER_NAME || "Federico";
+
+  const REPLY_SYSTEM = [
+    "You draft short replies to brands and creators who answered a cold email",
+    "from Linkable, a Shopify app for creator affiliate tracking and payouts.",
+    "",
+    "Rules:",
+    "- Answer the question they actually asked. If they asked nothing, say the",
+    "  one useful next thing and stop.",
+    "- Short sentences. Contractions. One idea per paragraph.",
+    "- No em dashes. No 'I hope this finds you well', no 'reach out', no",
+    "  'leverage', 'seamless' or 'exciting opportunity'.",
+    "- Never invent a number, a feature, a price or a case study. If you do not",
+    "  know something, say you will find out.",
+    "- If they said no, accept it in one line and do not sell. Do not ask why.",
+    // Told explicitly, because "sign off with a first name" without saying
+    // whose makes the model pick one: a draft signed itself "Tolu", which is
+    // the handle of a creator mentioned in the context, and another invented
+    // "Jamie". A name is a fact like any other and is not to be guessed.
+    `- Sign off with exactly this name and nothing else: ${SENDER_NAME}`,
+    "- Never sign off as anyone else, and never use a name that appears in the",
+    "  context below - those are the people we are writing to, not us.",
+    "- Plain text. No markdown, no bullet lists, no subject line.",
+  ].join("\n");
+
+  router.post("/replies/:activityId/draft", async (req, res) => {
+    const { data: event, error } = await supabase
+      .from(EVENTS)
+      .select("activity_id,kind,handle,email,event,subject,preview,campaign_name")
+      .eq("activity_id", req.params.activityId)
+      .maybeSingle();
+    if (error) return handleError(res, error, "loading the reply");
+    if (!event) return res.status(404).json({ error: "no such reply" });
+    if (!event.preview) {
+      return res.status(422).json({
+        error: "there is nothing to reply to",
+        hint: "Lemlist only stores the first line of a reply, and this one is empty.",
+      });
+    }
+
+    // What we know about them, so the draft can be specific rather than
+    // generically friendly. Missing context is left out rather than guessed.
+    const table = event.kind === "creator" ? CREATORS : TABLE;
+    const columns = event.kind === "creator"
+      ? "handle,full_name,tier,niche,followers,example_brand,brands_posted_about"
+      : "handle,brand_name,domain,tier,affiliate_app,top_creators,distinct_creators_90d";
+    const { data: who } = await supabase
+      .from(table).select(columns).eq("handle", event.handle).maybeSingle();
+
+    const context = Object.entries(who || {})
+      .filter(([, v]) => v !== null && v !== "" && v !== 0)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
+
+    try {
+      const out = await claudeMessage({
+        model: "claude-sonnet-4-6",
+        system: cachedSystem(REPLY_SYSTEM),
+        maxTokens: 400,
+        temperature: 0.7,
+        messages: [{
+          role: "user",
+          content: [
+            `They are a ${event.kind}. What we know:`,
+            context || "(nothing beyond their reply)",
+            "",
+            `Our email's subject was: ${event.subject || "(unknown)"}`,
+            `Their reply (Lemlist stores only the opening): "${event.preview}"`,
+            "",
+            "Draft the reply.",
+          ].join("\n"),
+        }],
+      });
+      const body = sanitizeStyle(out.text);
+      res.json({
+        draft: body,
+        // Surfaced rather than hidden: a draft that trips the house style
+        // rules is still worth showing, with the reason it is suspect.
+        issues: findStyleIssues(body),
+        replyingTo: event.preview,
+      });
+    } catch (err) {
+      const missingKey = /ANTHROPIC_API_KEY/.test(err?.message || "");
+      res.status(missingKey ? 503 : 500).json({
+        error: missingKey ? "drafting is not configured" : "could not draft a reply",
+        hint: missingKey ? "ANTHROPIC_API_KEY is not set on the ops server." : err?.message,
+      });
+    }
   });
 
   // --- campaigns ----------------------------------------------------------
