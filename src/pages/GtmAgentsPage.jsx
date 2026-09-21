@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
@@ -8,6 +8,9 @@ import { Skeleton, SkeletonListRows, SkeletonTableRows } from "../components/ui/
 import { Pagination } from "../components/ui/Pagination";
 import {
   useColumnWidths,
+  SortLabel,
+  nextSort,
+  ColumnFilter,
   ResizeHandle,
   useColumnOrder,
   DragHandle,
@@ -69,17 +72,37 @@ function when(raw) {
 // are fixed — nothing useful comes from dragging a toggle or a button group.
 const GTM_AGENT_COLUMNS = [
   { key: "expand", label: "", width: 28, resizable: false },
-  { key: "agent", label: "Agent", width: 260 },
-  { key: "audience", label: "Audience", width: 110 },
-  { key: "mode", label: "Mode", width: 110 },
-  { key: "state", label: "State", width: 140 },
-  { key: "contacted", label: "Contacted", width: 110, right: true },
-  { key: "replied", label: "Replied", width: 110, right: true },
-  { key: "daily_cap", label: "Per day", width: 90, right: true },
-  { key: "last_did", label: "Last did", width: 110 },
-  { key: "next", label: "Next", width: 100 },
+  { key: "agent", label: "Agent", width: 260, sort: "asc", fill: true,
+    filter: { type: "text", placeholder: "Agent or campaign…" } },
+  { key: "audience", label: "Audience", width: 110, sort: "asc",
+    filter: { type: "select", options: ["brand", "influencer"] } },
+  { key: "mode", label: "Mode", width: 110, sort: "asc", filter: { type: "text", placeholder: "Mode…" } },
+  { key: "state", label: "State", width: 140, sort: "asc", filter: { type: "text", placeholder: "State…" } },
+  { key: "contacted", label: "Contacted", width: 110, right: true, sort: "desc", filter: { type: "number" } },
+  { key: "replied", label: "Replied", width: 110, right: true, sort: "desc", filter: { type: "number" } },
+  { key: "daily_cap", label: "Per day", width: 90, right: true, sort: "desc", filter: { type: "number" } },
+  { key: "last_did", label: "Last did", width: 110, sort: "desc" },
+  { key: "next", label: "Next", width: 100, sort: "asc" },
   { key: "actions", label: "", width: 230, resizable: false },
 ];
+// What each column is worth when it is sorted or filtered. The cells render
+// composites - a name with a campaign link under it, "3/50" for contacted - so
+// neither sort nor filter can read the cell; they read this.
+function agentValue(col, a) {
+  switch (col) {
+    case "agent": return `${a.name || ""} ${a.email_campaigns?.name || ""}`.trim();
+    case "audience": return a.audience_type || "";
+    case "mode": return a.mode || "";
+    case "state": return a.status || "";
+    case "contacted": return a.contacted ?? 0;
+    case "replied": return a.replied ?? 0;
+    case "daily_cap": return a.daily_cap ?? 0;
+    case "last_did": return a.last_event_at || "";
+    case "next": return a.next_action_at || "";
+    default: return "";
+  }
+}
+
 const GTM_AGENT_DEFAULT_WIDTHS = Object.fromEntries(GTM_AGENT_COLUMNS.map((c) => [c.key, c.width]));
 // The chevron and the button group are controls, not data — pinned at their
 // original ends rather than draggable into the middle of the table.
@@ -226,11 +249,46 @@ export default function GtmAgentsPage() {
   });
 
   const { widths, startResize, resetWidth } = useColumnWidths("gtm-agents", GTM_AGENT_DEFAULT_WIDTHS);
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
+  const [colFilters, setColFilters] = useState({});
+  const handleSort = (colKey, defaultDir) => setSort((cur) => nextSort(cur, colKey, defaultDir));
+  const setColFilter = (key, value) =>
+    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
   const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder(
     "gtm-agents",
     GTM_AGENT_COLUMNS,
     GTM_AGENT_FIXED_KEYS,
   );
+
+  // Sorted and filtered here rather than on the server: this list arrives
+  // whole, so a round trip would be a slower answer to a question the page can
+  // already answer. The two tables that paginate do it server-side instead,
+  // because there a page-local sort would only order the rows on screen.
+  const visibleAgents = useMemo(() => {
+    let rows = agents;
+    for (const [key, raw] of Object.entries(colFilters)) {
+      if (!raw) continue;
+      const term = String(raw).toLowerCase();
+      const numeric = term.match(/^(gte|lte|gt|lt|eq|ne):(.+)$/);
+      rows = rows.filter((a) => {
+        const v = agentValue(key, a);
+        if (numeric) {
+          const n = Number(v), t = Number(numeric[2]);
+          if (Number.isNaN(n) || Number.isNaN(t)) return true;
+          return { gte: n >= t, lte: n <= t, gt: n > t, lt: n < t,
+                   eq: n === t, ne: n !== t }[numeric[1]];
+        }
+        return String(v).toLowerCase().includes(term);
+      });
+    }
+    if (!sort.sortBy) return rows;
+    const dir = sort.sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((x, y) => {
+      const a = agentValue(sort.sortBy, x), b = agentValue(sort.sortBy, y);
+      if (typeof a === "number" && typeof b === "number") return (a - b) * dir;
+      return String(a).localeCompare(String(b)) * dir;
+    });
+  }, [agents, colFilters, sort.sortBy, sort.sortDir]);
 
   const load = useCallback(
     () =>
@@ -600,8 +658,29 @@ export default function GtmAgentsPage() {
                       grip={!GTM_AGENT_FIXED_KEYS.includes(col.key) && (
                         <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
                       )}
+                      trailing={col.filter && (
+                        <ColumnFilter
+                          theme={theme}
+                          label={col.label}
+                          type={col.filter.type}
+                          options={col.filter.options}
+                          placeholder={col.filter.placeholder}
+                          value={colFilters[col.key] || ""}
+                          onCommit={(v) => setColFilter(col.key, v)}
+                        />
+                      )}
                     >
-                      {col.label}
+                      {col.sort ? (
+                        <SortLabel
+                          theme={theme}
+                          label={col.label}
+                          colKey={col.key}
+                          sortBy={sort.sortBy}
+                          sortDir={sort.sortDir}
+                          defaultDir={col.sort}
+                          onSort={handleSort}
+                        />
+                      ) : col.label}
                     </HeaderCell>
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
@@ -613,7 +692,7 @@ export default function GtmAgentsPage() {
             <tbody>
               {loading && <SkeletonTableRows rows={4} cols={orderedColumns.length} />}
 
-              {!loading && agents.length === 0 && (
+              {!loading && visibleAgents.length === 0 && (
                 <tr>
                   <td style={{ ...td, color: theme.textMuted }} colSpan={orderedColumns.length}>
                     No agents yet. One points at an existing campaign and decides when it runs.
@@ -622,7 +701,7 @@ export default function GtmAgentsPage() {
               )}
 
               {!loading &&
-                agents.map((a) => (
+                visibleAgents.map((a) => (
                   <Fragment key={a.id}>
                     <tr>
                       {orderedColumns.map((col) => (
