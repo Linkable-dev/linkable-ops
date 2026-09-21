@@ -124,6 +124,10 @@ export default function CreatorsGtmPage() {
         </Card>
       )}
 
+      {/* Above the counts, because finding creators is the job and the counts
+          describe what finding them produced. */}
+      <FindCreators theme={theme} onAdded={load} />
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         {tiles.map((t) => (
           <Card key={t.label}>
@@ -137,8 +141,6 @@ export default function CreatorsGtmPage() {
           </Card>
         ))}
       </div>
-
-      <FindCreators theme={theme} onAdded={load} />
 
       <Card>
         <div style={{ display: "flex", gap: 10, padding: 12, flexWrap: "wrap",
