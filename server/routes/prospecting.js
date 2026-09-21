@@ -19,6 +19,7 @@ const TABLE = "prospector_leads";
 const CAMPAIGNS = "prospector_campaigns";
 const RUNS = "prospector_campaign_runs";
 const CREATORS = "prospector_creators";
+const EVENTS = "prospector_outreach_events";
 const DECISIONS = ["pending", "send", "hold", "hide"];
 
 // Columns the list needs. Kept explicit rather than select(*) so adding a
@@ -240,6 +241,60 @@ export function prospectingRoutes() {
           : "no observed post to open with",
       })),
       counts: { queued: queued.length, invited: invited.length, blocked: blocked.length },
+    });
+  });
+
+  // --- replies -------------------------------------------------------------
+  //
+  // What came back after the send, for one audience. Read-only: unlike a lead's
+  // `decision`, there is nothing here for a person to set, because a reply is
+  // not an opinion. The pipeline writes these rows and nothing in this app
+  // does.
+
+  router.get("/replies", async (req, res) => {
+    const kind = req.query.kind === "creator" ? "creator" : "brand";
+    const table = kind === "creator" ? CREATORS : TABLE;
+    const nameColumn = kind === "creator" ? "full_name" : "brand_name";
+
+    const [events, funnel, waiting] = await Promise.all([
+      supabase.from(EVENTS)
+        .select("activity_id,handle,email,event,campaign_name,subject,preview,interest_score,occurred_at")
+        .eq("kind", kind)
+        .in("event", ["replied", "interested", "not_interested", "bounced", "unsubscribed"])
+        .order("occurred_at", { ascending: false })
+        .limit(200),
+      // Counted over people, not events: a lead that opened four times is one
+      // open, and a funnel counted in events flatters itself.
+      supabase.from(EVENTS).select("handle,event").eq("kind", kind).limit(10000),
+      supabase.from(table).select(`handle,${nameColumn},contact_email,tier,pushed_at,reply_state`)
+        .not("pushed_at", "is", null)
+        .order("pushed_at", { ascending: false })
+        .limit(500),
+    ]);
+
+    if (events.error) return handleError(res, events.error, "loading replies");
+    if (funnel.error) return handleError(res, funnel.error, "loading the reply funnel");
+    if (waiting.error) return handleError(res, waiting.error, "loading who was contacted");
+
+    const people = {};
+    for (const row of funnel.data || []) {
+      (people[row.event] ||= new Set()).add(row.handle);
+    }
+    const counts = Object.fromEntries(
+      Object.entries(people).map(([event, set]) => [event, set.size])
+    );
+
+    const contacted = waiting.data || [];
+    res.json({
+      events: events.data || [],
+      funnel: {
+        ...counts,
+        contacted: contacted.length,
+        // Nobody has answered and nothing has failed: still out there.
+        silent: contacted.filter((r) => !r.reply_state ||
+          ["sent", "opened", "clicked"].includes(r.reply_state)).length,
+      },
+      contacted: contacted.slice(0, 200),
     });
   });
 
