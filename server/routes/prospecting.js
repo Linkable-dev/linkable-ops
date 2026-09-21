@@ -18,6 +18,7 @@ import { supabase } from "../lib/supabase.js";
 const TABLE = "prospector_leads";
 const CAMPAIGNS = "prospector_campaigns";
 const RUNS = "prospector_campaign_runs";
+const CREATORS = "prospector_creators";
 const DECISIONS = ["pending", "send", "hold", "hide"];
 
 // Columns the list needs. Kept explicit rather than select(*) so adding a
@@ -144,6 +145,72 @@ export function prospectingRoutes() {
       .select("handle,decision");
     if (error) return handleError(res, error, "saving decisions");
     res.json({ updated: (data || []).length });
+  });
+
+  // --- creators -----------------------------------------------------------
+  //
+  // The mirror of leads, and the same contract: the pipeline owns every column
+  // except decision and ops_note, and a decision here is what stops an invite
+  // going out rather than what hides a row.
+
+  const CREATOR_COLUMNS = [
+    "handle", "tier", "decision", "ops_note", "decided_at", "full_name",
+    "biography", "contact_email", "niche", "country", "followers", "posts_count",
+    "is_verified", "brands_posted_about", "brand_posts", "example_post_url",
+    "example_brand", "creator_score", "tier_reason", "status", "source",
+    "instagram_url", "pushed_at",
+  ].join(",");
+
+  router.get("/creators", async (req, res) => {
+    const { tier, decision, q, limit = 100, offset = 0 } = req.query;
+    let query = supabase.from(CREATORS).select(CREATOR_COLUMNS, { count: "exact" });
+    if (tier) query = query.in("tier", String(tier).split(","));
+    if (decision) query = query.in("decision", String(decision).split(","));
+    if (q) {
+      const term = `%${q}%`;
+      query = query.or(`handle.ilike.${term},full_name.ilike.${term},niche.ilike.${term}`);
+    }
+    query = query
+      .order("tier", { ascending: true, nullsFirst: false })
+      .order("creator_score", { ascending: false, nullsFirst: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+    const { data, error, count } = await query;
+    if (error) return handleError(res, error, "listing creators");
+    res.json({ creators: data || [], total: count ?? (data || []).length });
+  });
+
+  router.get("/creators/stats", async (_req, res) => {
+    const { data, error } = await supabase
+      .from(CREATORS).select("tier,decision,contact_email,brands_posted_about,pushed_at");
+    if (error) return handleError(res, error, "loading creator stats");
+    const rows = data || [];
+    const tally = (key) => rows.reduce((acc, r) => {
+      const k = r[key] || "unknown";
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+    res.json({
+      total: rows.length,
+      byTier: tally("tier"),
+      byDecision: tally("decision"),
+      contactable: rows.filter((r) => r.contact_email && !["hold", "hide"].includes(r.decision)).length,
+      multiBrand: rows.filter((r) => (r.brands_posted_about || 0) >= 2).length,
+      invited: rows.filter((r) => r.pushed_at).length,
+    });
+  });
+
+  router.post("/creators/:handle/decision", async (req, res) => {
+    const { decision, note } = req.body || {};
+    if (!DECISIONS.includes(decision)) {
+      return res.status(400).json({ error: `decision must be one of ${DECISIONS.join(", ")}` });
+    }
+    const { data, error } = await supabase
+      .from(CREATORS).update({ decision, ops_note: note ?? null })
+      .eq("handle", req.params.handle).select(CREATOR_COLUMNS).maybeSingle();
+    if (error) return handleError(res, error, "saving creator decision");
+    if (!data) return res.status(404).json({ error: "no such creator" });
+    res.json(data);
   });
 
   // --- campaigns ----------------------------------------------------------

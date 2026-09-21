@@ -49,6 +49,13 @@ export const api = {
       method: "POST", body: JSON.stringify({ handles, decision, note }),
     }),
 
+  getProspectingCreators: (params = {}) => request(`/prospecting/creators?${buildQs(params)}`),
+  getProspectingCreatorStats: () => request("/prospecting/creators/stats"),
+  setProspectingCreatorDecision: (handle, decision, note) =>
+    request(`/prospecting/creators/${encodeURIComponent(handle)}/decision`, {
+      method: "POST", body: JSON.stringify({ decision, note }),
+    }),
+
   getProspectingCampaigns: () => request("/prospecting/campaigns"),
   createProspectingCampaign: (data) =>
     request("/prospecting/campaigns", { method: "POST", body: JSON.stringify(data) }),
