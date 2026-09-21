@@ -53,6 +53,8 @@ export const api = {
   getProspectingCreatorStats: () => request("/prospecting/creators/stats"),
   getProspectingCreatorOutreach: () => request("/prospecting/creators/outreach"),
   getProspectingReplies: (kind) => request(`/prospecting/replies?kind=${kind}`),
+  getSentEmails: (handle, kind = "brand") =>
+    request(`/prospecting/leads/${encodeURIComponent(handle)}/emails?kind=${kind}`),
   planCreatorSearch: (prompt) =>
     request("/prospecting/creators/search/plan", { method: "POST", body: JSON.stringify({ prompt }) }),
   runCreatorSearch: (query, limit) =>

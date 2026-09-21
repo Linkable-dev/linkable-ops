@@ -668,7 +668,106 @@ function LeadDetail({ lead, theme }) {
             </div>
           ))}
         </div>
+        <SentEmails handle={lead.handle} pushed={Boolean(lead.pushed_at)} theme={theme} />
       </td>
     </tr>
+  );
+}
+
+
+/**
+ * The emails themselves: what went, what is still to come, and what each one
+ * actually said.
+ *
+ * Reconstructed rather than stored. Lemlist keeps only the first line of a
+ * message on an activity, but it keeps the template and this lead's variables,
+ * and putting one through the other is exactly what it did when it sent. A
+ * copy saved by us at push time would eventually disagree with the recipient's
+ * inbox, quietly, the first time anybody edited the sequence.
+ *
+ * It earned itself immediately: the first render showed the last email in the
+ * sequence opening with "there," rather than "Hi there," - a greeting lost
+ * when some broken fallback syntax came out, and one nobody would have seen
+ * for seven days.
+ */
+function SentEmails({ handle, pushed, theme }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      setData(await api.getSentEmails(handle, "brand"));
+    } catch (err) {
+      setError(err?.hint || err?.message || "could not read the emails");
+    } finally {
+      setLoading(false);
+    }
+  }, [handle]);
+
+  if (!pushed) {
+    return (
+      <div style={{ marginTop: 12, color: theme.textMuted, fontSize: 12 }}>
+        Nothing sent. Mark this lead <strong>send</strong> and the next tick hands it to Lemlist.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {!data && !loading && (
+        <Btn variant="secondary" size="sm" onClick={load}>Show the emails</Btn>
+      )}
+      {loading && <Skeleton style={{ height: 60 }} />}
+      {error && <div style={{ color: "#dc2626", fontSize: 12 }}>{error}</div>}
+      {data && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ color: theme.textMuted, fontSize: 12 }}>
+            {data.campaignName}{data.from ? ` · from ${data.from}` : ""} · to {data.email}
+          </div>
+          {data.note && <div style={{ color: theme.textMuted, fontSize: 12 }}>{data.note}</div>}
+          {(data.steps || []).map((step) => (
+            <div key={step.index} style={{
+              border: `1px solid ${theme.border}`, borderRadius: 8,
+              background: theme.surface, opacity: step.sentAt ? 1 : 0.6,
+            }}>
+              <div style={{
+                padding: "6px 10px", borderBottom: `1px solid ${theme.border}`,
+                display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12,
+              }}>
+                <span style={{ color: theme.text }}>Step {step.index}</span>
+                <span style={{ color: theme.textMuted }}>
+                  {step.sentAt
+                    ? `sent ${new Date(step.sentAt).toLocaleString()}`
+                    : `due day ${step.delayDays}`}
+                </span>
+                {step.events.filter((e) => e.type !== "emailsSent").map((e, i) => (
+                  <span key={i} style={{ color: theme.success }}>
+                    {e.type.replace("emails", "").toLowerCase()}
+                  </span>
+                ))}
+              </div>
+              {step.subject && (
+                <div style={{ padding: "6px 10px", color: theme.text, fontSize: 13, fontWeight: 500 }}>
+                  {step.subject}
+                </div>
+              )}
+              <div style={{
+                padding: "0 10px 10px", whiteSpace: "pre-wrap",
+                color: theme.textMuted, fontSize: 13,
+              }}>{step.body}</div>
+            </div>
+          ))}
+          {/* {{signature}} is resolved by Lemlist from the sending mailbox, so
+              it is the one thing here that cannot be shown: we do not have it. */}
+          <div style={{ color: theme.textMuted, fontSize: 11 }}>
+            Reconstructed from the sequence and this lead's variables. Any
+            {" "}<code>{"{{signature}}"}</code> above is filled in by Lemlist from the
+            sending mailbox, so it is the one part we cannot show.
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

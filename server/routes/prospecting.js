@@ -480,6 +480,103 @@ export function prospectingRoutes() {
     res.json({ added: rows.length });
   });
 
+  // --- what was actually sent ----------------------------------------------
+  //
+  // Lemlist stores only the first line of a message on an activity, so the
+  // sent email cannot simply be read back. It can be reconstructed exactly:
+  // the sequence holds the template, the activity holds that lead's variables,
+  // and substituting one into the other is what the provider itself did.
+  //
+  // Reconstructed rather than stored at push time on purpose. What a template
+  // renders to is a property of the template, and the template can change
+  // after a send - so a copy saved by us would eventually disagree with what
+  // the recipient has in their inbox, and quietly.
+
+  const LEMLIST_API = "https://api.lemlist.com/api";
+
+  async function lemlist(path, params = {}) {
+    const key = process.env.LEMLIST_KEY || process.env.LEMLIST_API_KEY;
+    if (!key) throw new Error("LEMLIST_KEY is not set");
+    const url = new URL(LEMLIST_API + path);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+    const resp = await fetch(url, {
+      headers: { Authorization: "Basic " + Buffer.from(":" + key).toString("base64") },
+    });
+    if (!resp.ok) throw new Error(`lemlist ${path} returned ${resp.status}`);
+    return resp.json();
+  }
+
+  // {{name}} -> the lead's value. A variable with no value is left visible as
+  // itself rather than blanked: a hole you can see is a bug report, and a hole
+  // you cannot is an email that went out reading "saw  posting about".
+  function render(template, variables) {
+    return String(template || "").replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (whole, name) => {
+      const value = variables?.[name];
+      return value === undefined || value === null || value === "" ? whole : String(value);
+    });
+  }
+
+  router.get("/leads/:handle/emails", async (req, res) => {
+    const kind = req.query.kind === "creator" ? "creator" : "brand";
+    const table = kind === "creator" ? CREATORS : TABLE;
+
+    const { data: lead, error } = await supabase
+      .from(table).select("handle,contact_email,pushed_at").eq("handle", req.params.handle).maybeSingle();
+    if (error) return handleError(res, error, "loading the lead");
+    if (!lead) return res.status(404).json({ error: "no such lead" });
+    if (!lead.pushed_at) {
+      return res.json({ pushed: false, steps: [], sent: [], email: lead.contact_email });
+    }
+
+    try {
+      // Every activity for this address, so we know which steps went and when,
+      // and so we have the variables the provider used.
+      const types = ["emailsSent", "emailsOpened", "emailsClicked", "emailsReplied"];
+      const pages = await Promise.all(types.map((t) => lemlist("/activities", { type: t, limit: 100 })));
+      const wanted = String(lead.contact_email || "").toLowerCase();
+      const mine = pages.flat().filter(
+        (a) => String(a.leadEmail || a.email || "").toLowerCase() === wanted
+      );
+      if (!mine.length) {
+        return res.json({ pushed: true, steps: [], sent: [], email: lead.contact_email,
+                          note: "Handed to Lemlist, nothing sent yet." });
+      }
+
+      const campaignId = mine[0].campaignId;
+      const variables = mine.find((a) => a.type === "emailsSent") || mine[0];
+      const sequences = await lemlist(`/campaigns/${campaignId}/sequences`);
+      const entry = Object.values(sequences)[0] || { steps: [] };
+
+      // Which step each activity belongs to, so a step can say "sent, opened".
+      const bySent = mine.filter((a) => a.type === "emailsSent");
+      const eventsFor = (stepId) => mine
+        .filter((a) => a.stepId === stepId)
+        .map((a) => ({ type: a.type, at: a.createdAt }));
+
+      const steps = (entry.steps || []).map((st) => {
+        const sentHere = bySent.find((a) => a.stepId === st._id);
+        return {
+          index: st.index,
+          delayDays: st.delay,
+          subject: render(st.subject, variables),
+          body: render(st.message, variables),
+          sentAt: sentHere?.createdAt || null,
+          events: eventsFor(st._id),
+        };
+      });
+
+      res.json({
+        pushed: true,
+        email: lead.contact_email,
+        campaignName: mine[0].campaignName || mine[0].name || null,
+        from: variables.sendUserMailboxProviderId || null,
+        steps,
+      });
+    } catch (err) {
+      res.status(502).json({ error: "could not read what was sent", hint: err?.message });
+    }
+  });
+
   // --- drafting a reply ----------------------------------------------------
   //
   // Drafts only. Nothing here sends: the whole pipeline hands sending to
