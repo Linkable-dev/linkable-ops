@@ -217,10 +217,15 @@ export default function CreatorsGtmPage() {
                       {c.contact_email || "none found"}
                     </td>
                     <td style={{ padding: "6px 10px" }}>
-                      {/* Small, and only the chosen one filled. Three full-size
-                          buttons a row made the table a wall of identical
-                          controls with the creators hidden between them. */}
-                      <div style={{ display: "flex", gap: 4 }}>
+                      {/* A creator who cannot be invited says so instead of
+                          offering a button that does nothing. */}
+                      {c.blocked && (
+                        <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 4 }}
+                             title={c.blocked}>
+                          {c.blocked.length > 46 ? c.blocked.slice(0, 46) + "…" : c.blocked}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 4, opacity: c.blocked ? 0.45 : 1 }}>
                         {[["send", "invite", theme.success],
                           ["hold", "hold", theme.warning],
                           ["hide", "hide", theme.textMuted]].map(([value, label, colour]) => {

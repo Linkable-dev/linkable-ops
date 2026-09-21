@@ -181,8 +181,31 @@ export function prospectingRoutes() {
 
     const { data, error, count } = await query;
     if (error) return handleError(res, error, "listing creators");
-    res.json({ creators: data || [], total: count ?? (data || []).length });
+
+    // Say why a creator cannot be invited, next to the button that would
+    // invite them. Without this a creator found by search shows invite / hold
+    // / hide, somebody clicks invite, and nothing happens - ever, and with
+    // nothing anywhere saying why.
+    const creators = (data || []).map((c) => ({ ...c, blocked: inviteBlockedReason(c) }));
+    res.json({ creators, total: count ?? (data || []).length });
   });
+
+  // The same conditions push_creators_to_lemlist applies, in the same order,
+  // so the page and the pipeline cannot disagree about who is sendable.
+  function inviteBlockedReason(c) {
+    if (c.pushed_at) return null;
+    if (["hold", "hide"].includes(c.decision)) return null;   // that is the point of holding
+    if (c.status !== "qualified") return "not qualified yet - run creators qualify";
+    if (!c.contact_email) return "no email in their bio";
+    // The invite opens "saw your post about X". Without an X there is nothing
+    // true to say, and it becomes the mailshot this was built not to be.
+    if (!c.example_brand || !c.example_post_url) {
+      return c.source === "influencers_club"
+        ? "found by search, so we have not seen them post about a brand - the invite has no true opening line"
+        : "no observed post to open with";
+    }
+    return null;
+  }
 
   router.get("/creators/stats", async (_req, res) => {
     const { data, error } = await supabase
