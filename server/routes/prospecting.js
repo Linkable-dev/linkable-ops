@@ -16,6 +16,7 @@ import express from "express";
 import { supabase } from "../lib/supabase.js";
 import { claudeMessage, cachedSystem } from "../lib/anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
+import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-club.js";
 
 const TABLE = "prospector_leads";
 const CAMPAIGNS = "prospector_campaigns";
@@ -298,6 +299,185 @@ export function prospectingRoutes() {
       },
       contacted: contacted.slice(0, 200),
     });
+  });
+
+  // --- searching for creators ----------------------------------------------
+  //
+  // Describe the creators you want; a model turns that into a provider filter
+  // set; you read it; then you run it.
+  //
+  // Two calls rather than one because only the second spends money. Discovery
+  // bills 0.01 credits per creator RETURNED, so a search is cheap enough to run
+  // often and not cheap enough to run by accident. The plan is free, and it is
+  // also the part most worth a human eye: which keywords go in a creator's bio
+  // is exactly where judgement still beats the model.
+  //
+  // The filter vocabulary is not invented here. It mirrors the Go runner in
+  // service-grpc/clients/influencers_club_discovery.go, which stays the
+  // authority, so the two systems cannot drift into different definitions of a
+  // good creator.
+
+  const PLAN_TOOL = {
+    name: "creator_search",
+    description: "A filter set for the Influencers Club discovery API.",
+    input_schema: {
+      type: "object",
+      properties: {
+        bio_keywords: {
+          type: "array", items: { type: "string" },
+          description: "Words likely to appear in the creator's own bio. The single most important field. 2-6 of them, lowercase, no hashtags.",
+        },
+        caption_keywords: {
+          type: "array", items: { type: "string" },
+          description: "Words likely in their post captions. Optional; leave empty unless the brief is about what they post rather than who they are.",
+        },
+        excluded_keywords: {
+          type: "array", items: { type: "string" },
+          description: "Bio words that disqualify, e.g. agency, management, shop.",
+        },
+        locations: {
+          type: "array", items: { type: "string" },
+          description: "Plain country or city names as a person writes them, e.g. 'United Kingdom'. Never ISO codes.",
+        },
+        languages: { type: "array", items: { type: "string" } },
+        followers_min: { type: "integer", description: "Default 3000: nobody below it has ever replied." },
+        followers_max: { type: "integer", description: "Default 150000. Above that they have an agent and a rate card." },
+        engagement_min: { type: "number", description: "Percent. Default 0.5." },
+        gender: { type: "string", enum: ["any", "male", "female"] },
+        has_done_brand_deals: { type: "boolean" },
+        promotes_affiliate_links: { type: "boolean" },
+        rationale: {
+          type: "string",
+          description: "One sentence: why these filters answer the brief, and what you assumed.",
+        },
+      },
+      required: ["bio_keywords", "rationale"],
+    },
+  };
+
+  const PLAN_SYSTEM = [
+    "You turn a plain-English brief into a creator search for Linkable, a Shopify",
+    "app that pays creators commission on what they sell.",
+    "",
+    "The bio keywords are the whole search. A creator writes their own bio, so",
+    "the words there are what they call themselves - 'ugc creator', 'skincare',",
+    "'mum of two' - not what a marketer would call them.",
+    "",
+    "Defaults, from what has actually replied: followers 3,000 to 150,000,",
+    "engagement at least 0.5%. Below 3k nobody replies; above 150k they have",
+    "representation and a rate card, and a self-serve affiliate platform is not",
+    "what they want.",
+    "",
+    "Do not invent a location the brief did not ask for, and do not set gender",
+    "unless the product is genuinely gender-specific.",
+  ].join("\n");
+
+  router.post("/creators/search/plan", async (req, res) => {
+    const prompt = String(req.body?.prompt || "").trim();
+    if (!prompt) return res.status(400).json({ error: "describe the creators you want" });
+    if (prompt.length > 2000) return res.status(400).json({ error: "that brief is too long" });
+
+    try {
+      const out = await claudeMessage({
+        model: "claude-sonnet-4-6",
+        system: cachedSystem(PLAN_SYSTEM),
+        maxTokens: 800,
+        temperature: 0.2,
+        tools: [PLAN_TOOL],
+        toolChoice: { type: "tool", name: "creator_search" },
+        messages: [{ role: "user", content: prompt }],
+      });
+      // claudeMessage returns tool_use blocks as .toolCalls [{ name, input }].
+      const call = (out.toolCalls || []).find((t) => t.name === "creator_search");
+      const query = call?.input;
+      if (!query) return res.status(502).json({ error: "the model did not return a plan" });
+
+      res.json({
+        query,
+        // Shown so a person can see what will actually be sent, including the
+        // parts the model does not get to choose.
+        filters: buildFilters(query),
+        configured: Boolean(discoveryKey()),
+        creditsPerCreator: COSTS.CREDITS_PER_CREATOR,
+      });
+    } catch (err) {
+      const missingKey = /ANTHROPIC_API_KEY/.test(err?.message || "");
+      res.status(missingKey ? 503 : 500).json({
+        error: missingKey ? "planning is not configured" : "could not plan the search",
+        hint: err?.message,
+      });
+    }
+  });
+
+  router.post("/creators/search/run", async (req, res) => {
+    const query = req.body?.query;
+    if (!query || typeof query !== "object") {
+      return res.status(400).json({ error: "run needs the plan from /plan" });
+    }
+    // Capped here rather than trusted from the client: this is the call that
+    // spends, and the ceiling belongs on the side that cannot be edited.
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 25, 1), 100);
+
+    if (!discoveryKey()) {
+      return res.status(503).json({
+        error: "creator search is not configured",
+        hint: "INFLUENCERS_CLUB_SOURCING_API_KEY is not set on the ops server.",
+      });
+    }
+
+    try {
+      const { creators, filters, creditsSpent, droppedLocations } = await discover(query, limit);
+
+      // Which of them we already have, so the list says what is new rather than
+      // showing forty creators of which thirty are already in the table.
+      const handles = creators.map((c) => c.handle).filter(Boolean);
+      const known = new Set();
+      if (handles.length) {
+        const { data } = await supabase.from(CREATORS).select("handle").in("handle", handles);
+        for (const row of data || []) known.add(row.handle);
+      }
+
+      res.json({
+        creators: creators.map((c) => ({ ...c, known: known.has(c.handle) })),
+        filters,
+        creditsSpent,
+        // Names the model produced that the provider does not recognise. Shown
+        // rather than swallowed: a dropped location is a much wider search
+        // than the one that was asked for.
+        droppedLocations,
+        newCount: creators.filter((c) => !known.has(c.handle)).length,
+      });
+    } catch (err) {
+      res.status(502).json({ error: "the provider refused the search", hint: err?.message });
+    }
+  });
+
+  router.post("/creators/search/add", async (req, res) => {
+    const found = Array.isArray(req.body?.creators) ? req.body.creators : [];
+    const prompt = String(req.body?.prompt || "").slice(0, 300);
+    if (!found.length) return res.status(400).json({ error: "nothing to add" });
+
+    // Discovery returns no email, so these arrive unqualified and without a
+    // tier. They are candidates, not leads: the pipeline decides what they are
+    // worth, and `decision` stays pending because nobody has looked at them.
+    const rows = found.slice(0, 200).map((c) => ({
+      handle: String(c.handle || "").replace(/^@/, "").toLowerCase(),
+      full_name: c.full_name || null,
+      followers: c.followers ?? null,
+      status: "discovered",
+      source: "influencers_club",
+      // What was asked for, kept with the row: six weeks later "why is this
+      // creator here" has an answer that is not a guess.
+      tier_reason: prompt ? `found by search: ${prompt}` : "found by search",
+      instagram_url: `https://www.instagram.com/${String(c.handle || "").replace(/^@/, "")}/`,
+      first_seen_at: new Date().toISOString(),
+    })).filter((r) => r.handle);
+
+    const { error } = await supabase
+      .from(CREATORS)
+      .upsert(rows, { onConflict: "handle", ignoreDuplicates: true });
+    if (error) return handleError(res, error, "adding the creators");
+    res.json({ added: rows.length });
   });
 
   // --- drafting a reply ----------------------------------------------------

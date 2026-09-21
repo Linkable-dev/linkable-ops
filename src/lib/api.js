@@ -53,6 +53,12 @@ export const api = {
   getProspectingCreatorStats: () => request("/prospecting/creators/stats"),
   getProspectingCreatorOutreach: () => request("/prospecting/creators/outreach"),
   getProspectingReplies: (kind) => request(`/prospecting/replies?kind=${kind}`),
+  planCreatorSearch: (prompt) =>
+    request("/prospecting/creators/search/plan", { method: "POST", body: JSON.stringify({ prompt }) }),
+  runCreatorSearch: (query, limit) =>
+    request("/prospecting/creators/search/run", { method: "POST", body: JSON.stringify({ query, limit }) }),
+  addFoundCreators: (creators, prompt) =>
+    request("/prospecting/creators/search/add", { method: "POST", body: JSON.stringify({ creators, prompt }) }),
   draftProspectingReply: (activityId) =>
     request(`/prospecting/replies/${encodeURIComponent(activityId)}/draft`, { method: "POST" }),
   setProspectingCreatorDecision: (handle, decision, note) =>
