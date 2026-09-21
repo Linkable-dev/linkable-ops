@@ -6,6 +6,18 @@ import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
+import {
+  ColumnFilter,
+  DragHandle,
+  HeaderCell,
+  ResizeHandle,
+  SortLabel,
+  fitWidths,
+  headerCellStyle,
+  nextSort,
+  useColumnOrder,
+  useColumnWidths,
+} from "../components/table/tableTools";
 
 /**
  * Outbound prospecting: Shopify brands that look like candidates to install
@@ -44,6 +56,34 @@ const DECISIONS = [
 
 const PAGE_SIZE = 50;
 
+// The columns, and everything true about each one in a single place: how wide,
+// which way a first sort click goes, and what kind of filter its popover
+// offers. The header and the body both read this, so a column cannot appear in
+// one and not the other.
+//
+// `select` is the leading checkbox and `actions` the trailing Details button:
+// both fixed, neither reorderable, because a table whose checkbox has wandered
+// into the middle is a table nobody can use.
+const COLUMNS = [
+  { key: "tier", label: "Tier", width: 90, sort: "asc",
+    filter: { type: "select", options: ["A", "B", "C", "reject"] } },
+  { key: "brand_name", label: "Brand", width: 240, sort: "asc", fill: true,
+    filter: { type: "text", placeholder: "Brand or domain…" } },
+  { key: "distinct_creators_90d", label: "Creators", width: 110, sort: "desc", right: true,
+    filter: { type: "number" } },
+  { key: "affiliate_app", label: "Affiliate app", width: 150, sort: "asc",
+    filter: { type: "text", placeholder: "App name…" } },
+  { key: "contact_email", label: "Email", width: 230, sort: "asc",
+    filter: { type: "text", placeholder: "Email…" } },
+  { key: "reply_state", label: "Reply", width: 110, sort: "desc",
+    filter: { type: "select", options: ["sent", "opened", "clicked", "replied", "bounced", "unsubscribed"] } },
+  { key: "decision", label: "Decision", width: 200 },
+  { key: "actions", label: "Actions", width: 120, resizable: false },
+];
+const FIXED_KEYS = ["actions"];
+const DEFAULT_WIDTHS = fitWidths(COLUMNS);
+const SELECT_COL_WIDTH = 36;
+
 // "Tier A (11)" rather than a tile saying 11 somewhere else on the page. A
 // count is most useful attached to the thing it counts, where it also tells you
 // whether a filter is worth clicking before you click it.
@@ -69,13 +109,34 @@ export default function ProspectingPage() {
   const [open, setOpen] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [saving, setSaving] = useState(null);
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
+  const [colFilters, setColFilters] = useState({});
+
+  const { widths, sized, startResize, resetWidth } =
+    useColumnWidths("prospector-leads", DEFAULT_WIDTHS, FIXED_KEYS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } =
+    useColumnOrder("prospector-leads", COLUMNS, FIXED_KEYS);
+
+  const handleSort = useCallback((colKey, defaultDir) => {
+    setSort((cur) => nextSort(cur, colKey, defaultDir));
+    setPage(0);
+  }, []);
+
+  const setColFilter = useCallback((key, value) => {
+    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
+    setPage(0);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setProblem(null);
     try {
       const [rows, s] = await Promise.all([
-        api.getProspectingLeads({ tier, decision, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+        api.getProspectingLeads({
+          tier, decision, q, filters: colFilters,
+          sortBy: sort.sortBy, sortDir: sort.sortDir,
+          limit: PAGE_SIZE, offset: page * PAGE_SIZE,
+        }),
         api.getProspectingStats(),
       ]);
       setLeads(rows.leads || []);
@@ -90,7 +151,7 @@ export default function ProspectingPage() {
     } finally {
       setLoading(false);
     }
-  }, [tier, decision, q, page]);
+  }, [tier, decision, q, page, sort.sortBy, sort.sortDir, colFilters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -127,6 +188,10 @@ export default function ProspectingPage() {
   }
 
   const allShown = leads.length > 0 && leads.every((l) => selected.has(l.handle));
+  // Never narrower than the sum of its columns, so a table dragged wide
+  // scrolls rather than squeezing every column back.
+  const totalWidth = SELECT_COL_WIDTH + orderedColumns.reduce(
+    (sum, c) => sum + (c.fill && !sized.has(c.key) ? 160 : (widths[c.key] || c.width)), 0);
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -192,42 +257,91 @@ export default function ProspectingPage() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{
+            width: "100%", minWidth: totalWidth, borderCollapse: "collapse",
+            fontSize: 13, tableLayout: "fixed",
+          }}>
+            {/* Fixed layout plus a colgroup: without it the browser sizes
+                columns from their content and every drag is argued with. */}
+            <colgroup>
+              <col style={{ width: SELECT_COL_WIDTH }} />
+              {orderedColumns.map((col) => (
+                <col key={col.key} style={col.fill && !sized.has(col.key)
+                  ? { minWidth: 160 }
+                  : { width: widths[col.key] || col.width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                <th style={{ padding: "8px 10px", width: 32 }}>
+                <th style={{ padding: "8px 10px" }}>
                   <input
                     type="checkbox"
                     checked={allShown}
+                    aria-label="Select every lead on this page"
                     onChange={() =>
                       setSelected(allShown ? new Set() : new Set(leads.map((l) => l.handle)))
                     }
                   />
                 </th>
-                {[
-                  ["Tier", "left"], ["Brand", "left"], ["Creators", "right"],
-                  ["Affiliate app", "left"], ["Email", "left"],
-                  ["Decision", "left"], ["Actions", "left"],
-                ].map(([h, align]) => (
-                  <th key={h} style={{
-                    padding: "8px 10px", textAlign: align, fontWeight: 500,
-                    whiteSpace: "nowrap",
-                  }}>{h}</th>
+                {orderedColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{
+                      padding: "8px 10px", fontWeight: 500,
+                      textAlign: col.right ? "right" : "left",
+                      ...headerCellStyle,
+                      background: dragOverKey === col.key ? theme.accentLight : undefined,
+                    }}
+                    {...dropTargetProps(col.key)}
+                  >
+                    <HeaderCell
+                      align={col.right ? "right" : "left"}
+                      grip={!FIXED_KEYS.includes(col.key) && (
+                        <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
+                      )}
+                      trailing={col.filter && (
+                        <ColumnFilter
+                          theme={theme}
+                          label={col.label}
+                          type={col.filter.type}
+                          options={col.filter.options}
+                          placeholder={col.filter.placeholder}
+                          value={colFilters[col.key] || ""}
+                          onCommit={(v) => setColFilter(col.key, v)}
+                        />
+                      )}
+                    >
+                      {col.sort ? (
+                        <SortLabel
+                          theme={theme}
+                          label={col.label}
+                          colKey={col.key}
+                          sortBy={sort.sortBy}
+                          sortDir={sort.sortDir}
+                          defaultDir={col.sort}
+                          onSort={handleSort}
+                        />
+                      ) : col.label}
+                    </HeaderCell>
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize}
+                                    resetWidth={resetWidth} theme={theme} />
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                // Same shape as the table it stands in for: eight columns,
-                // counting the checkbox, and as many rows as are on screen
-                // now. Six skeletons under a screen of twenty-seven collapsed
-                // the table on every sort and filter, and a seven-column
-                // skeleton in an eight-column table left every row a cell
-                // short of the right edge.
-                <SkeletonTableRows rows={Math.min(Math.max(leads.length, 4), PAGE_SIZE)} cols={8} />
+                // Same shape and size as the table it stands in for.
+                <SkeletonTableRows
+                  rows={Math.min(Math.max(leads.length, 4), PAGE_SIZE)}
+                  cols={orderedColumns.length + 1}
+                />
               ) : leads.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 24, color: theme.textMuted, textAlign: "center" }}>
+                  <td colSpan={orderedColumns.length + 1}
+                      style={{ padding: 24, color: theme.textMuted, textAlign: "center" }}>
                     {problem ? "—" : "No leads match these filters."}
                   </td>
                 </tr>
@@ -236,6 +350,7 @@ export default function ProspectingPage() {
                   <Fragment key={lead.handle}>
                     <LeadRow
                       lead={lead}
+                      columns={orderedColumns}
                       theme={theme}
                       selected={selected.has(lead.handle)}
                       onToggle={() => toggle(lead.handle)}
@@ -244,7 +359,9 @@ export default function ProspectingPage() {
                       saving={saving === lead.handle}
                       expanded={open === lead.handle}
                     />
-                    {open === lead.handle && <LeadDetail lead={lead} theme={theme} />}
+                    {open === lead.handle && (
+                      <LeadDetail lead={lead} theme={theme} span={orderedColumns.length + 1} />
+                    )}
                   </Fragment>
                 ))
               )}
@@ -252,9 +369,6 @@ export default function ProspectingPage() {
           </table>
         </div>
 
-        {/* Pagination counts from 1; the offset maths here counts from 0.
-            Passing one to the other unconverted showed "Showing -49-0 of 27"
-            and a page indicator of "0 / 1". */}
         <Pagination
           page={page + 1}
           pageSize={PAGE_SIZE}
@@ -515,7 +629,74 @@ function StatTiles({ stats, loading, theme }) {
   );
 }
 
-function LeadRow({ lead, theme, selected, onToggle, onOpen, onDecide, saving, expanded }) {
+/**
+ * One lead, rendered in whatever order the header is currently in.
+ *
+ * The cells used to be a fixed sequence of <td>s, which is fine until columns
+ * can be reordered - then the header says one thing and the body another. A
+ * single renderer keyed on the column means they cannot disagree.
+ */
+function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded }) {
+  switch (col.key) {
+    case "tier":
+      return <TierBadge tier={lead.tier} theme={theme} />;
+    case "brand_name":
+      return (
+        <>
+          <div style={{ color: theme.text, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {lead.brand_name || lead.handle}
+          </div>
+          <a
+            href={lead.domain ? `https://${lead.domain}` : lead.instagram_url}
+            target="_blank" rel="noreferrer"
+            style={{ color: theme.textMuted, fontSize: 12, textDecoration: "none" }}
+          >
+            {lead.domain || `@${lead.handle}`}
+          </a>
+        </>
+      );
+    case "distinct_creators_90d":
+      return (
+        <>
+          <div style={{ color: theme.text, fontVariantNumeric: "tabular-nums" }}>
+            {lead.distinct_creators_90d ?? 0}
+          </div>
+          <div style={{ color: theme.textMuted, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+            {(lead.creator_activity_score ?? 0).toFixed(2)}
+          </div>
+        </>
+      );
+    case "affiliate_app":
+      return lead.affiliate_app && lead.affiliate_app !== "none"
+        ? lead.affiliate_app
+        : <span style={{ color: theme.textMuted }}>none</span>;
+    case "contact_email":
+      return (
+        <span title={lead.contact_email || ""}
+              style={{ color: lead.contact_email ? theme.text : theme.textMuted }}>
+          {lead.contact_email || "none found"}
+        </span>
+      );
+    case "reply_state":
+      return lead.reply_state
+        ? <span style={{ color: theme.text }}>{lead.reply_state.replace("_", " ")}</span>
+        : <span style={{ color: theme.textMuted }}>—</span>;
+    case "decision":
+      return <Decision lead={lead} theme={theme} saving={saving} onDecide={onDecide} />;
+    case "actions":
+      return (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Btn variant="secondary" size="sm" onClick={onOpen}>
+            {expanded ? "Less" : "Details"}
+          </Btn>
+        </div>
+      );
+    default:
+      return lead[col.key] ?? null;
+  }
+}
+
+function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, saving, expanded }) {
   const held = lead.decision === "hold" || lead.decision === "hide";
   return (
     <tr
@@ -525,56 +706,25 @@ function LeadRow({ lead, theme, selected, onToggle, onOpen, onDecide, saving, ex
         background: selected ? theme.hoverBg : "transparent",
       }}
     >
-      <td style={{ padding: "8px 10px" }}>
-        <input type="checkbox" checked={selected} onChange={onToggle} />
+      <td style={{ padding: "6px 10px" }}>
+        <input type="checkbox" checked={selected} onChange={onToggle}
+               aria-label={`Select ${lead.brand_name || lead.handle}`} />
       </td>
-      <td style={{ padding: "8px 10px" }}>
-        <TierBadge tier={lead.tier} theme={theme} />
-      </td>
-      <td style={{ padding: "8px 10px" }}>
-        <div style={{ color: theme.text }}>{lead.brand_name || lead.handle}</div>
-        <a
-          href={lead.domain ? `https://${lead.domain}` : lead.instagram_url}
-          target="_blank" rel="noreferrer"
-          style={{ color: theme.textMuted, fontSize: 12, textDecoration: "none" }}
+      {columns.map((col) => (
+        <td
+          key={col.key}
+          style={{
+            padding: "6px 10px", color: theme.text,
+            textAlign: col.right ? "right" : "left",
+            // Clipped, so a long email cannot print itself over the next
+            // column when somebody drags this one narrow.
+            overflow: "hidden", whiteSpace: col.key === "brand_name" ? "normal" : "nowrap",
+            textOverflow: "ellipsis",
+          }}
         >
-          {lead.domain || `@${lead.handle}`}
-        </a>
-      </td>
-      {/* Right-aligned and stacked: two numbers side by side in one cell read
-          as one number with a bracket after it, and neither could be compared
-          down the column. */}
-      <td style={{ padding: "6px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
-        <div style={{ color: theme.text, fontVariantNumeric: "tabular-nums" }}>
-          {lead.distinct_creators_90d ?? 0}
-        </div>
-        <div style={{ color: theme.textMuted, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
-          {(lead.creator_activity_score ?? 0).toFixed(2)}
-        </div>
-      </td>
-      <td style={{ padding: "6px 10px", color: theme.text }}>
-        {lead.affiliate_app && lead.affiliate_app !== "none"
-          ? lead.affiliate_app
-          : <span style={{ color: theme.textMuted }}>none</span>}
-      </td>
-      <td style={{
-        padding: "6px 10px", maxWidth: 220, overflow: "hidden",
-        textOverflow: "ellipsis", whiteSpace: "nowrap",
-        color: lead.contact_email ? theme.text : theme.textMuted,
-      }} title={lead.contact_email || ""}>
-        {lead.contact_email || "none found"}
-      </td>
-      <td style={{ padding: "6px 10px" }}>
-        <Decision lead={lead} theme={theme} saving={saving} onDecide={onDecide} />
-      </td>
-      {/* Actions: header left, content grouped right. */}
-      <td style={{ padding: "6px 10px" }}>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <Btn variant="secondary" size="sm" onClick={onOpen}>
-            {expanded ? "Less" : "Details"}
-          </Btn>
-        </div>
-      </td>
+          {leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded })}
+        </td>
+      ))}
     </tr>
   );
 }
@@ -653,7 +803,7 @@ function TierBadge({ tier, theme }) {
  * now, full width and at the top; the short facts are a proper aligned list
  * underneath, label and value in fixed columns.
  */
-function LeadDetail({ lead, theme }) {
+function LeadDetail({ lead, theme, span = 9 }) {
   // The long ones read as prose and get their own line.
   const prose = [
     ["Why this tier", lead.tier_reason],
@@ -676,7 +826,7 @@ function LeadDetail({ lead, theme }) {
 
   return (
     <tr>
-      <td colSpan={8} style={{ background: theme.hoverBg, padding: "16px 20px" }}>
+      <td colSpan={span} style={{ background: theme.hoverBg, padding: "16px 20px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1100 }}>
 
           {prose.length > 0 && (

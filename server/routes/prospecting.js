@@ -54,8 +54,58 @@ export function prospectingRoutes() {
     return res.status(500).json({ error: error?.message || what });
   }
 
+  // Sorting reaches the database, not just the page.
+  //
+  // Both these lists paginate server-side, so a sort applied in the browser
+  // would reorder the fifty rows on screen and leave the other rows where they
+  // were - which reads as a broken sort rather than as a client-side one.
+  //
+  // The column is checked against a list rather than interpolated, because it
+  // goes into an ORDER BY.
+  function applySort(query, sortBy, sortDir, allowed, fallback) {
+    const dir = String(sortDir || "desc").toLowerCase() === "asc";
+    if (sortBy && allowed.includes(String(sortBy))) {
+      return query.order(String(sortBy), { ascending: dir, nullsFirst: false });
+    }
+    return fallback(query);
+  }
+
+  // Arbitrary per-column filters, as the shared table header produces them:
+  // `filter[col]=value`, where a value may be a plain term or an operator
+  // expression the header's popover built.
+  function applyColumnFilters(query, raw, allowed) {
+    for (const [col, value] of Object.entries(raw || {})) {
+      if (!allowed.includes(col) || value === "" || value == null) continue;
+      const text = String(value);
+      const m = text.match(/^(gte|lte|gt|lt|eq|ne|is|isnot|contains|between):(.*)$/);
+      if (!m) { query = query.ilike(col, `%${text}%`); continue; }
+      const [, op, rest] = m;
+      if (op === "between") {
+        const [a, b] = rest.split(",");
+        if (a) query = query.gte(col, a);
+        if (b) query = query.lte(col, b);
+      } else if (op === "contains") {
+        query = query.ilike(col, `%${rest}%`);
+      } else if (op === "is") {
+        query = rest === "null" ? query.is(col, null) : query.eq(col, rest);
+      } else if (op === "isnot") {
+        query = rest === "null" ? query.not(col, "is", null) : query.neq(col, rest);
+      } else {
+        query = query[op === "ne" ? "neq" : op](col, rest);
+      }
+    }
+    return query;
+  }
+
+  const LEAD_SORTABLE = [
+    "handle", "tier", "brand_name", "domain", "contact_email", "country",
+    "affiliate_app", "product_count", "creator_activity_score",
+    "distinct_creators_90d", "status", "decision", "pushed_at", "first_seen_at",
+    "reply_state",
+  ];
+
   router.get("/leads", async (req, res) => {
-    const { tier, decision, status, q, limit = 100, offset = 0 } = req.query;
+    const { tier, decision, status, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
     let query = supabase.from(TABLE).select(LIST_COLUMNS, { count: "exact" });
 
     if (tier) query = query.in("tier", String(tier).split(","));
@@ -67,12 +117,13 @@ export function prospectingRoutes() {
         `handle.ilike.${term},brand_name.ilike.${term},domain.ilike.${term},contact_email.ilike.${term}`
       );
     }
+    query = applyColumnFilters(query, req.query.filter, LEAD_SORTABLE);
 
-    // Tier first, then the strongest signal inside a tier.
-    query = query
-      .order("tier", { ascending: true, nullsFirst: false })
-      .order("creator_activity_score", { ascending: false, nullsFirst: false })
-      .range(Number(offset), Number(offset) + Number(limit) - 1);
+    query = applySort(query, sortBy, sortDir, LEAD_SORTABLE, (qy) =>
+      // Tier first, then the strongest signal inside a tier.
+      qy.order("tier", { ascending: true, nullsFirst: false })
+        .order("creator_activity_score", { ascending: false, nullsFirst: false })
+    ).range(Number(offset), Number(offset) + Number(limit) - 1);
 
     const { data, error, count } = await query;
     if (error) return handleError(res, error, "listing leads");
@@ -165,8 +216,14 @@ export function prospectingRoutes() {
     "instagram_url", "pushed_at",
   ].join(",");
 
+  const CREATOR_SORTABLE = [
+    "handle", "tier", "full_name", "contact_email", "niche", "country",
+    "followers", "posts_count", "brands_posted_about", "brand_posts",
+    "creator_score", "status", "decision", "source", "pushed_at", "reply_state",
+  ];
+
   router.get("/creators", async (req, res) => {
-    const { tier, decision, q, limit = 100, offset = 0 } = req.query;
+    const { tier, decision, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
     let query = supabase.from(CREATORS).select(CREATOR_COLUMNS, { count: "exact" });
     if (tier) query = query.in("tier", String(tier).split(","));
     if (decision) query = query.in("decision", String(decision).split(","));
@@ -174,10 +231,12 @@ export function prospectingRoutes() {
       const term = `%${q}%`;
       query = query.or(`handle.ilike.${term},full_name.ilike.${term},niche.ilike.${term}`);
     }
-    query = query
-      .order("tier", { ascending: true, nullsFirst: false })
-      .order("creator_score", { ascending: false, nullsFirst: false })
-      .range(Number(offset), Number(offset) + Number(limit) - 1);
+    query = applyColumnFilters(query, req.query.filter, CREATOR_SORTABLE);
+
+    query = applySort(query, sortBy, sortDir, CREATOR_SORTABLE, (qy) =>
+      qy.order("tier", { ascending: true, nullsFirst: false })
+        .order("creator_score", { ascending: false, nullsFirst: false })
+    ).range(Number(offset), Number(offset) + Number(limit) - 1);
 
     const { data, error, count } = await query;
     if (error) return handleError(res, error, "listing creators");

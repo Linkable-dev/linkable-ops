@@ -6,6 +6,18 @@ import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
+import {
+  ColumnFilter,
+  DragHandle,
+  HeaderCell,
+  ResizeHandle,
+  SortLabel,
+  fitWidths,
+  headerCellStyle,
+  nextSort,
+  useColumnOrder,
+  useColumnWidths,
+} from "../components/table/tableTools";
 
 /**
  * Creator GTM: people worth inviting onto Linkable.
@@ -51,6 +63,28 @@ function withCounts(options, counts) {
   });
 }
 
+// Same shape as the Brands table: one place that says what each column is,
+// read by both the header and the body so they cannot drift apart.
+const COLUMNS = [
+  { key: "tier", label: "Tier", width: 90, sort: "asc",
+    filter: { type: "select", options: ["A", "B", "C", "reject"] } },
+  { key: "handle", label: "Creator", width: 240, sort: "asc", fill: true,
+    filter: { type: "text", placeholder: "Handle or name…" } },
+  { key: "followers", label: "Followers", width: 120, sort: "desc", right: true,
+    filter: { type: "number" } },
+  { key: "brands_posted_about", label: "Brands", width: 110, sort: "desc", right: true,
+    filter: { type: "number" } },
+  { key: "contact_email", label: "Email", width: 230, sort: "asc",
+    filter: { type: "text", placeholder: "Email…" } },
+  { key: "niche", label: "Niche", width: 130, sort: "asc",
+    filter: { type: "text", placeholder: "Niche…" } },
+  { key: "source", label: "Found via", width: 140, sort: "asc",
+    filter: { type: "select", options: ["brand_mentions", "influencers_club"] } },
+  { key: "decision", label: "Decision", width: 220 },
+];
+const FIXED_KEYS = [];
+const DEFAULT_WIDTHS = fitWidths(COLUMNS);
+
 export default function CreatorsGtmPage() {
   const { theme } = useTheme();
   const [creators, setCreators] = useState([]);
@@ -64,12 +98,33 @@ export default function CreatorsGtmPage() {
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState(null);
 
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
+  const [colFilters, setColFilters] = useState({});
+
+  const { widths, sized, startResize, resetWidth } =
+    useColumnWidths("prospector-creators", DEFAULT_WIDTHS, FIXED_KEYS);
+  const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } =
+    useColumnOrder("prospector-creators", COLUMNS, FIXED_KEYS);
+
+  const handleSort = useCallback((colKey, defaultDir) => {
+    setSort((cur) => nextSort(cur, colKey, defaultDir));
+    setPage(0);
+  }, []);
+  const setColFilter = useCallback((key, value) => {
+    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
+    setPage(0);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setProblem(null);
     try {
       const [rows, s] = await Promise.all([
-        api.getProspectingCreators({ tier, decision, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+        api.getProspectingCreators({
+          tier, decision, q, filters: colFilters,
+          sortBy: sort.sortBy, sortDir: sort.sortDir,
+          limit: PAGE_SIZE, offset: page * PAGE_SIZE,
+        }),
         api.getProspectingCreatorStats(),
       ]);
       setCreators(rows.creators || []);
@@ -81,7 +136,7 @@ export default function CreatorsGtmPage() {
     } finally {
       setLoading(false);
     }
-  }, [tier, decision, q, page]);
+  }, [tier, decision, q, page, sort.sortBy, sort.sortDir, colFilters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -99,6 +154,9 @@ export default function CreatorsGtmPage() {
   // Three, not five. Tier A and Tier B were both already a column in the table
   // and an option in the tier filter, so the page said the same thing three
   // times before showing a single creator; those counts are on the filter now.
+  const totalWidth = orderedColumns.reduce(
+    (sum, c) => sum + (c.fill && !sized.has(c.key) ? 160 : (widths[c.key] || c.width)), 0);
+
   const tiles = [
     { label: "Reachable", value: stats?.contactable ?? 0, hint: "email, not held" },
     { label: "Posts about 2+", value: stats?.multiBrand ?? 0, hint: "doing it as a habit" },
@@ -169,22 +227,75 @@ export default function CreatorsGtmPage() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{
+            width: "100%", minWidth: totalWidth, borderCollapse: "collapse",
+            fontSize: 13, tableLayout: "fixed",
+          }}>
+            <colgroup>
+              {orderedColumns.map((col) => (
+                <col key={col.key} style={col.fill && !sized.has(col.key)
+                  ? { minWidth: 160 }
+                  : { width: widths[col.key] || col.width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
-                {["Tier", "Creator", "Followers", "Brands", "Email", "Decision"].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 500 }}>{h}</th>
+                {orderedColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    style={{
+                      padding: "8px 10px", fontWeight: 500,
+                      textAlign: col.right ? "right" : "left",
+                      ...headerCellStyle,
+                      background: dragOverKey === col.key ? theme.accentLight : undefined,
+                    }}
+                    {...dropTargetProps(col.key)}
+                  >
+                    <HeaderCell
+                      align={col.right ? "right" : "left"}
+                      grip={<DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />}
+                      trailing={col.filter && (
+                        <ColumnFilter
+                          theme={theme}
+                          label={col.label}
+                          type={col.filter.type}
+                          options={col.filter.options}
+                          placeholder={col.filter.placeholder}
+                          value={colFilters[col.key] || ""}
+                          onCommit={(v) => setColFilter(col.key, v)}
+                        />
+                      )}
+                    >
+                      {col.sort ? (
+                        <SortLabel
+                          theme={theme}
+                          label={col.label}
+                          colKey={col.key}
+                          sortBy={sort.sortBy}
+                          sortDir={sort.sortDir}
+                          defaultDir={col.sort}
+                          onSort={handleSort}
+                        />
+                      ) : col.label}
+                    </HeaderCell>
+                    {col.resizable !== false && (
+                      <ResizeHandle colKey={col.key} startResize={startResize}
+                                    resetWidth={resetWidth} theme={theme} />
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                // As many rows as are on screen, so a sort does not collapse
-                // the table and grow it back.
-                <SkeletonTableRows rows={Math.min(Math.max(creators.length, 4), PAGE_SIZE)} cols={6} />
+                <SkeletonTableRows
+                  rows={Math.min(Math.max(creators.length, 4), PAGE_SIZE)}
+                  cols={orderedColumns.length}
+                />
               ) : creators.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 24, color: theme.textMuted, textAlign: "center" }}>
+                  <td colSpan={orderedColumns.length}
+                      style={{ padding: 24, color: theme.textMuted, textAlign: "center" }}>
                     {problem ? "—" : "No creators match these filters."}
                   </td>
                 </tr>
@@ -193,61 +304,16 @@ export default function CreatorsGtmPage() {
                 return (
                   <tr key={c.handle} style={{ borderBottom: `1px solid ${theme.border}`,
                                               opacity: held ? 0.55 : 1 }}>
-                    <td style={{ padding: "8px 10px", color: theme.text }}>{c.tier}</td>
-                    <td style={{ padding: "8px 10px" }}>
-                      <a href={c.instagram_url} target="_blank" rel="noreferrer"
-                         style={{ color: theme.text, textDecoration: "none" }}>
-                        @{c.handle}
-                      </a>
-                      <div style={{ color: theme.textMuted, fontSize: 11 }}>
-                        {c.full_name || c.niche || ""}
-                      </div>
-                    </td>
-                    <td style={{ padding: "8px 10px", color: theme.text }}>
-                      {(c.followers || 0).toLocaleString()}
-                    </td>
-                    <td style={{ padding: "8px 10px", color: theme.text }}>
-                      {c.brands_posted_about}
-                      {c.example_brand && (
-                        <div style={{ color: theme.textMuted, fontSize: 11 }}>
-                          e.g. @{c.example_brand}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: "8px 10px",
-                                 color: c.contact_email ? theme.text : theme.textMuted }}>
-                      {c.contact_email || "none found"}
-                    </td>
-                    <td style={{ padding: "6px 10px" }}>
-                      {/* A creator who cannot be invited says so instead of
-                          offering a button that does nothing. */}
-                      {c.blocked && (
-                        <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 4 }}
-                             title={c.blocked}>
-                          {c.blocked.length > 46 ? c.blocked.slice(0, 46) + "…" : c.blocked}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: 4, opacity: c.blocked ? 0.45 : 1 }}>
-                        {[["send", "invite", theme.success],
-                          ["hold", "hold", theme.warning],
-                          ["hide", "hide", theme.textMuted]].map(([value, label, colour]) => {
-                          const chosen = c.decision === value;
-                          return (
-                            <Btn key={value}
-                                 size="sm"
-                                 variant={chosen ? "solid" : "secondary"}
-                                 color={chosen ? colour : undefined}
-                                 style={{ padding: "4px 12px", fontSize: 12,
-                                          opacity: chosen || !c.decision || c.decision === "pending" ? 1 : 0.5 }}
-                                 disabled={saving === c.handle}
-                                 title={chosen ? `${label} - click to undo` : `Mark ${label}`}
-                                 onClick={() => decide(c.handle, chosen ? "pending" : value)}>
-                              {label}
-                            </Btn>
-                          );
-                        })}
-                      </div>
-                    </td>
+                    {orderedColumns.map((col) => (
+                      <td key={col.key} style={{
+                        padding: "6px 10px", color: theme.text,
+                        textAlign: col.right ? "right" : "left",
+                        overflow: "hidden", textOverflow: "ellipsis",
+                        whiteSpace: col.key === "handle" ? "normal" : "nowrap",
+                      }}>
+                        {creatorCell(col, { c, theme, saving, decide })}
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
@@ -255,7 +321,6 @@ export default function CreatorsGtmPage() {
           </table>
         </div>
 
-        {/* Pagination counts from 1, the offset maths from 0. */}
         <Pagination page={page + 1} pageSize={PAGE_SIZE} total={total}
                     onPageChange={(n) => setPage(Math.max(0, n - 1))} />
       </Card>
@@ -436,4 +501,87 @@ function FindCreators({ theme, onAdded }) {
       </div>
     </Card>
   );
+}
+
+
+/**
+ * One creator's cells, keyed on the column rather than written in a fixed
+ * order, so reordering the header reorders the body with it.
+ */
+function creatorCell(col, { c, theme, saving, decide }) {
+  switch (col.key) {
+    case "tier":
+      return c.tier || "—";
+    case "handle":
+      return (
+        <>
+          <a href={c.instagram_url} target="_blank" rel="noreferrer"
+             style={{ color: theme.text, textDecoration: "none" }}>
+            @{c.handle}
+          </a>
+          <div style={{ color: theme.textMuted, fontSize: 11 }}>
+            {c.full_name || c.niche || ""}
+          </div>
+        </>
+      );
+    case "followers":
+      return <span style={{ fontVariantNumeric: "tabular-nums" }}>
+        {(c.followers || 0).toLocaleString()}
+      </span>;
+    case "brands_posted_about":
+      return (
+        <>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{c.brands_posted_about}</span>
+          {c.example_brand && (
+            <div style={{ color: theme.textMuted, fontSize: 11 }}>e.g. @{c.example_brand}</div>
+          )}
+        </>
+      );
+    case "contact_email":
+      return (
+        <span title={c.contact_email || ""}
+              style={{ color: c.contact_email ? theme.text : theme.textMuted }}>
+          {c.contact_email || "none found"}
+        </span>
+      );
+    case "niche":
+      return c.niche || <span style={{ color: theme.textMuted }}>—</span>;
+    case "source":
+      return <span style={{ color: theme.textMuted, fontSize: 12 }}>
+        {(c.source || "").replace("_", " ") || "—"}
+      </span>;
+    case "decision":
+      return (
+        <>
+          {/* A creator who cannot be invited says so rather than offering a
+              button that does nothing. */}
+          {c.blocked && (
+            <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 4 }} title={c.blocked}>
+              {c.blocked.length > 40 ? c.blocked.slice(0, 40) + "…" : c.blocked}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 4, opacity: c.blocked ? 0.45 : 1 }}>
+            {[["send", "invite", theme.success],
+              ["hold", "hold", theme.warning],
+              ["hide", "hide", theme.textMuted]].map(([value, label, colour]) => {
+              const chosen = c.decision === value;
+              return (
+                <Btn key={value} size="sm"
+                     variant={chosen ? "solid" : "secondary"}
+                     color={chosen ? colour : undefined}
+                     style={{ padding: "4px 12px", fontSize: 12,
+                              opacity: chosen || !c.decision || c.decision === "pending" ? 1 : 0.5 }}
+                     disabled={saving === c.handle}
+                     title={chosen ? `${label} - click to undo` : `Mark ${label}`}
+                     onClick={() => decide(c.handle, chosen ? "pending" : value)}>
+                  {label}
+                </Btn>
+              );
+            })}
+          </div>
+        </>
+      );
+    default:
+      return c[col.key] ?? null;
+  }
 }
