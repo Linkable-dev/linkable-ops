@@ -23,6 +23,8 @@ const AiCreatorsPage = lazy(() => import("./pages/AiCreatorsPage"));
 const ContentPage = lazy(() => import("./pages/ContentPage"));
 const ProspectingPage = lazy(() => import("./pages/ProspectingPage.jsx"));
 const CreatorsGtmPage = lazy(() => import("./pages/CreatorsGtmPage.jsx"));
+const GtmSection = lazy(() => import("./components/gtm/GtmSection.jsx").then(m => ({ default: m.GtmSection })));
+import { BRAND_TABS, CREATOR_TABS } from "./components/gtm/GtmSection.jsx";
 const GtmAgentsPage = lazy(() => import("./pages/GtmAgentsPage"));
 const TablePage = lazy(() => import("./pages/TablePage"));
 const TableAnalyticsPage = lazy(() => import("./pages/TableAnalyticsPage"));
@@ -59,10 +61,14 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/ops/costs" element={<CostsPage />} />
                     <Route path="/ops/ai-creators" element={<AiCreatorsPage />} />
                     <Route path="/ops/content" element={<ContentPage />} />
-                    <Route path="/ai/inbox" element={<AiInboxPage />} />
-                    <Route path="/ai/agents" element={<GtmAgentsPage />} />
-                    <Route path="/gtm/brands" element={<ProspectingPage />} />
-                    <Route path="/gtm/creators" element={<CreatorsGtmPage />} />
+                    <Route element={<GtmSection tabs={BRAND_TABS} />}>
+                      <Route path="/gtm/brands" element={<ProspectingPage />} />
+                      <Route path="/ai/agents" element={<GtmAgentsPage />} />
+                      <Route path="/ai/inbox" element={<AiInboxPage />} />
+                    </Route>
+                    <Route element={<GtmSection tabs={CREATOR_TABS} />}>
+                      <Route path="/gtm/creators" element={<CreatorsGtmPage />} />
+                    </Route>
                     <Route path="/ai/prospecting" element={<Navigate to="/gtm/brands" replace />} />
                     <Route path="/ai/campaigns/:id" element={<AiCampaignDetailPage />} />
                     <Route path="/users" element={<UsersPage />} />

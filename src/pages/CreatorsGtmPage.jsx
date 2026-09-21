@@ -6,7 +6,6 @@ import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
-import { GtmTabs } from "../components/gtm/GtmTabs";
 
 /**
  * Creator GTM: people worth inviting onto Linkable.
@@ -105,7 +104,6 @@ export default function CreatorsGtmPage() {
         </p>
       </div>
 
-      <GtmTabs tabs={[{ to: "/gtm/creators", label: "Find" }]} />
 
       {problem && (
         <Card>

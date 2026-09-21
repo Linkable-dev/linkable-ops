@@ -6,7 +6,6 @@ import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
-import { GtmTabs, BRAND_TABS } from "../components/gtm/GtmTabs";
 
 /**
  * Outbound prospecting: Shopify brands that look like candidates to install
@@ -129,7 +128,6 @@ export default function ProspectingPage() {
         </p>
       </div>
 
-      <GtmTabs tabs={BRAND_TABS} />
 
       <Campaigns theme={theme} />
 
@@ -297,11 +295,6 @@ function Campaigns({ theme }) {
           leads it was asked for or has spent what it was given.
         </div>
       )}
-      <div style={{ padding: "12px 14px", borderBottom: `1px solid ${theme.border}`,
-                    color: theme.textMuted, fontSize: 12 }}>
-        Campaigns — each has a goal and a budget, and stops itself when it has one or
-        has spent the other.
-      </div>
       {campaigns.length > 0 && (
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
