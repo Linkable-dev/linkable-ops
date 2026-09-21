@@ -213,6 +213,36 @@ export function prospectingRoutes() {
     res.json(data);
   });
 
+  router.get("/creators/outreach", async (_req, res) => {
+    const { data, error } = await supabase
+      .from(CREATORS)
+      .select("handle,full_name,tier,decision,contact_email,example_brand,example_post_url," +
+              "followers,brands_posted_about,pushed_at,status")
+      .order("pushed_at", { ascending: false, nullsFirst: false });
+    if (error) return handleError(res, error, "loading creator outreach");
+
+    const rows = data || [];
+    // The three states that matter, and the reason each one is in it.
+    const invited = rows.filter((r) => r.pushed_at);
+    const blocked = rows.filter((r) => !r.pushed_at && (
+      ["hold", "hide"].includes(r.decision) || !r.contact_email ||
+      !r.example_brand || !r.example_post_url
+    ));
+    const queued = rows.filter((r) => !r.pushed_at && !blocked.includes(r));
+
+    res.json({
+      queued: queued.slice(0, 100),
+      invited: invited.slice(0, 100),
+      blocked: blocked.slice(0, 100).map((r) => ({
+        ...r,
+        why: ["hold", "hide"].includes(r.decision) ? `held: ${r.decision}`
+          : !r.contact_email ? "no email"
+          : "no observed post to open with",
+      })),
+      counts: { queued: queued.length, invited: invited.length, blocked: blocked.length },
+    });
+  });
+
   // --- campaigns ----------------------------------------------------------
   //
   // A campaign reports `state` and a person sets `desired_state`. Two columns

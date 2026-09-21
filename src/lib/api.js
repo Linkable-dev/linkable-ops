@@ -51,6 +51,7 @@ export const api = {
 
   getProspectingCreators: (params = {}) => request(`/prospecting/creators?${buildQs(params)}`),
   getProspectingCreatorStats: () => request("/prospecting/creators/stats"),
+  getProspectingCreatorOutreach: () => request("/prospecting/creators/outreach"),
   setProspectingCreatorDecision: (handle, decision, note) =>
     request(`/prospecting/creators/${encodeURIComponent(handle)}/decision`, {
       method: "POST", body: JSON.stringify({ decision, note }),

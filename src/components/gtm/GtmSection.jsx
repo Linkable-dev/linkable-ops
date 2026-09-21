@@ -57,5 +57,7 @@ export const BRAND_TABS = [
 ];
 
 export const CREATOR_TABS = [
-  { to: "/gtm/creators", label: "Find", match: (p) => p.startsWith("/gtm/creators") },
+  { to: "/gtm/creators", label: "Find", match: (p) => p === "/gtm/creators" },
+  { to: "/gtm/creators/outreach", label: "Outreach",
+    match: (p) => p.startsWith("/gtm/creators/outreach") },
 ];
