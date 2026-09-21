@@ -637,43 +637,78 @@ function TierBadge({ tier, theme }) {
   );
 }
 
+/**
+ * Everything known about one lead.
+ *
+ * Laid out in two parts rather than as one grid of facts. An auto-fitting grid
+ * put a two-line sentence about why a lead is Tier A beside a one-word country
+ * and a number, each column as wide as the widest thing in it, so nothing
+ * lined up and the eye had no left edge to follow. The sentences are sentences
+ * now, full width and at the top; the short facts are a proper aligned list
+ * underneath, label and value in fixed columns.
+ */
 function LeadDetail({ lead, theme }) {
-  const facts = [
+  // The long ones read as prose and get their own line.
+  const prose = [
     ["Why this tier", lead.tier_reason],
-    ["Creators seen", lead.top_creators],
-    ["Open call", lead.intent_post_url],
+    ["Creators seen posting about them", lead.top_creators],
+    ["Note", lead.ops_note],
+  ].filter(([, v]) => v);
+
+  // The short ones line up.
+  const facts = [
     ["Products", lead.product_count],
+    ["Affiliate app", lead.affiliate_app && lead.affiliate_app !== "none" ? lead.affiliate_app : "none"],
     ["Entity", lead.entity_type
-      ? `${lead.entity_type}${lead.entity_verified ? " (verified)" : " (unverified)"}`
+      ? `${lead.entity_type.replace(/_/g, " ")}${lead.entity_verified ? " · verified" : " · unverified"}`
       : null],
     ["Founder", lead.founder_name],
     ["Country", lead.country],
     ["Found via", lead.source],
     ["Pipeline status", lead.status],
-    ["Note", lead.ops_note],
   ].filter(([, v]) => v !== null && v !== undefined && v !== "");
 
   return (
     <tr>
-      <td colSpan={8} style={{ background: theme.hoverBg, padding: "12px 16px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
-          {facts.map(([label, value]) => (
-            <div key={label}>
-              <div style={{ color: theme.textMuted, fontSize: 11 }}>{label}</div>
-              <div style={{ color: theme.text, fontSize: 13, wordBreak: "break-word" }}>
-                {String(value).startsWith("http")
-                  ? <a href={String(value)} target="_blank" rel="noreferrer" style={{ color: theme.accent }}>{String(value)}</a>
-                  : String(value)}
-              </div>
+      <td colSpan={8} style={{ background: theme.hoverBg, padding: "16px 20px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1100 }}>
+
+          {prose.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {prose.map(([label, value]) => (
+                <div key={label}>
+                  <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 2 }}>{label}</div>
+                  <div style={{ color: theme.text, fontSize: 13, lineHeight: 1.5 }}>{String(value)}</div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          {lead.intent_post_url && (
+            <div>
+              <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 2 }}>Open call</div>
+              <a href={lead.intent_post_url} target="_blank" rel="noreferrer"
+                 style={{ color: theme.accent, fontSize: 13 }}>{lead.intent_post_url}</a>
+            </div>
+          )}
+
+          {/* A fixed label column, so every value starts at the same place. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                        columnGap: 32, rowGap: 6 }}>
+            {facts.map(([label, value]) => (
+              <div key={label} style={{ display: "flex", gap: 12, fontSize: 13, lineHeight: 1.6 }}>
+                <span style={{ color: theme.textMuted, minWidth: 110, flexShrink: 0 }}>{label}</span>
+                <span style={{ color: theme.text }}>{String(value)}</span>
+              </div>
+            ))}
+          </div>
+
+          <SentEmails handle={lead.handle} pushed={Boolean(lead.pushed_at)} theme={theme} />
         </div>
-        <SentEmails handle={lead.handle} pushed={Boolean(lead.pushed_at)} theme={theme} />
       </td>
     </tr>
   );
 }
-
 
 /**
  * The emails themselves: what went, what is still to come, and what each one

@@ -573,7 +573,18 @@ export function prospectingRoutes() {
         steps,
       });
     } catch (err) {
-      res.status(502).json({ error: "could not read what was sent", hint: err?.message });
+      // Say which thing is wrong. "could not read what was sent" sent somebody
+      // looking at the lead when the actual answer was a missing environment
+      // variable on this server.
+      const missingKey = /LEMLIST_KEY/.test(err?.message || "");
+      res.status(missingKey ? 503 : 502).json({
+        error: missingKey
+          ? "Lemlist is not configured on this server"
+          : "could not read what was sent",
+        hint: missingKey
+          ? "LEMLIST_KEY is not set, so the sequence and its activity cannot be read."
+          : err?.message,
+      });
     }
   });
 
