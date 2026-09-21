@@ -859,6 +859,8 @@ function LeadDetail({ lead, theme, span = 9 }) {
             ))}
           </div>
 
+          <CreatorList text={lead.creator_list} theme={theme} />
+
           <SentEmails handle={lead.handle} pushed={Boolean(lead.pushed_at)} theme={theme} />
         </div>
       </td>
@@ -959,6 +961,50 @@ function SentEmails({ handle, pushed, theme }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * The list the first email offers to send.
+ *
+ * "I've got the full list - every handle, every post. Want me to send it over?"
+ * is the ask that gets a reply, and it only works if the answer exists the
+ * moment somebody says yes. This is that answer, one click from the lead, so
+ * replying is a paste rather than a job.
+ */
+function CreatorList({ text, theme }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  const lines = text.split("\n").filter(Boolean);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <span style={{ color: theme.textMuted, fontSize: 11 }}>
+          The list we offered them ({lines.length})
+        </span>
+        <Btn variant="secondary" size="sm" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </Btn>
+      </div>
+      <div style={{
+        maxHeight: 160, overflowY: "auto", whiteSpace: "pre-wrap",
+        background: theme.surface, border: `1px solid ${theme.border}`,
+        borderRadius: 8, padding: 10, color: theme.text, fontSize: 12,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }}>{text}</div>
     </div>
   );
 }

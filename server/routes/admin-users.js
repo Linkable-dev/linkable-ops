@@ -313,6 +313,12 @@ async function wipeBrand(userId, admin, dbTarget) {
       ["brand_referrals", "DELETE FROM brand_referrals WHERE referrer_user_id = $1 OR referee_user_id = $1"],
       ["referrals", "DELETE FROM referrals WHERE referrer_user_id = $1 OR referee_user_id = $1"],
       ["products", "DELETE FROM products WHERE user_id = $1"],
+      // The Shopify catalogue. It must go after products (campaigns reference
+      // it, with no cascade) and before brands/users (it references both, also
+      // with no cascade) — without these two steps the whole wipe rolls back on
+      // a foreign key violation at the brands step.
+      ["shop_product_variants", "DELETE FROM shop_product_variants WHERE shop_product_id IN (SELECT id FROM shop_products WHERE user_id = $1)"],
+      ["shop_products", "DELETE FROM shop_products WHERE user_id = $1"],
       ["brands", "DELETE FROM brands WHERE user_id = $1"],
       ["users", "DELETE FROM users WHERE id = $1"],
     ];

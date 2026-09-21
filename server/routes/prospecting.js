@@ -34,6 +34,11 @@ const LIST_COLUMNS = [
   "distinct_creators_90d", "top_creators", "intent_signal", "intent_post_url",
   "entity_type", "entity_verified", "status", "tier_reason", "source",
   "instagram_url", "pushed_at", "first_seen_at",
+  // reply_state was missing, so the Reply column on the Brands table showed a
+  // dash for every lead including the two that have been opened.
+  "reply_state", "replied_at",
+  // The list the first email offers to send.
+  "creator_list",
 ].join(",");
 
 export function prospectingRoutes() {
