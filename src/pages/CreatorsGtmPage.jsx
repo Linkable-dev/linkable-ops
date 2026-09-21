@@ -179,7 +179,9 @@ export default function CreatorsGtmPage() {
             </thead>
             <tbody>
               {loading ? (
-                <SkeletonTableRows rows={6} cols={6} />
+                // As many rows as are on screen, so a sort does not collapse
+                // the table and grow it back.
+                <SkeletonTableRows rows={Math.min(Math.max(creators.length, 4), PAGE_SIZE)} cols={6} />
               ) : creators.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: 24, color: theme.textMuted, textAlign: "center" }}>

@@ -17,6 +17,7 @@ import {
   DragHandle,
   HeaderCell,
   headerCellStyle,
+  fitWidths,
 } from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
 import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
@@ -75,7 +76,8 @@ const AGENT_COLUMNS = [
   { key: "last_event_at", label: "Last did", sort: "desc", width: 120 },
   { key: "next_action_at", label: "Next", sort: "asc", width: 120 },
 ];
-const AGENT_DEFAULT_WIDTHS = Object.fromEntries(AGENT_COLUMNS.map((c) => [c.key, c.width]));
+// Floors, widened to whatever each header actually needs. See fitWidths.
+const AGENT_DEFAULT_WIDTHS = fitWidths(AGENT_COLUMNS);
 // The leading expand/collapse chevron column: fixed width, never resized.
 const TOGGLE_COL_WIDTH = 28;
 
@@ -589,7 +591,7 @@ export default function AutopilotPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonTableRows rows={6} cols={orderedColumns.length + 1} />}
+                {loading && <SkeletonTableRows rows={Math.min(Math.max(rows.length, 4), 25)} cols={orderedColumns.length + 1} />}
 
                 {!loading && rows.length === 0 && (
                   <tr>

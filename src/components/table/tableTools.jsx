@@ -143,6 +143,17 @@ export function useColumnWidths(tableId, defaultWidths, fixedKeys = EMPTY_KEYS) 
       document.body.style.userSelect = "";
       setWidths((w) => { persist(w); return w; });
       dragRef.current = null;
+      // preventDefault on mousedown does not stop the click that follows, and
+      // that click lands on the header - which sorts. So the next one is
+      // swallowed, once, in the capture phase before anything can act on it.
+      const swallow = (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      document.addEventListener("click", swallow, { capture: true, once: true });
+      // If no click follows - a drag that ended outside the header, say - the
+      // listener must not sit there waiting to eat an unrelated one.
+      setTimeout(() => document.removeEventListener("click", swallow, { capture: true }), 0);
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -358,8 +369,12 @@ export function ResizeHandle({ colKey, startResize, resetWidth, theme }) {
         // a header cell that clips its content — which they now do, so a
         // squeezed column stops bleeding over its neighbour — clipped half the
         // grab strip away with it.
-        position: "absolute", top: 0, right: 0, bottom: 0, width: 10,
-        cursor: "col-resize", zIndex: 2,
+        // Wider than it looks, and above everything else in the cell. At 10px
+        // it was a coin-sized target sitting at the very edge of the column,
+        // so an aim a few pixels short landed on the sort label instead and
+        // the column sorted when somebody meant to resize it.
+        position: "absolute", top: 0, right: 0, bottom: 0, width: RESIZE_STRIP,
+        cursor: "col-resize", zIndex: 5,
         display: "flex", alignItems: "stretch", justifyContent: "center",
       }}
     >
@@ -384,7 +399,70 @@ export function ResizeHandle({ colKey, startResize, resetWidth, theme }) {
 //
 // `position: relative` is in here too because ResizeHandle is absolutely
 // positioned against the cell and silently does nothing without it.
-export const headerCellStyle = { position: "relative", overflow: "hidden" };
+// How wide the grab strip is, and therefore how much room every header cell
+// has to keep free on its right so the strip is never sitting on top of
+// something clickable - the filter funnel, in particular, which lives at that
+// end of the cell.
+export const RESIZE_STRIP = 14;
+
+// What a header cell spends before the label gets a pixel: the drag grip, the
+// gap after it, the sort arrow, the filter funnel, the resize strip and the
+// cell's own padding.
+//
+// This is why numeric columns were truncating to "C…" and "S…". They were
+// given 80-100px on the reasoning that the values are small numbers, which is
+// true, and the header is not - "Accepted" over a column of single digits
+// still needs room for "Accepted".
+const HEADER_CHROME = { grip: 16, sort: 14, funnel: 22, padding: 22 };
+
+/**
+ * The width a column needs for its own header to fit, at minimum.
+ *
+ * Approximate on purpose: measuring text properly means rendering it, and a
+ * default width only has to be close enough that nothing truncates before
+ * anybody drags anything. Roughly 6.6px per character at the 11px uppercase
+ * headers these tables use.
+ */
+export function headerWidth(label, { grip = true, sortable = true, filter = true, min = 70 } = {}) {
+  const chrome = RESIZE_STRIP + HEADER_CHROME.padding
+    + (grip ? HEADER_CHROME.grip : 0)
+    + (sortable ? HEADER_CHROME.sort : 0)
+    + (filter ? HEADER_CHROME.funnel : 0);
+  return Math.max(min, Math.ceil(String(label || "").length * 6.6) + chrome);
+}
+
+/**
+ * Default widths for a set of columns, each at least wide enough for its own
+ * header, and together adding up to something that fills a typical window
+ * rather than huddling on the left with dead space beside it.
+ *
+ * Columns marked `fill` take the slack, so the table spans its container and
+ * the extra lands where it is useful - a name, not a count.
+ */
+export function fitWidths(columns, { target = 1400 } = {}) {
+  const base = {};
+  for (const col of columns) {
+    base[col.key] = col.resizable === false
+      ? col.width
+      : Math.max(col.width || 0, headerWidth(col.label, {
+          sortable: Boolean(col.sortKey || col.sort),
+          filter: Boolean(col.filter),
+        }));
+  }
+  const total = Object.values(base).reduce((a, b) => a + (b || 0), 0);
+  const fillers = columns.filter((c) => c.fill);
+  if (fillers.length && total < target) {
+    const share = Math.floor((target - total) / fillers.length);
+    for (const col of fillers) base[col.key] += share;
+  }
+  return base;
+}
+
+export const headerCellStyle = {
+  position: "relative",
+  overflow: "hidden",
+  paddingRight: RESIZE_STRIP,
+};
 
 // Grip, then a label that gives way, then anything that must keep its size —
 // a sort arrow, a filter funnel. Put the ResizeHandle after this, as a direct

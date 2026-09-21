@@ -218,7 +218,13 @@ export default function ProspectingPage() {
             </thead>
             <tbody>
               {loading ? (
-                <SkeletonTableRows rows={6} cols={7} />
+                // Same shape as the table it stands in for: eight columns,
+                // counting the checkbox, and as many rows as are on screen
+                // now. Six skeletons under a screen of twenty-seven collapsed
+                // the table on every sort and filter, and a seven-column
+                // skeleton in an eight-column table left every row a cell
+                // short of the right edge.
+                <SkeletonTableRows rows={Math.min(Math.max(leads.length, 4), PAGE_SIZE)} cols={8} />
               ) : leads.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ padding: 24, color: theme.textMuted, textAlign: "center" }}>

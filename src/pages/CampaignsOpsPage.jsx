@@ -5,7 +5,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/ui/Skeleton";
-import { useColumnWidths, useColumnOrder, ResizeHandle, DragHandle, ColumnFilter } from "../components/table/tableTools";
+import { useColumnWidths, useColumnOrder, ResizeHandle, DragHandle, ColumnFilter, fitWidths } from "../components/table/tableTools";
 import CreatorMatchesModal from "../components/campaigns/CreatorMatchesModal";
 
 const STATUS_COLORS = {
@@ -54,7 +54,11 @@ const COLUMNS = [
   { key: "sales",             label: "Sales", width: 80, num: true, sortKey: "sales", filter: { type: "number" } },
   { key: "bottleneck",        label: "Bottleneck", width: 180, fill: true, sortKey: "bottleneck", filter: { type: "select", extra: { options: BOTTLENECK_OPTIONS } } },
 ];
-const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
+// Each column at least as wide as its own header needs, with the slack going
+// to the two `fill` columns. The hand-written numbers below are floors now
+// rather than the answer: "Accepted" over a column of single digits still has
+// to fit the word "Accepted".
+const DEFAULT_WIDTHS = fitWidths(COLUMNS);
 // The expand-chevron is the only column pinned out of dragging — see comment above.
 const CAMPAIGNS_FIXED_KEYS = ["expand"];
 
