@@ -246,7 +246,9 @@ export default function CreatorsGtmPage() {
           </table>
         </div>
 
-        <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
+        {/* Pagination counts from 1, the offset maths from 0. */}
+        <Pagination page={page + 1} pageSize={PAGE_SIZE} total={total}
+                    onPageChange={(n) => setPage(Math.max(0, n - 1))} />
       </Card>
     </div>
   );

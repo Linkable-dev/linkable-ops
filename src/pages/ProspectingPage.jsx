@@ -147,6 +147,8 @@ export default function ProspectingPage() {
         </Card>
       )}
 
+      <Campaigns theme={theme} />
+
       <StatTiles stats={stats} loading={loading && !stats} theme={theme} />
 
       <Card>
@@ -244,18 +246,16 @@ export default function ProspectingPage() {
           </table>
         </div>
 
+        {/* Pagination counts from 1; the offset maths here counts from 0.
+            Passing one to the other unconverted showed "Showing -49-0 of 27"
+            and a page indicator of "0 / 1". */}
         <Pagination
-          page={page}
+          page={page + 1}
           pageSize={PAGE_SIZE}
           total={total}
-          onPageChange={setPage}
+          onPageChange={(n) => setPage(Math.max(0, n - 1))}
         />
       </Card>
-
-      {/* Below the leads, deliberately. This page is for the decision, and the
-          decision is the table: campaigns are what produced it, which is
-          context rather than the job. */}
-      <Campaigns theme={theme} />
 
       <p style={{ color: theme.textMuted, fontSize: 12, margin: 0 }}>
         Leads are produced by the linkable-prospector pipeline, which runs outside this app
@@ -315,64 +315,60 @@ function Campaigns({ theme }) {
           leads it was asked for or has spent what it was given.
         </div>
       )}
-      {campaigns.length > 0 && (
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead>
-          <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
-            {["Campaign", "State", "Progress", "Spent", "Passes", ""].map((h) => (
-              <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 500 }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map((c) => {
-            const asked = c.desired_state === "running";
-            const actually = c.state === "running";
-            return (
-              <tr key={c.name} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                <td style={{ padding: "8px 12px", color: theme.text }}>
-                  {c.name}
-                  <div style={{ color: theme.textMuted, fontSize: 11 }}>
-                    tier {c.goal_tiers} · {c.source}
-                  </div>
-                </td>
-                <td style={{ padding: "8px 12px" }}>
-                  <span style={{ color: actually ? theme.success : theme.textMuted }}>
-                    {c.state}
-                  </span>
-                  {asked && !actually && (
-                    <div style={{ color: theme.textMuted, fontSize: 11 }}>asked to start</div>
-                  )}
-                  {c.stopped_reason && (
-                    <div style={{ color: theme.textMuted, fontSize: 11 }}>{c.stopped_reason}</div>
-                  )}
-                  {c.last_error && (
-                    <div style={{ color: theme.danger, fontSize: 11 }}>{c.last_error}</div>
-                  )}
-                </td>
-                <td style={{ padding: "8px 12px", color: theme.text }}>
-                  {c.leads_found}/{c.goal_leads}
-                </td>
-                <td style={{ padding: "8px 12px", color: theme.text }}>
-                  ${Number(c.spent_usd || 0).toFixed(2)}
-                  <span style={{ color: theme.textMuted }}> of ${Number(c.budget_usd).toFixed(2)}</span>
-                </td>
-                <td style={{ padding: "8px 12px", color: theme.textMuted }}>{c.passes}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right" }}>
-                  <Btn
-                    variant={asked ? "secondary" : "primary"}
-                    disabled={busy === c.name}
-                    onClick={() => setState(c.name, asked ? "off" : "running")}
-                  >
-                    {asked ? "Hold" : "Start"}
-                  </Btn>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      )}
+      {/* One line each, not a table.
+          Three lines per campaign - the state, "asked to start", and the
+          sentence explaining why it stopped - made two campaigns taller than
+          the leads they produced, and it was the first thing on the page.
+          The explanation is still there, on hover, where it costs nothing to
+          have until you want it. */}
+      {campaigns.map((c) => {
+        const asked = c.desired_state === "running";
+        const actually = c.state === "running";
+        const why = [
+          asked && !actually ? "asked to start" : null,
+          c.stopped_reason,
+          c.last_error,
+        ].filter(Boolean).join(" · ");
+        return (
+          <div key={c.name} style={{
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+            padding: "10px 14px", borderTop: `1px solid ${theme.border}`, fontSize: 13,
+          }}>
+            <span style={{ color: theme.text, fontWeight: 500 }}>{c.name}</span>
+            <span
+              title={why || undefined}
+              style={{
+                color: actually ? theme.success : theme.textMuted,
+                borderBottom: why ? `1px dotted ${theme.border}` : "none",
+                cursor: why ? "help" : "default",
+              }}
+            >
+              {c.state}{asked && !actually ? " (starting)" : ""}
+            </span>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              tier {c.goal_tiers} · {c.source}
+            </span>
+            <div style={{ flex: 1 }} />
+            <span style={{ color: theme.text, fontVariantNumeric: "tabular-nums" }}>
+              {c.leads_found}/{c.goal_leads}
+            </span>
+            <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>
+              ${Number(c.spent_usd || 0).toFixed(2)} of ${Number(c.budget_usd).toFixed(2)}
+            </span>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {c.passes} pass{c.passes === 1 ? "" : "es"}
+            </span>
+            <Btn
+              size="sm"
+              variant={asked ? "secondary" : "solid"}
+              disabled={busy === c.name}
+              onClick={() => setState(c.name, asked ? "off" : "running")}
+            >
+              {asked ? "Hold" : "Start"}
+            </Btn>
+          </div>
+        );
+      })}
     </Card>
   );
 }
