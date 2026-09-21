@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { useDbTarget } from "../contexts/DbTargetContext";
@@ -8,6 +8,9 @@ import { Btn } from "../components/ui/Button";
 import { Skeleton, SkeletonTable } from "../components/ui/Skeleton";
 import {
   useColumnWidths,
+  SortLabel,
+  nextSort,
+  ColumnFilter,
   ResizeHandle,
   useColumnOrder,
   DragHandle,
@@ -195,6 +198,45 @@ function ResultTable({ result, theme }) {
     columns.map((c) => ({ key: c })),
   );
   const orderedCols = orderedColumns.map((c) => c.key);
+
+  // Sorting and filtering a result set, with no schema to describe it: every
+  // column is sortable and every column takes a filter, and whether it is
+  // treated as a number is decided by whether every value in it is one -
+  // which the page already works out for alignment.
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
+  const [colFilters, setColFilters] = useState({});
+  const handleSort = (colKey, defaultDir) => setSort((cur) => nextSort(cur, colKey, defaultDir));
+  const setColFilter = (key, value) =>
+    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
+
+  const visibleRows = useMemo(() => {
+    let out = rows;
+    for (const [col, raw] of Object.entries(colFilters)) {
+      if (!raw) continue;
+      const term = String(raw).toLowerCase();
+      const numeric = term.match(/^(gte|lte|gt|lt|eq|ne):(.+)$/);
+      out = out.filter((r) => {
+        const v = r[col];
+        if (numeric) {
+          const n = Number(v), t = Number(numeric[2]);
+          if (Number.isNaN(n) || Number.isNaN(t)) return true;
+          return { gte: n >= t, lte: n <= t, gt: n > t, lt: n < t,
+                   eq: n === t, ne: n !== t }[numeric[1]];
+        }
+        return String(v ?? "").toLowerCase().includes(term);
+      });
+    }
+    if (!sort.sortBy) return out;
+    const dir = sort.sortDir === "asc" ? 1 : -1;
+    const asNumber = numericCols.includes(sort.sortBy);
+    return [...out].sort((x, y) => {
+      const a = x[sort.sortBy], b = y[sort.sortBy];
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return (asNumber ? (Number(a) - Number(b)) : String(a).localeCompare(String(b))) * dir;
+    });
+  }, [rows, colFilters, sort.sortBy, sort.sortDir, numericCols]);
+
   if (!rows.length) return <Card><div style={{ fontSize: 13, color: theme.textMuted }}>The query returned no rows.</div></Card>;
   const labelCol = columns.find((c) => !numericCols.includes(c));
   const valueCol = numericCols.find((c) => c !== labelCol);
@@ -241,8 +283,26 @@ function ResultTable({ result, theme }) {
                     <HeaderCell
                       align={numericCols.includes(c) ? "right" : "left"}
                       grip={<DragHandle colKey={c} dragHandleProps={dragHandleProps} theme={theme} />}
+                      trailing={
+                        <ColumnFilter
+                          theme={theme}
+                          label={c}
+                          type={numericCols.includes(c) ? "number" : "text"}
+                          placeholder={`${c}…`}
+                          value={colFilters[c] || ""}
+                          onCommit={(v) => setColFilter(c, v)}
+                        />
+                      }
                     >
-                      {c}
+                      <SortLabel
+                        theme={theme}
+                        label={c}
+                        colKey={c}
+                        sortBy={sort.sortBy}
+                        sortDir={sort.sortDir}
+                        defaultDir={numericCols.includes(c) ? "desc" : "asc"}
+                        onSort={handleSort}
+                      />
                     </HeaderCell>
                     <ResizeHandle colKey={c} startResize={startResize} resetWidth={resetWidth} theme={theme} />
                   </th>
@@ -250,7 +310,7 @@ function ResultTable({ result, theme }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {visibleRows.map((r, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${theme.border}` }}>
                   {orderedCols.map((c) => <td key={c} style={{ padding: "9px 14px", color: theme.text, textAlign: numericCols.includes(c) ? "right" : "left", whiteSpace: "nowrap", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", fontVariantNumeric: "tabular-nums" }} title={typeof r[c] === "string" ? r[c] : undefined}>{fmt(r[c])}</td>)}
                 </tr>

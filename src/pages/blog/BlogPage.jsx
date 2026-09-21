@@ -12,6 +12,9 @@ import { Tag } from "../../components/ui/Tag";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import {
   useColumnWidths,
+  SortLabel,
+  nextSort,
+  ColumnFilter,
   ResizeHandle,
   useColumnOrder,
   DragHandle,
@@ -27,12 +30,16 @@ const STATUS_COLOR = { published: "#16A34A", draft: "#CA8A04", archived: "#A3A3A
 const SOURCE_LABEL = { ai: "AI", manual: "Manual", framer: "Framer" };
 
 const BLOG_COLUMNS = [
-  { key: "article",   label: "Article",   width: 340 },
-  { key: "status",    label: "Status",    width: 110 },
-  { key: "source",    label: "Source",    width: 90 },
-  { key: "length",    label: "Length",    width: 150 },
-  { key: "published", label: "Published", width: 110 },
-  { key: "updated",   label: "Updated",   width: 110 },
+  { key: "article",   label: "Article",   width: 340, sort: "asc", sortField: "title", fill: true,
+    filter: { type: "text", field: "title", placeholder: "Title…" } },
+  { key: "status",    label: "Status",    width: 110, sort: "asc", sortField: "status",
+    filter: { type: "text", field: "status", placeholder: "Status…" } },
+  { key: "source",    label: "Source",    width: 90, sort: "asc", sortField: "source",
+    filter: { type: "text", field: "source", placeholder: "Source…" } },
+  { key: "length",    label: "Length",    width: 150, sort: "desc", sortField: "word_count",
+    filter: { type: "number", field: "word_count" } },
+  { key: "published", label: "Published", width: 110, sort: "desc", sortField: "published_at" },
+  { key: "updated",   label: "Updated",   width: 110, sort: "desc", sortField: "updated_at" },
   { key: "actions",   label: "",          width: 260, resizable: false },
 ];
 const BLOG_DEFAULT_WIDTHS = Object.fromEntries(BLOG_COLUMNS.map((c) => [c.key, c.width]));
@@ -106,18 +113,34 @@ export default function BlogPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
   const { widths, startResize, resetWidth } = useColumnWidths("blog-posts", BLOG_DEFAULT_WIDTHS);
+  // The column keys are display names ("article", "length"); the database
+  // knows them as title and word_count, so each column carries the field its
+  // sort and filter actually go to.
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
+  const [colFilters, setColFilters] = useState({});
+  const handleSort = (field, defaultDir) => {
+    setSort((cur) => nextSort(cur, field, defaultDir));
+    setOffset(0);
+  };
+  const setColFilter = (field, value) => {
+    setColFilters((cur) => (cur[field] === value ? cur : { ...cur, [field]: value }));
+    setOffset(0);
+  };
   const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("blog-posts", BLOG_COLUMNS, BLOG_FIXED_KEYS);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.getBlogPosts({ status: filter === "all" ? undefined : filter, limit: PAGE, offset });
+      const r = await api.getBlogPosts({
+        status: filter === "all" ? undefined : filter, limit: PAGE, offset,
+        sortBy: sort.sortBy, sortDir: sort.sortDir, filters: colFilters,
+      });
       setPosts(r.items); setTotal(r.total); setError(null);
       // Deleting the last article on the last page leaves offset past the end ("26–25 of 25"): step back.
       if (offset > 0 && offset >= r.total) setOffset(Math.max(0, Math.floor(Math.max(0, r.total - 1) / PAGE) * PAGE));
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [filter, offset]);
+  }, [filter, offset, sort.sortBy, sort.sortDir, colFilters]);
   useEffect(() => { load(); }, [load]);
   const changeFilter = (f) => { setFilter(f); setOffset(0); };
 
@@ -207,8 +230,28 @@ export default function BlogPage() {
                       grip={!BLOG_FIXED_KEYS.includes(col.key) && (
                         <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={t} />
                       )}
+                      trailing={col.filter && (
+                        <ColumnFilter
+                          theme={t}
+                          label={col.label}
+                          type={col.filter.type}
+                          placeholder={col.filter.placeholder}
+                          value={colFilters[col.filter.field] || ""}
+                          onCommit={(v) => setColFilter(col.filter.field, v)}
+                        />
+                      )}
                     >
-                      {col.label}
+                      {col.sort ? (
+                        <SortLabel
+                          theme={t}
+                          label={col.label}
+                          colKey={col.sortField}
+                          sortBy={sort.sortBy}
+                          sortDir={sort.sortDir}
+                          defaultDir={col.sort}
+                          onSort={handleSort}
+                        />
+                      ) : col.label}
                     </HeaderCell>
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={t} />

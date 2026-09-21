@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -7,6 +7,9 @@ import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import {
   useColumnWidths,
+  SortLabel,
+  nextSort,
+  ColumnFilter,
   ResizeHandle,
   useColumnOrder,
   DragHandle,
@@ -41,12 +44,27 @@ const GENDERS = [
 // small and unpaginated), just drag-resizable widths — the "actions" column
 // holds two buttons and doesn't shrink below that.
 const ROSTER_COLUMNS = [
-  { key: "name",      label: "Name",      width: 220 },
-  { key: "archetype", label: "Archetype", width: 160 },
-  { key: "status",    label: "Status",    width: 170 },
-  { key: "plates",    label: "Plates",    width: 160 },
+  { key: "name",      label: "Name",      width: 220, sort: "asc", fill: true,
+    filter: { type: "text", placeholder: "Name…" } },
+  { key: "archetype", label: "Archetype", width: 160, sort: "asc",
+    filter: { type: "text", placeholder: "Archetype…" } },
+  { key: "status",    label: "Status",    width: 170, sort: "asc",
+    filter: { type: "text", placeholder: "Status…" } },
+  { key: "plates",    label: "Plates",    width: 160, sort: "desc" },
   { key: "actions",   label: "Actions",   width: 200, resizable: false },
 ];
+// Sorting and filtering read this, not the cell: the name cell carries an age
+// under it and the plates cell is a row of thumbnails.
+function avatarValue(col, a) {
+  switch (col) {
+    case "name": return a.name || "";
+    case "archetype": return a.archetype || "";
+    case "status": return a.status || "";
+    case "plates": return a.plate_urls?.length || 0;
+    default: return "";
+  }
+}
+
 const ROSTER_DEFAULT_WIDTHS = Object.fromEntries(ROSTER_COLUMNS.map((c) => [c.key, c.width]));
 // The two action buttons, not a column of data — stays put rather than being
 // draggable somewhere into the middle of the table.
@@ -134,6 +152,28 @@ export default function AiCreatorsPage() {
 
   const { widths, startResize, resetWidth } = useColumnWidths("ai-creators-roster", ROSTER_DEFAULT_WIDTHS);
   const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("ai-creators-roster", ROSTER_COLUMNS, ROSTER_FIXED_KEYS);
+  const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
+  const [colFilters, setColFilters] = useState({});
+  const handleSort = (colKey, defaultDir) => setSort((cur) => nextSort(cur, colKey, defaultDir));
+  const setColFilter = (key, value) =>
+    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
+
+  // The roster arrives whole, so it is ordered and narrowed here.
+  const visibleAvatars = useMemo(() => {
+    let rows = data?.avatars || [];
+    for (const [key, raw] of Object.entries(colFilters)) {
+      if (!raw) continue;
+      const term = String(raw).toLowerCase();
+      rows = rows.filter((a) => String(avatarValue(key, a)).toLowerCase().includes(term));
+    }
+    if (!sort.sortBy) return rows;
+    const dir = sort.sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((x, y) => {
+      const a = avatarValue(sort.sortBy, x), b = avatarValue(sort.sortBy, y);
+      if (typeof a === "number" && typeof b === "number") return (a - b) * dir;
+      return String(a).localeCompare(String(b)) * dir;
+    });
+  }, [data, colFilters, sort.sortBy, sort.sortDir]);
 
   const load = () =>
     api
@@ -330,8 +370,28 @@ export default function AiCreatorsPage() {
                       grip={!ROSTER_FIXED_KEYS.includes(col.key) && (
                         <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
                       )}
+                      trailing={col.filter && (
+                        <ColumnFilter
+                          theme={theme}
+                          label={col.label}
+                          type={col.filter.type}
+                          placeholder={col.filter.placeholder}
+                          value={colFilters[col.key] || ""}
+                          onCommit={(v) => setColFilter(col.key, v)}
+                        />
+                      )}
                     >
-                      {col.label}
+                      {col.sort ? (
+                        <SortLabel
+                          theme={theme}
+                          label={col.label}
+                          colKey={col.key}
+                          sortBy={sort.sortBy}
+                          sortDir={sort.sortDir}
+                          defaultDir={col.sort}
+                          onSort={handleSort}
+                        />
+                      ) : col.label}
                     </HeaderCell>
                     {col.resizable !== false && (
                       <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
@@ -343,7 +403,7 @@ export default function AiCreatorsPage() {
             <tbody>
               {!data && <SkeletonTableRows rows={4} cols={orderedColumns.length} />}
 
-              {data && (data.avatars || []).length === 0 && (
+              {data && visibleAvatars.length === 0 && (
                 <tr>
                   <td style={{ ...td, color: theme.textMuted }} colSpan={orderedColumns.length}>
                     {data.configured
@@ -353,7 +413,7 @@ export default function AiCreatorsPage() {
                 </tr>
               )}
 
-              {(data?.avatars || []).map((a) => (
+              {visibleAvatars.map((a) => (
                 <Fragment key={a.id}>
                   <tr>
                     {orderedColumns.map((col) => (

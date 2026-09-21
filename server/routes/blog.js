@@ -27,13 +27,36 @@ export function blogRoutes() {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
       const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+      // Sorting and per-column filters reach the database, because this list
+      // is paged: ordering the twenty-five rows on screen would leave the rest
+      // where they were, which reads as a sort that does not work.
+      const SORTABLE = ["title", "status", "source", "category", "keyword",
+                        "word_count", "read_minutes", "published_at",
+                        "created_at", "updated_at", "author_name"];
       let q = supabase.from("blog_posts")
-        .select("id, slug, title, excerpt, category, keyword, status, source, author_name, hero_image_id, hero_image, word_count, read_minutes, published_at, created_at, updated_at, created_by", { count: "exact" })
-        .order("published_at", { ascending: false, nullsFirst: true })
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
+        .select("id, slug, title, excerpt, category, keyword, status, source, author_name, hero_image_id, hero_image, word_count, read_minutes, published_at, created_at, updated_at, created_by", { count: "exact" });
+
       if (req.query.status) q = q.eq("status", req.query.status);
       if (req.query.q) q = q.ilike("title", `%${String(req.query.q).replace(/[%_]/g, "")}%`);
+      for (const [col, raw] of Object.entries(req.query.filter || {})) {
+        if (!SORTABLE.includes(col) || raw === "" || raw == null) continue;
+        const text = String(raw);
+        const m = text.match(/^(gte|lte|gt|lt|eq|ne):(.*)$/);
+        if (!m) { q = q.ilike(col, `%${text}%`); continue; }
+        q = q[m[1] === "ne" ? "neq" : m[1]](col, m[2]);
+      }
+
+      const sortBy = String(req.query.sortBy || "");
+      if (SORTABLE.includes(sortBy)) {
+        q = q.order(sortBy, {
+          ascending: String(req.query.sortDir || "desc").toLowerCase() === "asc",
+          nullsFirst: false,
+        });
+      } else {
+        q = q.order("published_at", { ascending: false, nullsFirst: true })
+             .order("created_at", { ascending: false });
+      }
+      q = q.range(offset, offset + limit - 1);
       const { data, error, count } = await q;
       if (error) throw new Error(error.message);
       res.json({ items: data, total: count ?? data.length, limit, offset });

@@ -79,7 +79,8 @@ export const api = {
     }),
 
   // Blog (articles on www.linkable.link)
-  getBlogPosts: ({ status, limit = 25, offset = 0, q } = {}) => request(`/blog/posts?${buildQs({ status, limit, offset, q })}`),
+  getBlogPosts: ({ status, limit = 25, offset = 0, q, sortBy, sortDir, filters } = {}) =>
+    request(`/blog/posts?${buildQs({ status, limit, offset, q, sortBy, sortDir, filters })}`),
   searchBlogImages: (q) => request(`/blog/images/search?q=${encodeURIComponent(q)}`),
   getBlogPost: (id) => request(`/blog/posts/${id}`),
   createBlogPost: (data) => request("/blog/posts", { method: "POST", body: JSON.stringify(data) }),

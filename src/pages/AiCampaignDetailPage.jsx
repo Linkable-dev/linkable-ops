@@ -21,6 +21,7 @@ import {
   useColumnOrder,
   DragHandle,
   HeaderCell,
+  ColumnFilter,
   headerCellStyle,
 } from "../components/table/tableTools";
 
@@ -446,7 +447,11 @@ function TableColGroup({ cols, widths }) {
 // `cols` is expected to already be in the caller's `orderedColumns` order
 // (from useColumnOrder) — this only renders what it's given, in that order,
 // for both the header and (via the caller's own body .map) the row cells.
-function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidth, theme, dragHandleProps, dropTargetProps, dragOverKey }) {
+// `filters` is optional and, where given, is the SAME state the toolbar above
+// the table already drives. The funnel is a second way to reach one filter, not
+// a second filter: two controls that disagree about what is being shown would
+// be worse than one control in the wrong place.
+function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidth, theme, dragHandleProps, dropTargetProps, dragOverKey, filters }) {
   return (
     <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
       {cols.map((c) => (
@@ -455,7 +460,20 @@ function SortableHeaderRow({ cols, thStyle, sort, onSort, startResize, resetWidt
           style={{ ...thStyle, ...headerCellStyle, background: dragOverKey === c.key ? theme.accentLight : undefined }}
           {...dropTargetProps(c.key)}
         >
-          <HeaderCell grip={<DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />}>
+          <HeaderCell
+            grip={<DragHandle colKey={c.key} dragHandleProps={dragHandleProps} theme={theme} />}
+            trailing={filters?.[c.key] && (
+              <ColumnFilter
+                theme={theme}
+                label={c.label}
+                type={filters[c.key].type}
+                options={filters[c.key].options}
+                placeholder={filters[c.key].placeholder}
+                value={filters[c.key].value}
+                onCommit={filters[c.key].onCommit}
+              />
+            )}
+          >
             {c.sortable ? (
               <SortLabel
                 label={c.label}
@@ -584,6 +602,25 @@ function SendsTab({ campaign, theme }) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+
+  // The header funnels, pointed at the filters the toolbar above the table
+  // already owns. One piece of state behind both, so a funnel and a dropdown
+  // can never disagree about what is being shown - which would be worse than
+  // one control in a place nobody looks.
+  const headerFilters = useMemo(() => ({
+    brand_group: {
+      type: "select", options: ["all", ...Object.keys(GROUP_TINTS)],
+      value: group, onCommit: (v) => { setGroup(v || "all"); setPage(1); },
+    },
+    touch_number: {
+      type: "select", options: ["all", ...TOUCHES.map(String)],
+      value: String(touch), onCommit: (v) => { setTouch(v || "all"); setPage(1); },
+    },
+    to_email: {
+      type: "text", placeholder: "Email or subject…",
+      value: search, onCommit: (v) => { setSearch(v || ""); setPage(1); },
+    },
+  }), [group, touch, search]);
 
   // Server-side sort + drag-resizable columns (persisted per table).
   const [sort, setSort] = useState({ sortBy: "scheduled_at", sortDir: "desc" });
@@ -814,6 +851,7 @@ function SendsTab({ campaign, theme }) {
                 cols={orderedColumns} thStyle={sendTh} sort={sort} onSort={handleSort}
                 startResize={startResize} resetWidth={resetWidth} theme={theme}
                 dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
+                filters={headerFilters}
               />
             </thead>
             <tbody>
@@ -832,6 +870,7 @@ function SendsTab({ campaign, theme }) {
                 cols={orderedColumns} thStyle={sendTh} sort={sort} onSort={handleSort}
                 startResize={startResize} resetWidth={resetWidth} theme={theme}
                 dragHandleProps={dragHandleProps} dropTargetProps={dropTargetProps} dragOverKey={dragOverKey}
+                filters={headerFilters}
               />
             </thead>
             <tbody>
