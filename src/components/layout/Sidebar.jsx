@@ -95,7 +95,6 @@ const gtmIcon = icon(<>
   <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
   <polyline points="17 6 23 6 23 12" />
 </>);
-const sendIcon = icon(<path d="M3 11l18-8-5 18-4-7-9-3z" />);
 const brandsIcon = icon(<>
   <path d="M3 21h18" />
   <path d="M5 21V8l7-5 7 5v13" />
@@ -104,10 +103,6 @@ const brandsIcon = icon(<>
 const creatorsIcon = icon(<>
   <circle cx="12" cy="8" r="3.5" />
   <path d="M5 20a7 7 0 0 1 14 0" />
-</>);
-const inboxIcon = icon(<>
-  <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-  <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
 </>);
 const blogIcon = icon(<>
   <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />

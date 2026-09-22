@@ -16,7 +16,14 @@ const PAGES = [
   ["AI creators", "/ops/ai-creators", "avatars roster synthetic casting"],
   ["Campaign content", "/ops/content", "creator content files deliverables uploads generated assets library"],
   ["Trials", "/trials"], ["Impersonation", "/users"],
-  ["Brands", "/gtm/brands"], ["Creators", "/gtm/creators"], ["Brand outreach", "/ai/agents"], ["Replies", "/ai/inbox"], ["Blog", "/blog"],
+  ["Brands", "/gtm/brands"], ["Creators", "/gtm/creators"],
+  // "Replies" pointed at /ai/inbox — the retired system's inbox, holding one
+  // conversation — while the live reply queue sat at /gtm/brands/replies under
+  // the same word. Searching the palette for the obvious term took you to the
+  // empty one.
+  ["Brand replies", "/gtm/brands/replies", "outbound answers inbox"],
+  ["Creator replies", "/gtm/creators/replies", "outbound answers inbox"],
+  ["Blog", "/blog"],
   ["Dashboard", "/dashboard"], ["Ask the data", "/ask"], ["Team", "/team"],
 ];
 let tablesCache = null;

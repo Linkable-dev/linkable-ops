@@ -49,25 +49,3 @@ export function GtmSection({ tabs }) {
     </div>
   );
 }
-
-// Two of these are the prospector's (Find, Replies) and two belong to the main
-// app's own outbound (Outreach, Inbox). They share a strip because an operator
-// working brands does not care which system a row came from — but Replies and
-// Inbox stay separate tabs, because they are separate systems and merging them
-// would mean pretending one pipeline's suppression list covers the other's.
-export const BRAND_TABS = [
-  { to: "/gtm/brands", label: "Find",
-    match: (p) => p === "/gtm/brands" || p.startsWith("/gtm/brands/lead") },
-  { to: "/ai/agents", label: "Outreach", match: (p) => p.startsWith("/ai/agents") },
-  { to: "/gtm/brands/replies", label: "Replies",
-    match: (p) => p.startsWith("/gtm/brands/replies") },
-  { to: "/ai/inbox", label: "Inbox", match: (p) => p.startsWith("/ai/inbox") },
-];
-
-export const CREATOR_TABS = [
-  { to: "/gtm/creators", label: "Find", match: (p) => p === "/gtm/creators" },
-  { to: "/gtm/creators/outreach", label: "Outreach",
-    match: (p) => p.startsWith("/gtm/creators/outreach") },
-  { to: "/gtm/creators/replies", label: "Replies",
-    match: (p) => p.startsWith("/gtm/creators/replies") },
-];
