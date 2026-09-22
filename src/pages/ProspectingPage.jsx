@@ -734,7 +734,21 @@ function StateCell({ lead, theme }) {
     : lead.status !== "routed" ? ["needs review", theme.warning]
     : lead.decision === "send" ? ["queued", theme.text]
     : ["—", theme.textMuted];
-  return <span style={{ color: colour }}>{label}</span>;
+  return (
+    <>
+      <span style={{ color: colour }}>{label}</span>
+      {/* Why it is held. The pipeline writes a sentence on every needs_review
+          lead - "GB lead with entity_type=unknown: individual subscriber under
+          PECR until confirmed otherwise" - and it was stored, synced, and shown
+          nowhere. A state you cannot act on is a state you argue with. */}
+      {lead.status !== "routed" && !lead.pushed_at && lead.review_reason && (
+        <div title={lead.review_reason}
+             style={{ color: theme.textMuted, fontSize: 11, whiteSpace: "normal", lineHeight: 1.3 }}>
+          {lead.review_reason.split(":")[0]}
+        </div>
+      )}
+    </>
+  );
 }
 
 function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, saving, expanded,

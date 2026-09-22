@@ -34,6 +34,10 @@ const LIST_COLUMNS = [
   "distinct_creators_90d", "top_creators", "intent_signal", "intent_post_url",
   "entity_type", "entity_verified", "status", "tier_reason", "source",
   "instagram_url", "pushed_at", "first_seen_at",
+  // Why a lead is held at needs_review, in the pipeline's own words. It was
+  // written on every held lead and shown nowhere, so six brands sat in a state
+  // the page could name but not explain.
+  "review_reason",
   // reply_state was missing, so the Reply column on the Brands table showed a
   // dash for every lead including the two that have been opened.
   "reply_state", "replied_at",
