@@ -240,7 +240,7 @@ function AgentMenu({ a, theme, busy, open, onOpenChange, runNow }) {
       {open === a.id && (
         <div role="menu" onClick={(e) => e.stopPropagation()} style={{
           position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 30,
-          background: theme.cardBg, border: `1px solid ${theme.border}`,
+          background: theme.surface, border: `1px solid ${theme.border}`,
           borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", minWidth: 190, padding: 4,
         }}>
           <button type="button" role="menuitem" style={item} disabled={off}
@@ -279,7 +279,7 @@ function RunningSummary({ agents, theme }) {
     <div style={{
       display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
       borderRadius: 10, fontSize: 13,
-      background: on ? theme.accentLight : theme.hoverBg,
+      background: on ? theme.accentLight : theme.surfaceAlt,
       color: on ? theme.accent : theme.textMuted,
       border: `1px solid ${on ? theme.accent : theme.border}`,
     }}>

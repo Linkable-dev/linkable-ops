@@ -16,6 +16,12 @@ const LIGHT = {
   accent: "#232323",
   accentLight: "#F1F2F4",
   brand: "#3CBA8C",
+  // Status, not decoration. success is the brand green so a good state reads as
+  // on-brand rather than as a second green; warning is amber because the only
+  // other alarm colour here is danger, and "needs a look" must not read as
+  // "broken".
+  success: "#2F9E74",
+  warning: "#B45309",
   danger: "#DC2626",
   radius: 14,
   radiusSm: 10,
@@ -37,6 +43,8 @@ const DARK = {
   accent: "#F5F7FA",
   accentLight: "#20242B",
   brand: "#3CBA8C",
+  success: "#4ADE9B",
+  warning: "#FBBF24",
   danger: "#F87171",
   radius: 14,
   radiusSm: 10,
@@ -45,6 +53,29 @@ const DARK = {
   sidebarBg: "#171A1F",
   sidebarBorder: "#2A2F38",
 };
+
+// A misspelled token is invisible: `background: theme.cardBg` on a palette
+// with only `surface` is `background: undefined`, which renders a menu with
+// no background at all rather than throwing. Three GTM pages shipped exactly
+// that, plus `theme.success` silently falling back to near-black, before
+// anyone noticed the colours were wrong rather than merely ugly.
+//
+// Dev only, and a warning rather than a throw: a wrong colour must never take
+// the page down, it just has to stop being silent.
+function guard(palette) {
+  if (!import.meta.env?.DEV || typeof Proxy === "undefined") return palette;
+  return new Proxy(palette, {
+    get(target, key) {
+      if (typeof key === "string" && !(key in target)) {
+        console.warn(
+          `[theme] "${key}" is not in the palette - this renders as undefined. ` +
+          `Available: ${Object.keys(target).join(", ")}`
+        );
+      }
+      return target[key];
+    },
+  });
+}
 
 export function ThemeProvider({ children }) {
   const [mode, setMode] = useState(() => {
@@ -57,7 +88,7 @@ export function ThemeProvider({ children }) {
     return saved !== "collapsed";
   });
 
-  const theme = mode === "dark" ? DARK : LIGHT;
+  const theme = guard(mode === "dark" ? DARK : LIGHT);
 
   const toggleTheme = () => {
     const next = mode === "dark" ? "light" : "dark";

@@ -206,7 +206,7 @@ export default function CreatorsGtmPage() {
             placeholder="Search"
             aria-label="Search creators"
             style={{ width: 200, padding: "6px 10px", borderRadius: 8,
-                     border: `1px solid ${theme.border}`, background: theme.inputBg,
+                     border: `1px solid ${theme.border}`, background: theme.surface,
                      color: theme.text, fontSize: 13 }}
           />
           <div style={{ flex: 1 }} />
@@ -391,7 +391,7 @@ function FindCreators({ theme, onAdded }) {
             aria-label="Describe the creators you want"
             style={{
               flex: 1, minWidth: 280, padding: "8px 12px", borderRadius: 8,
-              border: `1px solid ${theme.border}`, background: theme.inputBg,
+              border: `1px solid ${theme.border}`, background: theme.surface,
               color: theme.text, fontSize: 13,
             }}
           />
@@ -421,7 +421,7 @@ function FindCreators({ theme, onAdded }) {
                      onChange={(e) => setLimit(Number(e.target.value))}
                      aria-label="How many creators"
                      style={{ width: 70, padding: "6px 8px", borderRadius: 8,
-                              border: `1px solid ${theme.border}`, background: theme.inputBg,
+                              border: `1px solid ${theme.border}`, background: theme.surface,
                               color: theme.text, fontSize: 13 }} />
               <span style={{ color: theme.textMuted, fontSize: 12 }}>
                 ≈ {(limit * (plan.creditsPerCreator || 0.01)).toFixed(2)} credits
@@ -594,12 +594,12 @@ function InviteToggle({ c, theme, saving, decide }) {
       color={on ? theme.success : undefined}
       disabled={saving || (!on && Boolean(c.blocked))}
       title={c.blocked && !on ? c.blocked
-            : on ? "Marked invite - click to stop it going"
+            : on ? "Queued to be invited - click to stop it going"
             : `Invite this creator (${c.invite} email)`}
       style={{ padding: "4px 14px", fontSize: 12 }}
       onClick={() => decide(c.handle, on ? "pending" : "send")}
     >
-      {on ? "Inviting" : "Invite"}
+      {on ? "✓ Queued" : "Invite"}
     </Btn>
   );
 }
@@ -621,7 +621,7 @@ function RowMenu({ c, theme, saving, open, onOpenChange, decide }) {
       {open && (
         <div role="menu" style={{
           position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 20,
-          background: theme.cardBg, border: `1px solid ${theme.border}`,
+          background: theme.surface, border: `1px solid ${theme.border}`,
           borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", minWidth: 160, padding: 4,
         }}>
           <button type="button" role="menuitem"

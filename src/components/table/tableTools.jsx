@@ -378,10 +378,18 @@ export function ResizeHandle({ colKey, startResize, resetWidth, theme }) {
         display: "flex", alignItems: "stretch", justifyContent: "center",
       }}
     >
+      {/* Visible at rest, not only under the cursor.
+          It used to be transparent until hovered, which made the whole
+          affordance undiscoverable: no column separators, and no hint that a
+          column could be resized at all unless you happened to pass over the
+          exact strip. At rest it is the same hairline as the table's own
+          borders, so it reads as column separation; on hover it darkens into
+          a handle. */}
       <span style={{
-        width: 2, borderRadius: 1,
-        background: hover ? (theme?.text || "#888") : "transparent",
-        opacity: hover ? 0.5 : 1,
+        width: hover ? 2 : 1, borderRadius: 1,
+        background: hover ? (theme?.text || "#888") : (theme?.border || "#E5EAF0"),
+        opacity: hover ? 0.55 : 1,
+        transition: "background 0.12s, width 0.12s",
       }} />
     </span>
   );

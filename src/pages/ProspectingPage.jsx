@@ -73,6 +73,10 @@ const VIEWS = [
 
 const PAGE_SIZE = 50;
 
+// Both checkboxes, from one place. They are the same control in two rows and
+// were styled in two spots, which is how they ended up a pixel out.
+const CHECKBOX = { display: "block", margin: 0, width: 15, height: 15, cursor: "pointer" };
+
 // The columns, and everything true about each one in a single place: how wide,
 // which way a first sort click goes, and what kind of filter its popover
 // offers. The header and the body both read this, so a column cannot appear in
@@ -254,7 +258,7 @@ export default function ProspectingPage() {
             aria-label="Search leads"
             style={{
               width: 200, padding: "6px 10px", borderRadius: 8,
-              border: `1px solid ${theme.border}`, background: theme.inputBg,
+              border: `1px solid ${theme.border}`, background: theme.surface,
               color: theme.text, fontSize: 13,
             }}
           />
@@ -288,9 +292,15 @@ export default function ProspectingPage() {
             </colgroup>
             <thead>
               <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                <th style={{ padding: "8px 10px" }}>
+                {/* Centred in the row, not sat on the text baseline. A
+                    checkbox is an inline element, so without this it aligns to
+                    a baseline that the cell beside it does not share - and the
+                    header and body cells carried different padding, so the two
+                    columns of boxes did not line up with each other either. */}
+                <th style={{ padding: "8px 10px", verticalAlign: "middle", lineHeight: 0 }}>
                   <input
                     type="checkbox"
+                    style={CHECKBOX}
                     checked={allShown}
                     aria-label="Select every lead on this page"
                     onChange={() =>
@@ -519,7 +529,7 @@ function NewCampaign({ theme, onCreated }) {
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const field = {
     padding: "6px 10px", borderRadius: 8, border: `1px solid ${theme.border}`,
-    background: theme.inputBg, color: theme.text, fontSize: 13,
+    background: theme.surface, color: theme.text, fontSize: 13,
   };
 
   async function create() {
@@ -725,6 +735,18 @@ function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded, menuOp
  *
  * Read in the order things happen, so the first true one wins.
  */
+// The pipeline writes its reasons for itself: "GB lead with
+// entity_type=unknown: individual subscriber under PECR until confirmed
+// otherwise" is exact and means nothing to somebody looking at a queue. The
+// full sentence stays in the tooltip; the line on the row says what it means.
+function holdReason(raw) {
+  const text = String(raw || "");
+  if (/entity_type=unknown/i.test(text)) return "no company record found";
+  if (/no contact email/i.test(text)) return "no email on the storefront";
+  if (/suppress/i.test(text)) return "on the suppression list";
+  return text.split(":")[0];
+}
+
 function StateCell({ lead, theme }) {
   const [label, colour] =
     lead.reply_state && lead.reply_state !== "sent"
@@ -744,7 +766,7 @@ function StateCell({ lead, theme }) {
       {lead.status !== "routed" && !lead.pushed_at && lead.review_reason && (
         <div title={lead.review_reason}
              style={{ color: theme.textMuted, fontSize: 11, whiteSpace: "normal", lineHeight: 1.3 }}>
-          {lead.review_reason.split(":")[0]}
+          {holdReason(lead.review_reason)}
         </div>
       )}
     </>
@@ -759,11 +781,11 @@ function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, s
       style={{
         borderBottom: `1px solid ${theme.border}`,
         opacity: held ? 0.55 : 1,
-        background: selected ? theme.hoverBg : "transparent",
+        background: selected ? theme.surfaceAlt : "transparent",
       }}
     >
-      <td style={{ padding: "6px 10px" }}>
-        <input type="checkbox" checked={selected} onChange={onToggle}
+      <td style={{ padding: "6px 10px", verticalAlign: "middle", lineHeight: 0 }}>
+        <input type="checkbox" style={CHECKBOX} checked={selected} onChange={onToggle}
                aria-label={`Select ${lead.brand_name || lead.handle}`} />
       </td>
       {columns.map((col) => (
@@ -807,11 +829,15 @@ function SendToggle({ lead, theme, saving, onDecide }) {
       variant={on ? "solid" : "secondary"}
       color={on ? theme.success : undefined}
       disabled={saving}
-      title={on ? "Marked send - click to stop it going" : "Mark this lead to be emailed"}
+      title={on ? "Queued to be emailed - click to stop it going" : "Mark this lead to be emailed"}
       style={{ padding: "4px 14px", fontSize: 12 }}
       onClick={() => onDecide(lead.handle, on ? "pending" : "send")}
     >
-      {on ? "Sending" : "Send"}
+      {/* "Send" and "Sending" differ by two letters and both read as verbs, so
+          at a glance the row did not say which state it was in. The on-state
+          is a tick and a noun - a state, in the brand green - against an
+          outlined verb for the action. */}
+      {on ? "✓ Queued" : "Send"}
     </Btn>
   );
 }
@@ -838,7 +864,7 @@ function RowMenu({ lead, theme, saving, open, onOpenChange, onDecide }) {
           role="menu"
           style={{
             position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 20,
-            background: theme.cardBg, border: `1px solid ${theme.border}`,
+            background: theme.surface, border: `1px solid ${theme.border}`,
             borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", minWidth: 150,
             padding: 4,
           }}
@@ -910,7 +936,7 @@ function LeadDetail({ lead, theme, span = 9 }) {
 
   return (
     <tr>
-      <td colSpan={span} style={{ background: theme.hoverBg, padding: "16px 20px" }}>
+      <td colSpan={span} style={{ background: theme.surfaceAlt, padding: "16px 20px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1100 }}>
 
           {prose.length > 0 && (
