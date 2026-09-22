@@ -6,7 +6,12 @@ import { useTheme } from "../../contexts/ThemeContext";
 // in a new tab" are links — a button that fakes one with window.location loses
 // middle-click, cmd-click and the download attribute, and every one of those is
 // something a person expects from a thing that goes somewhere.
-export function Btn({ children, onClick, disabled, loading, color, variant = "solid", size = "md", style = {}, type = "button", title, href, target, download }) {
+// `rest` carries the attributes a button sometimes needs and this signature
+// cannot enumerate — aria-label and aria-expanded on an icon-only trigger, or a
+// data-* hook. Without it they were accepted at the call site and dropped
+// silently, so an overflow button whose only label was an aria-label reached
+// the DOM with no accessible name at all.
+export function Btn({ children, onClick, disabled, loading, color, variant = "solid", size = "md", style = {}, type = "button", title, href, target, download, ...rest }) {
   const { theme, mode } = useTheme();
   const c = variant === "danger" ? "#DC2626" : (color || theme.accent);
   const pad = size === "sm" ? "7px 15px" : "10px 22px";
@@ -38,6 +43,7 @@ export function Btn({ children, onClick, disabled, loading, color, variant = "so
         onClick={onClick}
         className={`lk-btn lk-btn-${variant}`}
         style={{ ...dressing, textDecoration: "none" }}
+        {...rest}
       >
         {loading && <Spinner size={fs - 2} color={fg} />}
         {children}
@@ -46,7 +52,7 @@ export function Btn({ children, onClick, disabled, loading, color, variant = "so
   }
 
   return (
-    <button onClick={onClick} disabled={isDisabled} type={type} title={title} className={`lk-btn lk-btn-${variant}`} style={dressing}>
+    <button onClick={onClick} disabled={isDisabled} type={type} title={title} className={`lk-btn lk-btn-${variant}`} style={dressing} {...rest}>
       {loading && <Spinner size={fs - 2} color={fg} />}
       {children}
     </button>
