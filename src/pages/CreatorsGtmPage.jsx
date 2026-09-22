@@ -7,7 +7,6 @@ import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
 import {
-  ColumnFilter,
   DragHandle,
   HeaderCell,
   ResizeHandle,
@@ -32,8 +31,14 @@ import {
  * three different brands is doing it as a habit, where one could be a customer
  * who liked something.
  *
- * Same contract as Brands: hold and hide stop the invite going out, they do not
- * tidy the list.
+ * Same contract as Brands, and the same shape on screen so neither page has to
+ * be learned twice: one Invite toggle per row, four tiles that are also the
+ * filter, and no per-column popovers.
+ *
+ * A creator is invited if and only if the decision is `send`. Pending, hold and
+ * hide are one instruction to the sender - not this one - so the row asks one
+ * question rather than three. Across all 49 creators the old three-button
+ * control had produced exactly nothing: every row still reads `pending`.
  */
 
 const TIERS = [
@@ -43,12 +48,17 @@ const TIERS = [
   { value: "C", label: "Tier C" },
 ];
 
-const DECISIONS = [
-  { value: "", label: "All decisions" },
-  { value: "pending", label: "Undecided" },
-  { value: "send", label: "Invite" },
-  { value: "hold", label: "Hold" },
-  { value: "hide", label: "Hidden" },
+// The funnel, and the only way to slice this table. Each is a tile you click.
+//
+// `blocked` is the one that was nowhere: a creator who is not qualified, or
+// whose bio gave up no email, cannot be invited however often somebody clicks
+// invite. The server already knew - it sends a `blocked` reason per row - but
+// there was no way to ask how many there were.
+const VIEWS = [
+  { value: "review", label: "To review", hint: "nobody has said invite" },
+  { value: "queued", label: "Queued to invite", hint: "goes on the next tick" },
+  { value: "invited", label: "Invited", hint: "handed to Lemlist" },
+  { value: "blocked", label: "Cannot invite", hint: "no email, or not qualified" },
 ];
 
 const PAGE_SIZE = 50;
@@ -65,24 +75,21 @@ function withCounts(options, counts) {
 
 // Same shape as the Brands table: one place that says what each column is,
 // read by both the header and the body so they cannot drift apart.
+//
+// No per-column filter popovers - the tiles and the toolbar already reach
+// everything they reached, from one place instead of two. "Found via" is gone
+// with them: it reads brand_mentions on all 49 rows, because that is the only
+// finder that has run.
 const COLUMNS = [
-  { key: "tier", label: "Tier", width: 90, sort: "asc",
-    filter: { type: "select", options: ["A", "B", "C", "reject"] } },
-  { key: "handle", label: "Creator", width: 240, sort: "asc", fill: true,
-    filter: { type: "text", placeholder: "Handle or name…" } },
-  { key: "followers", label: "Followers", width: 120, sort: "desc", right: true,
-    filter: { type: "number" } },
-  { key: "brands_posted_about", label: "Brands", width: 110, sort: "desc", right: true,
-    filter: { type: "number" } },
-  { key: "contact_email", label: "Email", width: 230, sort: "asc",
-    filter: { type: "text", placeholder: "Email…" } },
-  { key: "niche", label: "Niche", width: 130, sort: "asc",
-    filter: { type: "text", placeholder: "Niche…" } },
-  { key: "source", label: "Found via", width: 140, sort: "asc",
-    filter: { type: "select", options: ["brand_mentions", "influencers_club"] } },
-  { key: "decision", label: "Decision", width: 220 },
+  { key: "tier", label: "Tier", width: 80, sort: "asc" },
+  { key: "handle", label: "Creator", width: 260, sort: "asc", fill: true },
+  { key: "followers", label: "Followers", width: 120, sort: "desc", right: true },
+  { key: "brands_posted_about", label: "Brands", width: 110, sort: "desc", right: true },
+  { key: "contact_email", label: "Email", width: 240, sort: "asc" },
+  { key: "state", label: "State", width: 150, sort: "desc" },
+  { key: "actions", label: "Actions", width: 180, resizable: false },
 ];
-const FIXED_KEYS = [];
+const FIXED_KEYS = ["actions"];
 const DEFAULT_WIDTHS = fitWidths(COLUMNS);
 
 export default function CreatorsGtmPage() {
@@ -94,12 +101,12 @@ export default function CreatorsGtmPage() {
   const [problem, setProblem] = useState(null);
   const [page, setPage] = useState(0);
   const [tier, setTier] = useState("");
-  const [decision, setDecision] = useState("");
+  const [view, setView] = useState("");
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState(null);
 
   const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
-  const [colFilters, setColFilters] = useState({});
+  const [menu, setMenu] = useState(null);
 
   const { widths, sized, startResize, resetWidth } =
     useColumnWidths("prospector-creators", DEFAULT_WIDTHS, FIXED_KEYS);
@@ -110,8 +117,10 @@ export default function CreatorsGtmPage() {
     setSort((cur) => nextSort(cur, colKey, defaultDir));
     setPage(0);
   }, []);
-  const setColFilter = useCallback((key, value) => {
-    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
+  // Clicking the tile you are on clears it, so one control both narrows the
+  // table and gives the whole list back.
+  const chooseView = useCallback((next) => {
+    setView((cur) => (cur === next ? "" : next));
     setPage(0);
   }, []);
 
@@ -121,7 +130,7 @@ export default function CreatorsGtmPage() {
     try {
       const [rows, s] = await Promise.all([
         api.getProspectingCreators({
-          tier, decision, q, filters: colFilters,
+          tier, view, q,
           sortBy: sort.sortBy, sortDir: sort.sortDir,
           limit: PAGE_SIZE, offset: page * PAGE_SIZE,
         }),
@@ -136,7 +145,7 @@ export default function CreatorsGtmPage() {
     } finally {
       setLoading(false);
     }
-  }, [tier, decision, q, page, sort.sortBy, sort.sortDir, colFilters]);
+  }, [tier, view, q, page, sort.sortBy, sort.sortDir]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -157,11 +166,6 @@ export default function CreatorsGtmPage() {
   const totalWidth = orderedColumns.reduce(
     (sum, c) => sum + (c.fill && !sized.has(c.key) ? 160 : (widths[c.key] || c.width)), 0);
 
-  const tiles = [
-    { label: "Reachable", value: stats?.contactable ?? 0, hint: "email, not held" },
-    { label: "Posts about 2+", value: stats?.multiBrand ?? 0, hint: "doing it as a habit" },
-    { label: "Invited", value: stats?.invited ?? 0, hint: "already contacted" },
-  ];
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -169,7 +173,7 @@ export default function CreatorsGtmPage() {
         <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Creators</h1>
         <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 700 }}>
           Found by the brand pipeline: they posted about a brand we were looking at, which
-          means they already do this. Hold and hide stop the invite being sent.
+          means they already do this. A creator is invited only if marked Invite.
         </p>
       </div>
 
@@ -186,19 +190,8 @@ export default function CreatorsGtmPage() {
           describe what finding them produced. */}
       <FindCreators theme={theme} onAdded={load} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        {tiles.map((t) => (
-          <Card key={t.label}>
-            <div style={{ padding: 14 }}>
-              <div style={{ color: theme.textMuted, fontSize: 12 }}>{t.label}</div>
-              {loading && !stats
-                ? <Skeleton style={{ height: 26, width: 48, marginTop: 6 }} />
-                : <div style={{ fontSize: 24, color: theme.text, fontWeight: 600 }}>{t.value}</div>}
-              <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{t.hint}</div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <ViewTiles stats={stats} loading={loading && !stats} theme={theme}
+                 view={view} onChoose={chooseView} />
 
       <Card>
         <div style={{ display: "flex", gap: 10, padding: 12, flexWrap: "wrap",
@@ -206,10 +199,6 @@ export default function CreatorsGtmPage() {
           <div style={{ width: 150 }}>
             <Select value={tier} onChange={(v) => { setTier(v); setPage(0); }}
                     options={withCounts(TIERS, stats?.byTier)} ariaLabel="Tier" size="sm" />
-          </div>
-          <div style={{ width: 150 }}>
-            <Select value={decision} onChange={(v) => { setDecision(v); setPage(0); }}
-                    options={DECISIONS} ariaLabel="Decision" size="sm" />
           </div>
           <input
             value={q}
@@ -253,17 +242,8 @@ export default function CreatorsGtmPage() {
                   >
                     <HeaderCell
                       align={col.right ? "right" : "left"}
-                      grip={<DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />}
-                      trailing={col.filter && (
-                        <ColumnFilter
-                          theme={theme}
-                          label={col.label}
-                          type={col.filter.type}
-                          options={col.filter.options}
-                          placeholder={col.filter.placeholder}
-                          value={colFilters[col.key] || ""}
-                          onCommit={(v) => setColFilter(col.key, v)}
-                        />
+                      grip={!FIXED_KEYS.includes(col.key) && (
+                        <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
                       )}
                     >
                       {col.sort ? (
@@ -308,10 +288,14 @@ export default function CreatorsGtmPage() {
                       <td key={col.key} style={{
                         padding: "6px 10px", color: theme.text,
                         textAlign: col.right ? "right" : "left",
-                        overflow: "hidden", textOverflow: "ellipsis",
+                        // Everything clips so a long email cannot print over the
+                        // next column - except Actions, whose menu must escape.
+                        overflow: col.key === "actions" ? "visible" : "hidden",
+                        textOverflow: "ellipsis",
                         whiteSpace: col.key === "handle" ? "normal" : "nowrap",
                       }}>
-                        {creatorCell(col, { c, theme, saving, decide })}
+                        {creatorCell(col, { c, theme, saving, decide,
+                                            menuOpen: menu === c.handle, onMenu: setMenu })}
                       </td>
                     ))}
                   </tr>
@@ -508,7 +492,7 @@ function FindCreators({ theme, onAdded }) {
  * One creator's cells, keyed on the column rather than written in a fixed
  * order, so reordering the header reorders the body with it.
  */
-function creatorCell(col, { c, theme, saving, decide }) {
+function creatorCell(col, { c, theme, saving, decide, menuOpen, onMenu }) {
   switch (col.key) {
     case "tier":
       return c.tier || "—";
@@ -544,44 +528,151 @@ function creatorCell(col, { c, theme, saving, decide }) {
           {c.contact_email || "none found"}
         </span>
       );
-    case "niche":
-      return c.niche || <span style={{ color: theme.textMuted }}>—</span>;
-    case "source":
-      return <span style={{ color: theme.textMuted, fontSize: 12 }}>
-        {(c.source || "").replace("_", " ") || "—"}
-      </span>;
-    case "decision":
+    case "state":
+      return <StateCell c={c} theme={theme} />;
+    case "actions":
+      // Header left, content grouped right and tight: the house rule for an
+      // Actions column everywhere in ops.
       return (
-        <>
-          {/* A creator who cannot be invited says so rather than offering a
-              button that does nothing. */}
-          {c.blocked && (
-            <div style={{ color: theme.textMuted, fontSize: 11, marginBottom: 4 }} title={c.blocked}>
-              {c.blocked.length > 40 ? c.blocked.slice(0, 40) + "…" : c.blocked}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 4, opacity: c.blocked ? 0.45 : 1 }}>
-            {[["send", "invite", theme.success],
-              ["hold", "hold", theme.warning],
-              ["hide", "hide", theme.textMuted]].map(([value, label, colour]) => {
-              const chosen = c.decision === value;
-              return (
-                <Btn key={value} size="sm"
-                     variant={chosen ? "solid" : "secondary"}
-                     color={chosen ? colour : undefined}
-                     style={{ padding: "4px 12px", fontSize: 12,
-                              opacity: chosen || !c.decision || c.decision === "pending" ? 1 : 0.5 }}
-                     disabled={saving === c.handle}
-                     title={chosen ? `${label} - click to undo` : `Mark ${label}`}
-                     onClick={() => decide(c.handle, chosen ? "pending" : value)}>
-                  {label}
-                </Btn>
-              );
-            })}
-          </div>
-        </>
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
+          <InviteToggle c={c} theme={theme} saving={saving === c.handle} decide={decide} />
+          <RowMenu c={c} theme={theme} saving={saving === c.handle}
+                   open={menuOpen} onOpenChange={onMenu} decide={decide} />
+        </div>
       );
     default:
       return c[col.key] ?? null;
   }
+}
+
+/**
+ * How far this creator has got, in one word - and, when they cannot go any
+ * further, why.
+ *
+ * The reason was already computed on the server and already sent down as
+ * `blocked`; it was rendered above three buttons in a 40-character truncation
+ * nobody would read. It is the state now, because for a blocked creator it is
+ * the only thing about them worth knowing.
+ */
+function StateCell({ c, theme }) {
+  if (c.reply_state && c.reply_state !== "sent") {
+    return <span style={{ color: theme.success }}>{c.reply_state.replace("_", " ")}</span>;
+  }
+  if (c.pushed_at) return <span style={{ color: theme.text }}>invited</span>;
+  if (c.blocked) {
+    return (
+      <span title={c.blocked} style={{ color: theme.warning }}>
+        {c.blocked.length > 22 ? c.blocked.slice(0, 22) + "…" : c.blocked}
+      </span>
+    );
+  }
+  if (c.decision === "hide") return <span style={{ color: theme.textMuted }}>hidden</span>;
+  if (c.decision === "send") {
+    // Which of the two sequences they would get. The cold one is the weaker,
+    // and it should never be a surprise that it is about to go.
+    return (
+      <>
+        <div style={{ color: theme.text }}>queued</div>
+        <div style={{ color: theme.textMuted, fontSize: 11 }}>{c.invite} email</div>
+      </>
+    );
+  }
+  return <span style={{ color: theme.textMuted }}>—</span>;
+}
+
+/**
+ * The one bit that matters, as one button. A creator is handed to Lemlist if
+ * and only if the decision is `send`, so the other three values were three
+ * ways of writing the same instruction.
+ */
+function InviteToggle({ c, theme, saving, decide }) {
+  const on = c.decision === "send";
+  return (
+    <Btn
+      size="sm"
+      variant={on ? "solid" : "secondary"}
+      color={on ? theme.success : undefined}
+      disabled={saving || (!on && Boolean(c.blocked))}
+      title={c.blocked && !on ? c.blocked
+            : on ? "Marked invite - click to stop it going"
+            : `Invite this creator (${c.invite} email)`}
+      style={{ padding: "4px 14px", fontSize: 12 }}
+      onClick={() => decide(c.handle, on ? "pending" : "send")}
+    >
+      {on ? "Inviting" : "Invite"}
+    </Btn>
+  );
+}
+
+/**
+ * Putting a creator away, behind an overflow because it is rare - and a rare
+ * action sitting permanently beside a common one is most of what makes a table
+ * look busy.
+ */
+function RowMenu({ c, theme, saving, open, onOpenChange, decide }) {
+  const hidden = c.decision === "hide";
+  return (
+    <div style={{ position: "relative" }}>
+      <Btn variant="secondary" size="sm" disabled={saving}
+           aria-label={`More actions for @${c.handle}`} aria-expanded={open}
+           onClick={() => onOpenChange(open ? null : c.handle)}>
+        ···
+      </Btn>
+      {open && (
+        <div role="menu" style={{
+          position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 20,
+          background: theme.cardBg, border: `1px solid ${theme.border}`,
+          borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", minWidth: 160, padding: 4,
+        }}>
+          <button type="button" role="menuitem"
+            onClick={() => { onOpenChange(null); decide(c.handle, hidden ? "pending" : "hide"); }}
+            style={{
+              display: "block", width: "100%", textAlign: "left", padding: "7px 10px",
+              background: "transparent", border: "none", cursor: "pointer",
+              color: theme.text, fontSize: 13, borderRadius: 6, font: "inherit",
+            }}>
+            {hidden ? "Unhide" : "Hide this creator"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Four numbers, each one the filter for itself.
+ *
+ * They were three that only described the table - you read "Invited 0", then
+ * found "Invited" again in a select below to actually see it. A count you
+ * cannot click is a fact you have to act on somewhere else.
+ */
+function ViewTiles({ stats, loading, theme, view, onChoose }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+      {VIEWS.map((t) => {
+        const active = view === t.value;
+        return (
+          <Card key={t.value}>
+            <button type="button" onClick={() => onChoose(t.value)} aria-pressed={active}
+              style={{
+                display: "block", width: "100%", textAlign: "left", padding: 14,
+                background: active ? theme.accentLight : "transparent",
+                border: "none", borderRadius: "inherit", cursor: "pointer", font: "inherit",
+                boxShadow: active ? `inset 0 0 0 1px ${theme.accent}` : "none",
+              }}>
+              <div style={{ color: active ? theme.accent : theme.textMuted, fontSize: 12 }}>
+                {t.label}
+              </div>
+              {loading
+                ? <Skeleton style={{ height: 26, width: 48, marginTop: 6 }} />
+                : <div style={{ fontSize: 24, color: theme.text, fontWeight: 600 }}>
+                    {stats?.byView?.[t.value] ?? 0}
+                  </div>}
+              <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{t.hint}</div>
+            </button>
+          </Card>
+        );
+      })}
+    </div>
+  );
 }

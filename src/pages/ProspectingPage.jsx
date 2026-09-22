@@ -7,7 +7,6 @@ import { Select } from "../components/ui/Select";
 import { Skeleton, SkeletonTableRows } from "../components/ui/Skeleton";
 import { Pagination } from "../components/ui/Pagination";
 import {
-  ColumnFilter,
   DragHandle,
   HeaderCell,
   ResizeHandle,
@@ -29,10 +28,21 @@ import {
  * database sells, because it only exists by crossing Instagram activity with
  * storefront technographics.
  *
- * What this page is for is the decision, not the browsing. The pipeline
- * proposes; a person here says send, hold or hide, and the pipeline reads that
- * back before it hands anything to Lemlist. Holding a lead is therefore not a
- * view filter — it is what stops the email. Hiding one suppresses it outright.
+ * What this page is for is the decision, not the browsing — and there is only
+ * one decision, because `ops_require_decision` is on in the pipeline and a
+ * lead is emailed if and only if it is marked send. Pending, hold and hide all
+ * mean the same thing to the sender: not this one.
+ *
+ * So the row carries one Send toggle and nothing else. It used to carry three
+ * buttons — send, hold and hide — which is eighty-one controls on a screen of
+ * twenty-seven leads to express a single bit, and the page had to spend a line
+ * of its own subtitle explaining that two of the three did the same thing.
+ * Across the whole table those two were worth one row: 25 send, 1 pending,
+ * 1 hold, 0 hide.
+ *
+ * Hide survives in the overflow, because putting a lead away is a real thing
+ * to want and it is not the same as deciding about it. Hold is no longer
+ * offered; rows still holding it read as undecided, which is what it meant.
  *
  * The pipeline itself runs outside this app and is not startable from here.
  * That is deliberate for now rather than missing: it spends money per run, and
@@ -46,12 +56,19 @@ const TIERS = [
   { value: "C", label: "Tier C" },
 ];
 
-const DECISIONS = [
-  { value: "", label: "All decisions" },
-  { value: "pending", label: "Undecided" },
-  { value: "send", label: "Send" },
-  { value: "hold", label: "Hold" },
-  { value: "hide", label: "Hidden" },
+// The funnel, in order, and the only way to slice this table. Each one is a
+// tile you click rather than an option you find in a select — a count you
+// cannot act on and a filter you cannot see the size of were the same three
+// facts printed twice.
+//
+// `blocked` is the one that was nowhere on the page: a lead the pipeline has
+// not routed cannot be emailed whatever its decision says, and six leads marked
+// send were sitting in it.
+const VIEWS = [
+  { value: "review", label: "To review", hint: "nobody has said send" },
+  { value: "queued", label: "Queued to send", hint: "goes on the next tick" },
+  { value: "sent", label: "Sent", hint: "handed to Lemlist" },
+  { value: "blocked", label: "Needs review", hint: "cannot send yet" },
 ];
 
 const PAGE_SIZE = 50;
@@ -64,21 +81,21 @@ const PAGE_SIZE = 50;
 // `select` is the leading checkbox and `actions` the trailing Details button:
 // both fixed, neither reorderable, because a table whose checkbox has wandered
 // into the middle is a table nobody can use.
+// No per-column filter popovers. Every column that had one was already
+// reachable from the toolbar above it or the tiles above that, so the page
+// carried two filtering systems that did the same job and disagreed about
+// where you would look for it. Sorting, dragging and resizing stay.
+//
+// "Affiliate app" is gone with them. It is the defining fact of a tier — Tier A
+// means there is no affiliate app — so on a table that is mostly Tier A it was
+// a column of the word "none".
 const COLUMNS = [
-  { key: "tier", label: "Tier", width: 90, sort: "asc",
-    filter: { type: "select", options: ["A", "B", "C", "reject"] } },
-  { key: "brand_name", label: "Brand", width: 240, sort: "asc", fill: true,
-    filter: { type: "text", placeholder: "Brand or domain…" } },
-  { key: "distinct_creators_90d", label: "Creators", width: 110, sort: "desc", right: true,
-    filter: { type: "number" } },
-  { key: "affiliate_app", label: "Affiliate app", width: 150, sort: "asc",
-    filter: { type: "text", placeholder: "App name…" } },
-  { key: "contact_email", label: "Email", width: 230, sort: "asc",
-    filter: { type: "text", placeholder: "Email…" } },
-  { key: "reply_state", label: "Reply", width: 110, sort: "desc",
-    filter: { type: "select", options: ["sent", "opened", "clicked", "replied", "bounced", "unsubscribed"] } },
-  { key: "decision", label: "Decision", width: 200 },
-  { key: "actions", label: "Actions", width: 120, resizable: false },
+  { key: "tier", label: "Tier", width: 80, sort: "asc" },
+  { key: "brand_name", label: "Brand", width: 260, sort: "asc", fill: true },
+  { key: "distinct_creators_90d", label: "Creators", width: 110, sort: "desc", right: true },
+  { key: "contact_email", label: "Email", width: 240, sort: "asc" },
+  { key: "state", label: "State", width: 130, sort: "desc" },
+  { key: "actions", label: "Actions", width: 190, resizable: false },
 ];
 const FIXED_KEYS = ["actions"];
 const DEFAULT_WIDTHS = fitWidths(COLUMNS);
@@ -104,13 +121,13 @@ export default function ProspectingPage() {
   const [problem, setProblem] = useState(null);
   const [page, setPage] = useState(0);
   const [tier, setTier] = useState("");
-  const [decision, setDecision] = useState("");
+  const [view, setView] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [saving, setSaving] = useState(null);
   const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
-  const [colFilters, setColFilters] = useState({});
+  const [menu, setMenu] = useState(null);
 
   const { widths, sized, startResize, resetWidth } =
     useColumnWidths("prospector-leads", DEFAULT_WIDTHS, FIXED_KEYS);
@@ -122,8 +139,10 @@ export default function ProspectingPage() {
     setPage(0);
   }, []);
 
-  const setColFilter = useCallback((key, value) => {
-    setColFilters((cur) => (cur[key] === value ? cur : { ...cur, [key]: value }));
+  // Clicking the tile you are already on clears it, so the same control both
+  // narrows the table and gives you the whole list back.
+  const chooseView = useCallback((next) => {
+    setView((cur) => (cur === next ? "" : next));
     setPage(0);
   }, []);
 
@@ -133,7 +152,7 @@ export default function ProspectingPage() {
     try {
       const [rows, s] = await Promise.all([
         api.getProspectingLeads({
-          tier, decision, q, filters: colFilters,
+          tier, view, q,
           sortBy: sort.sortBy, sortDir: sort.sortDir,
           limit: PAGE_SIZE, offset: page * PAGE_SIZE,
         }),
@@ -151,7 +170,7 @@ export default function ProspectingPage() {
     } finally {
       setLoading(false);
     }
-  }, [tier, decision, q, page, sort.sortBy, sort.sortDir, colFilters]);
+  }, [tier, view, q, page, sort.sortBy, sort.sortDir]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -199,8 +218,8 @@ export default function ProspectingPage() {
         <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Brands</h1>
         <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 680 }}>
           Shopify brands with creators posting about them. Tier A have no affiliate app,
-          so they cannot attribute any of it. Decide here: hold and hide stop the email
-          being sent, they do not just tidy the list.
+          so they cannot attribute any of it. A lead is emailed only if it is marked
+          Send.
         </p>
       </div>
 
@@ -214,7 +233,8 @@ export default function ProspectingPage() {
 
       <Campaigns theme={theme} />
 
-      <StatTiles stats={stats} loading={loading && !stats} theme={theme} />
+      <ViewTiles stats={stats} loading={loading && !stats} theme={theme}
+                 view={view} onChoose={chooseView} />
 
       <Card>
         {/* Filters sized to their contents, like everywhere else in ops: a
@@ -226,10 +246,6 @@ export default function ProspectingPage() {
           <div style={{ width: 150 }}>
             <Select value={tier} onChange={(v) => { setTier(v); setPage(0); }}
                     options={withCounts(TIERS, stats?.byTier)} ariaLabel="Tier" size="sm" />
-          </div>
-          <div style={{ width: 170 }}>
-            <Select value={decision} onChange={(v) => { setDecision(v); setPage(0); }}
-                    options={withCounts(DECISIONS, stats?.byDecision)} ariaLabel="Decision" size="sm" />
           </div>
           <input
             value={q}
@@ -250,7 +266,6 @@ export default function ProspectingPage() {
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <span style={{ color: theme.textMuted, fontSize: 12 }}>{selected.size} selected</span>
               <Btn onClick={() => decideMany("send")} disabled={saving === "bulk"}>Send</Btn>
-              <Btn variant="secondary" onClick={() => decideMany("hold")} disabled={saving === "bulk"}>Hold</Btn>
               <Btn variant="secondary" onClick={() => decideMany("hide")} disabled={saving === "bulk"}>Hide</Btn>
             </div>
           )}
@@ -298,17 +313,6 @@ export default function ProspectingPage() {
                       align={col.right ? "right" : "left"}
                       grip={!FIXED_KEYS.includes(col.key) && (
                         <DragHandle colKey={col.key} dragHandleProps={dragHandleProps} theme={theme} />
-                      )}
-                      trailing={col.filter && (
-                        <ColumnFilter
-                          theme={theme}
-                          label={col.label}
-                          type={col.filter.type}
-                          options={col.filter.options}
-                          placeholder={col.filter.placeholder}
-                          value={colFilters[col.key] || ""}
-                          onCommit={(v) => setColFilter(col.key, v)}
-                        />
                       )}
                     >
                       {col.sort ? (
@@ -358,6 +362,8 @@ export default function ProspectingPage() {
                       onDecide={decide}
                       saving={saving === lead.handle}
                       expanded={open === lead.handle}
+                      menuOpen={menu === lead.handle}
+                      onMenu={setMenu}
                     />
                     {open === lead.handle && (
                       <LeadDetail lead={lead} theme={theme} span={orderedColumns.length + 1} />
@@ -594,37 +600,52 @@ function Labelled({ label, width, theme, children }) {
 }
 
 /**
- * Three numbers, not five.
+ * Four numbers, and each one is the filter for itself.
  *
- * Tier A and Tier B were two of them, and both were already a column in the
- * table and an option in the tier filter - so the page said the same thing
- * three times before showing a single lead. They are counts on the filter now,
- * where they are useful as a label rather than as a headline.
+ * They were three tiles that only described the table: you read "Undecided 1",
+ * then went to a select in the toolbar below and found "Undecided" a second
+ * time to actually see it. A count you cannot click is a fact you have to act
+ * on somewhere else.
  *
- * What is left is the three that describe work: how many could be written to,
- * how many nobody has ruled on, how many have gone.
+ * The fourth is new. "Needs review" is the leads the pipeline has not routed,
+ * which cannot be emailed whatever their decision says — six of them were
+ * marked send and going nowhere, and the page gave no hint they existed.
  */
-function StatTiles({ stats, loading, theme }) {
-  const tiles = [
-    { label: "Ready to contact", value: stats?.contactable ?? 0, hint: "routed, with an email, not held" },
-    { label: "Undecided", value: stats?.byDecision?.pending ?? 0, hint: "waiting on a call" },
-    { label: "Already sent", value: stats?.sent ?? 0, hint: "handed to Lemlist" },
-  ];
+function ViewTiles({ stats, loading, theme, view, onChoose }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-      {tiles.map((t) => (
-        <Card key={t.label}>
-          <div style={{ padding: 14 }}>
-            <div style={{ color: theme.textMuted, fontSize: 12 }}>{t.label}</div>
-            {loading ? (
-              <Skeleton style={{ height: 26, width: 48, marginTop: 6 }} />
-            ) : (
-              <div style={{ fontSize: 24, color: theme.text, fontWeight: 600 }}>{t.value}</div>
-            )}
-            <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{t.hint}</div>
-          </div>
-        </Card>
-      ))}
+      {VIEWS.map((t) => {
+        const active = view === t.value;
+        return (
+          <Card key={t.value}>
+            <button
+              type="button"
+              onClick={() => onChoose(t.value)}
+              aria-pressed={active}
+              style={{
+                display: "block", width: "100%", textAlign: "left", padding: 14,
+                background: active ? theme.accentLight : "transparent",
+                border: "none", borderRadius: "inherit", cursor: "pointer", font: "inherit",
+                // The selected tile is the only thing telling you why the table
+                // below is short, so it has to survive a glance.
+                boxShadow: active ? `inset 0 0 0 1px ${theme.accent}` : "none",
+              }}
+            >
+              <div style={{ color: active ? theme.accent : theme.textMuted, fontSize: 12 }}>
+                {t.label}
+              </div>
+              {loading ? (
+                <Skeleton style={{ height: 26, width: 48, marginTop: 6 }} />
+              ) : (
+                <div style={{ fontSize: 24, color: theme.text, fontWeight: 600 }}>
+                  {stats?.byView?.[t.value] ?? 0}
+                </div>
+              )}
+              <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{t.hint}</div>
+            </button>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -636,7 +657,7 @@ function StatTiles({ stats, loading, theme }) {
  * can be reordered - then the header says one thing and the body another. A
  * single renderer keyed on the column means they cannot disagree.
  */
-function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded }) {
+function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded, menuOpen, onMenu }) {
   switch (col.key) {
     case "tier":
       return <TierBadge tier={lead.tier} theme={theme} />;
@@ -666,10 +687,6 @@ function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded }) {
           </div>
         </>
       );
-    case "affiliate_app":
-      return lead.affiliate_app && lead.affiliate_app !== "none"
-        ? lead.affiliate_app
-        : <span style={{ color: theme.textMuted }}>none</span>;
     case "contact_email":
       return (
         <span title={lead.contact_email || ""}
@@ -677,18 +694,19 @@ function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded }) {
           {lead.contact_email || "none found"}
         </span>
       );
-    case "reply_state":
-      return lead.reply_state
-        ? <span style={{ color: theme.text }}>{lead.reply_state.replace("_", " ")}</span>
-        : <span style={{ color: theme.textMuted }}>—</span>;
-    case "decision":
-      return <Decision lead={lead} theme={theme} saving={saving} onDecide={onDecide} />;
+    case "state":
+      return <StateCell lead={lead} theme={theme} />;
     case "actions":
+      // Header left, content grouped right and tight: the house rule for an
+      // Actions column everywhere in ops.
       return (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
+          <SendToggle lead={lead} theme={theme} saving={saving} onDecide={onDecide} />
           <Btn variant="secondary" size="sm" onClick={onOpen}>
             {expanded ? "Less" : "Details"}
           </Btn>
+          <RowMenu lead={lead} theme={theme} saving={saving}
+                   open={menuOpen} onOpenChange={onMenu} onDecide={onDecide} />
         </div>
       );
     default:
@@ -696,7 +714,31 @@ function leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded }) {
   }
 }
 
-function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, saving, expanded }) {
+/**
+ * How far this lead has actually got, in one word.
+ *
+ * There were two columns for this — "Reply", which was blank until Lemlist
+ * said something, and "Decision", which was three buttons. Neither answered
+ * the question you actually arrive with, which is whether this brand has been
+ * emailed yet, because that lives in a third column the table never showed
+ * (`status`, and a lead that is not `routed` never goes).
+ *
+ * Read in the order things happen, so the first true one wins.
+ */
+function StateCell({ lead, theme }) {
+  const [label, colour] =
+    lead.reply_state && lead.reply_state !== "sent"
+      ? [lead.reply_state.replace("_", " "), theme.success]
+    : lead.pushed_at ? ["sent", theme.text]
+    : lead.decision === "hide" ? ["hidden", theme.textMuted]
+    : lead.status !== "routed" ? ["needs review", theme.warning]
+    : lead.decision === "send" ? ["queued", theme.text]
+    : ["—", theme.textMuted];
+  return <span style={{ color: colour }}>{label}</span>;
+}
+
+function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, saving, expanded,
+                   menuOpen, onMenu }) {
   const held = lead.decision === "hold" || lead.decision === "hide";
   return (
     <tr
@@ -718,11 +760,14 @@ function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, s
             textAlign: col.right ? "right" : "left",
             // Clipped, so a long email cannot print itself over the next
             // column when somebody drags this one narrow.
-            overflow: "hidden", whiteSpace: col.key === "brand_name" ? "normal" : "nowrap",
+            // Every column clips, so a long email cannot print itself over the
+            // next one — except Actions, which has a menu that must escape.
+            overflow: col.key === "actions" ? "visible" : "hidden",
+            whiteSpace: col.key === "brand_name" ? "normal" : "nowrap",
             textOverflow: "ellipsis",
           }}
         >
-          {leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded })}
+          {leadCell(col, { lead, theme, saving, onDecide, onOpen, expanded, menuOpen, onMenu })}
         </td>
       ))}
     </tr>
@@ -730,49 +775,74 @@ function LeadRow({ lead, columns, theme, selected, onToggle, onOpen, onDecide, s
 }
 
 /**
- * Three small buttons instead of three large ones, and only the chosen one is
- * filled.
+ * The one bit that matters, as one button.
  *
- * At full size this was three pill buttons on every row - eighty-one of them
- * on a screen of twenty-seven leads - and they were the loudest thing on the
- * page by a distance. The table became a wall of identical controls with the
- * brands hidden between them, which is the opposite of what a page for
- * deciding needs: you have to be able to read the row before you can decide
- * anything about it.
+ * `ops_require_decision` is on in the pipeline, so a lead is handed to Lemlist
+ * if and only if its decision is `send`. Pending, hold and hide are all the
+ * same instruction — don't — and giving three of them a button each meant the
+ * table asked a three-way question about something with two answers.
  *
- * Clicking the current decision clears it back to undecided, which is why the
- * chosen one stays a button rather than becoming a label.
+ * Clicking a sending row turns it back off, which is why it stays a button
+ * rather than becoming a tick.
  */
-function Decision({ lead, theme, saving, onDecide }) {
-  const options = [
-    ["send", theme.success],
-    ["hold", theme.warning],
-    ["hide", theme.textMuted],
-  ];
+function SendToggle({ lead, theme, saving, onDecide }) {
+  const on = lead.decision === "send";
   return (
-    <div style={{ display: "flex", gap: 4 }}>
-      {options.map(([value, colour]) => {
-        const chosen = lead.decision === value;
-        return (
-          <Btn
-            key={value}
-            size="sm"
-            variant={chosen ? "solid" : "secondary"}
-            color={chosen ? colour : undefined}
-            disabled={saving}
-            title={chosen ? `${value} - click to undo` : `Mark ${value}`}
+    <Btn
+      size="sm"
+      variant={on ? "solid" : "secondary"}
+      color={on ? theme.success : undefined}
+      disabled={saving}
+      title={on ? "Marked send - click to stop it going" : "Mark this lead to be emailed"}
+      style={{ padding: "4px 14px", fontSize: 12 }}
+      onClick={() => onDecide(lead.handle, on ? "pending" : "send")}
+    >
+      {on ? "Sending" : "Send"}
+    </Btn>
+  );
+}
+
+/**
+ * Putting a lead away, which is not the same as deciding about it.
+ *
+ * Behind an overflow because it is rare — nought rows out of twenty-seven use
+ * it — and a rare action sitting permanently beside a common one is most of
+ * what makes a table look busy.
+ */
+function RowMenu({ lead, theme, saving, open, onOpenChange, onDecide }) {
+  const hidden = lead.decision === "hide";
+  return (
+    <div style={{ position: "relative" }}>
+      <Btn variant="secondary" size="sm" disabled={saving}
+           aria-label={`More actions for ${lead.brand_name || lead.handle}`}
+           aria-expanded={open}
+           onClick={() => onOpenChange(open ? null : lead.handle)}>
+        ···
+      </Btn>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 20,
+            background: theme.cardBg, border: `1px solid ${theme.border}`,
+            borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", minWidth: 150,
+            padding: 4,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { onOpenChange(null); onDecide(lead.handle, hidden ? "pending" : "hide"); }}
             style={{
-              padding: "4px 12px", fontSize: 12,
-              // A row nobody has decided on should not look like three
-              // rejected options. Quiet until it means something.
-              opacity: chosen || lead.decision === "pending" || !lead.decision ? 1 : 0.5,
+              display: "block", width: "100%", textAlign: "left", padding: "7px 10px",
+              background: "transparent", border: "none", cursor: "pointer",
+              color: theme.text, fontSize: 13, borderRadius: 6, font: "inherit",
             }}
-            onClick={() => onDecide(lead.handle, chosen ? "pending" : value)}
           >
-            {value}
-          </Btn>
-        );
-      })}
+            {hidden ? "Unhide" : "Hide this lead"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

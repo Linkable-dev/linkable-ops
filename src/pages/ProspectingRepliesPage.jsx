@@ -58,11 +58,14 @@ export default function ProspectingRepliesPage({ kind = "brand" }) {
   }, []);
 
   const f = data?.funnel || {};
+  // Humans only. A helpdesk acknowledging receipt used to land in here, which
+  // made the one number that says the copy works read 1 when it was 0.
   const replied = (f.replied || 0) + (f.interested || 0);
   const tiles = [
     { label: "Contacted", value: f.contacted ?? 0, hint: "handed to Lemlist" },
     { label: "Opened", value: f.opened ?? 0, hint: "people, not opens" },
-    { label: "Replied", value: replied, hint: "answered something" },
+    { label: "Replied", value: replied, hint: "a person answered" },
+    { label: "Auto-replied", value: f.auto_reply ?? 0, hint: "a ticket queue answered" },
     { label: "Stopped", value: (f.bounced || 0) + (f.unsubscribed || 0),
       hint: "bounced or opted out" },
   ];

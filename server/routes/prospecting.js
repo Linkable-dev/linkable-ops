@@ -109,13 +109,35 @@ export function prospectingRoutes() {
     "reply_state",
   ];
 
+  // The four slices the Brands tiles stand for. A view is one word from the
+  // client rather than a filter it assembles itself, because three of these are
+  // conditions on two columns at once and a client that gets one subtly wrong
+  // shows a number it cannot act on.
+  //
+  // They are the funnel in order, and they do not overlap:
+  //   review  nobody has said send yet, and it has not gone
+  //   queued  marked send, waiting for the next tick
+  //   sent    handed to Lemlist
+  //   blocked routed nowhere - compliance has not cleared it, so `send` on one
+  //           of these is an instruction the pipeline will never carry out.
+  //           Invisible until now, which is why six leads marked send had not
+  //           moved and the page offered no reason.
+  const VIEWS = {
+    review: (qy) => qy.in("decision", ["pending", "hold"]).is("pushed_at", null)
+                      .eq("status", "routed"),
+    queued: (qy) => qy.eq("decision", "send").is("pushed_at", null).eq("status", "routed"),
+    sent: (qy) => qy.not("pushed_at", "is", null),
+    blocked: (qy) => qy.neq("status", "routed").is("pushed_at", null),
+  };
+
   router.get("/leads", async (req, res) => {
-    const { tier, decision, status, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
+    const { tier, decision, status, view, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
     let query = supabase.from(TABLE).select(LIST_COLUMNS, { count: "exact" });
 
     if (tier) query = query.in("tier", String(tier).split(","));
     if (decision) query = query.in("decision", String(decision).split(","));
     if (status) query = query.in("status", String(status).split(","));
+    if (VIEWS[view]) query = VIEWS[view](query);
     if (q) {
       const term = `%${q}%`;
       query = query.or(
@@ -160,6 +182,20 @@ export function prospectingRoutes() {
         (r) => r.contact_email && r.status === "routed" && !["hold", "hide"].includes(r.decision)
       ).length,
       sent: rows.filter((r) => r.pushed_at).length,
+      // The same four slices the /leads `view` param selects, counted here so
+      // a tile and the table it filters can never disagree about how many
+      // there are. Kept in step with VIEWS above by hand - they are four lines
+      // each and a shared predicate would have to run in SQL and in JS anyway.
+      byView: {
+        review: rows.filter(
+          (r) => ["pending", "hold"].includes(r.decision) && !r.pushed_at && r.status === "routed"
+        ).length,
+        queued: rows.filter(
+          (r) => r.decision === "send" && !r.pushed_at && r.status === "routed"
+        ).length,
+        sent: rows.filter((r) => r.pushed_at).length,
+        blocked: rows.filter((r) => r.status !== "routed" && !r.pushed_at).length,
+      },
       untracked: rows.filter((r) => (r.affiliate_app || "none") === "none").length,
     });
   });
@@ -227,11 +263,28 @@ export function prospectingRoutes() {
     "creator_score", "status", "decision", "source", "pushed_at", "reply_state",
   ];
 
+  // The creator funnel, in the same four words as the brand one. The two
+  // pages do the same job on different rows, so they should not need learning
+  // twice.
+  //
+  // `blocked` is the machine-readable half of inviteBlockedReason below: a
+  // creator who is not qualified, or whose bio gave up no email, cannot be
+  // invited however many times somebody clicks invite.
+  const CREATOR_VIEWS = {
+    review: (qy) => qy.in("decision", ["pending", "hold"]).is("pushed_at", null)
+                      .eq("status", "qualified").not("contact_email", "is", null),
+    queued: (qy) => qy.eq("decision", "send").is("pushed_at", null),
+    invited: (qy) => qy.not("pushed_at", "is", null),
+    blocked: (qy) => qy.is("pushed_at", null)
+                       .or("status.neq.qualified,contact_email.is.null"),
+  };
+
   router.get("/creators", async (req, res) => {
-    const { tier, decision, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
+    const { tier, decision, view, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
     let query = supabase.from(CREATORS).select(CREATOR_COLUMNS, { count: "exact" });
     if (tier) query = query.in("tier", String(tier).split(","));
     if (decision) query = query.in("decision", String(decision).split(","));
+    if (CREATOR_VIEWS[view]) query = CREATOR_VIEWS[view](query);
     if (q) {
       const term = `%${q}%`;
       query = query.or(`handle.ilike.${term},full_name.ilike.${term},niche.ilike.${term}`);
@@ -278,7 +331,7 @@ export function prospectingRoutes() {
 
   router.get("/creators/stats", async (_req, res) => {
     const { data, error } = await supabase
-      .from(CREATORS).select("tier,decision,contact_email,brands_posted_about,pushed_at");
+      .from(CREATORS).select("tier,decision,status,contact_email,brands_posted_about,pushed_at");
     if (error) return handleError(res, error, "loading creator stats");
     const rows = data || [];
     const tally = (key) => rows.reduce((acc, r) => {
@@ -293,6 +346,19 @@ export function prospectingRoutes() {
       contactable: rows.filter((r) => r.contact_email && !["hold", "hide"].includes(r.decision)).length,
       multiBrand: rows.filter((r) => (r.brands_posted_about || 0) >= 2).length,
       invited: rows.filter((r) => r.pushed_at).length,
+      // The four slices CREATOR_VIEWS selects, so a tile and the table it
+      // filters cannot disagree about how many there are.
+      byView: {
+        review: rows.filter(
+          (r) => ["pending", "hold"].includes(r.decision) && !r.pushed_at
+                 && r.status === "qualified" && r.contact_email
+        ).length,
+        queued: rows.filter((r) => r.decision === "send" && !r.pushed_at).length,
+        invited: rows.filter((r) => r.pushed_at).length,
+        blocked: rows.filter(
+          (r) => !r.pushed_at && (r.status !== "qualified" || !r.contact_email)
+        ).length,
+      },
     });
   });
 
@@ -355,7 +421,11 @@ export function prospectingRoutes() {
       supabase.from(EVENTS)
         .select("activity_id,handle,email,event,campaign_name,subject,preview,interest_score,occurred_at")
         .eq("kind", kind)
-        .in("event", ["replied", "interested", "not_interested", "bounced", "unsubscribed"])
+        // auto_reply is listed so it stays visible rather than silently
+        // vanishing: "this brand's inbox is a ticket queue" is worth seeing,
+        // it just is not a reply.
+        .in("event", ["replied", "interested", "not_interested", "auto_reply",
+                      "bounced", "unsubscribed"])
         .order("occurred_at", { ascending: false })
         .limit(200),
       // Counted over people, not events: a lead that opened four times is one
