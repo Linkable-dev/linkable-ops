@@ -31,9 +31,13 @@ import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
  * a week, a campaign that has emailed four hundred creators and produced one
  * application — and this is the page that does it.
  *
- * Read-only on purpose. Starting, stopping and re-planning go through the main
- * app's own console, which enforces the search budget and the send guards; a
- * button here would write straight to the database and walk past both.
+ * It also starts them. The brand-facing console is built with
+ * PUBLIC_SOURCING_ENABLED=false in production, so in prod this is the only
+ * place an agent can be switched on at all — and a campaign that went live
+ * before agents existed has no agent row for the brand to switch on anyway.
+ * What is written is only ever what the agent READS on its next tick: its
+ * mode, its goal, its budget. Searching, pushing and sending still happen in
+ * service-grpc, behind the credit budget and the send guards.
  */
 
 // The states an agent can be in, in the words the machine uses, with the
@@ -47,7 +51,14 @@ const STATUS_COLORS = {
   paused:  { bg: "#F3F4F6", fg: "#4B5563", bgDark: "#1F2937", fgDark: "#9CA3AF" },
   failed:  { bg: "#FEE2E2", fg: "#991B1B", bgDark: "#3F1313", fgDark: "#FCA5A5" },
   off:     { bg: "#F3F4F6", fg: "#4B5563", bgDark: "#1F2937", fgDark: "#9CA3AF" },
+  // A campaign that has never been enrolled. Not grey like "off", because off
+  // is a decision and this is an unanswered question — the rows somebody came
+  // to this page to act on.
+  none:    { bg: "#EEF2FF", fg: "#3730A3", bgDark: "#1E1B4B", fgDark: "#A5B4FC" },
 };
+
+// The words for the states whose column value is not what a person would say.
+const STATUS_LABELS = { none: "not launched" };
 
 // The header, declared once so it cannot drift from the endpoint. `key` must
 // exist in AGENT_SORTS / AGENT_FILTERS in routes/autopilot.js — both sorting
@@ -163,6 +174,10 @@ function renderAgentCell(key, r, { theme, pill }) {
         </>
       );
     case "runs_used":
+      // A campaign with no agent has no budget — the numbers behind this are
+      // the defaults it WOULD be given, and printing them as "0/2" reads as a
+      // budget somebody set.
+      if (r.mode === "none") return "—";
       return (
         <>
           {r.runs_used}/{r.max_runs}
@@ -186,7 +201,7 @@ function renderAgentCell(key, r, { theme, pill }) {
     case "last_event_at":
       return ago(r.last_event_at);
     case "next_action_at":
-      return r.mode === "off" || ["done", "failed"].includes(r.status)
+      return ["off", "none"].includes(r.mode) || ["done", "failed"].includes(r.status)
         ? "—"
         : whenNext(r.next_action_at);
     default:
@@ -203,6 +218,9 @@ const FILTERS = [
     label: "Mode",
     type: "select",
     options: [
+      // First, because it is the one the page can do something about: an
+      // active campaign nobody has switched Autopilot on for.
+      { value: "none", label: "Not launched" },
       { value: "autonomous", label: "Autonomous" },
       { value: "assisted", label: "Assisted" },
       { value: "off", label: "Off" },
@@ -216,6 +234,7 @@ const FILTERS = [
       // First, because it is the reason anybody filters this page at all:
       // an agent that is switched on and going nowhere.
       { value: "stuck", label: "Stuck or parked" },
+      { value: "none", label: "Not launched" },
       { value: "working", label: "Working" },
       { value: "waiting", label: "Waiting" },
       { value: "idle", label: "Idle" },
@@ -377,7 +396,7 @@ export default function AutopilotPage() {
           whiteSpace: "nowrap",
         }}
       >
-        {value}
+        {STATUS_LABELS[value] || value}
       </span>
     );
   };

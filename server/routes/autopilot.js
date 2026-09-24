@@ -36,9 +36,21 @@ const LINK_APPLIED = 2;
 const LINK_ACCEPTED = 3;
 const ND = "deleted = '-infinity'";
 
-// Postgres "undefined_table". Sourcing has never been promoted to production,
-// so the prod database has none of these tables — a 500 there would read as a
-// broken page rather than as a feature that is not there yet.
+// products.status 2 = ACTIVE (PRODUCT_STATUS_ACTIVE in proto/products.proto).
+// The only campaign an agent will act on: its first move on anything else is
+// to stop itself, so it is also the only one worth offering a launch for.
+const CAMPAIGN_ACTIVE = 2;
+
+// The numbers a campaign launching today is enrolled with — houseGoalApplications
+// and houseMaxRuns in service-grpc/services/products_service.go. Used to fill
+// the editor for a campaign that has no agent row to read them from.
+const HOUSE_GOAL = 25;
+const HOUSE_MAX_RUNS = 2;
+
+// Postgres "undefined_table". Sourcing reached production on 21 Sep 2026 and
+// its tables follow the code, but this app deploys on its own schedule and can
+// be pointed at a database that has not caught up — a 500 there would read as
+// a broken page rather than as a feature that is not there yet.
 const UNDEFINED_TABLE = "42P01";
 
 function notPromoted(e) {
@@ -72,9 +84,13 @@ function clamp(raw, min, max) {
 // The agent's own log, written the way service-grpc writes it. An admin's
 // change belongs in the same timeline as the agent's decisions — a mode that
 // changed with no line saying who changed it reads as the agent's own doing.
-async function logAgentEvent(agentId, productId, action, summary, detail) {
+// Takes the router's own `query` rather than reaching for cloudSqlQuery: the
+// footnote must land on the same connection as the change it describes, or a
+// caller that injected one (a test, a transaction) writes the line somewhere
+// the row it points at does not exist.
+async function logAgentEvent(query, agentId, productId, action, summary, detail) {
   try {
-    await cloudSqlQuery(
+    await query(
       `INSERT INTO sourcing_agent_events (sourcing_agent_id, product_id, action, summary, detail)
        VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
       [agentId, productId, action, summary, detail],
@@ -101,8 +117,13 @@ const AGENT_FILTERS = {
     off: "a.mode = 'off'",
     assisted: "a.mode = 'assisted'",
     autonomous: "a.mode = 'autonomous'",
+    // Not a mode: a campaign with no agent row at all. Every comparison above
+    // is NULL for those rows and so excludes them, which is why this needs to
+    // be its own answer rather than falling out of "off".
+    none: "a.id IS NULL",
   }),
   status: enumFilter({
+    none: "a.id IS NULL",
     idle: "a.status = 'idle'",
     working: "a.status = 'working'",
     waiting: "a.status = 'waiting'",
@@ -133,15 +154,20 @@ const AGENT_FILTERS = {
 const AGENT_SORTS = {
   campaign_name: "p.title",
   brand_name: "b.store_name",
-  mode: "a.mode",
-  status: "a.status",
-  enrolled_at: "a.created",
+  // COALESCEd for the same reason the SELECT is: a campaign with no agent has
+  // no mode, and sorting it to wherever NULL lands scatters the launchable
+  // ones through the table instead of grouping them.
+  mode: "COALESCE(a.mode, 'none')",
+  status: "COALESCE(a.status, 'none')",
+  // Falls back to when the CAMPAIGN went live, which is what the column says
+  // and the only date an un-enrolled row has.
+  enrolled_at: "COALESCE(a.created, p.activated_at)",
   found: "COALESCE(f.found, 0)",
   contactable: "COALESCE(f.contactable, 0)",
   emailed: "COALESCE(f.emailed, 0)",
   replied: "COALESCE(r.replied, 0)",
   applied: "COALESCE(f.applied, 0)",
-  runs_used: "a.runs_used",
+  runs_used: "COALESCE(a.runs_used, 0)",
   searches_used: `(SELECT count(*) FROM sourcing_runs sr
                      JOIN products sp ON sp.id = sr.product_id
                     WHERE sp.user_id = p.user_id AND sr.${ND}
@@ -154,7 +180,9 @@ const AGENT_SORTS = {
 // moved most recently. It doubles as the tie-breaker under every other sort,
 // so the order inside equal values is stable rather than whatever the planner
 // felt like returning.
-const DEFAULT_ORDER = "a.status = 'working' DESC, ev.created DESC NULLS LAST, a.created DESC";
+const DEFAULT_ORDER =
+  "COALESCE(a.status, '') = 'working' DESC, ev.created DESC NULLS LAST, " +
+  "COALESCE(a.created, p.activated_at) DESC";
 
 export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
   const router = Router();
@@ -164,6 +192,15 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
   // One row per campaign that has an agent, whatever state it is in — an agent
   // that is off or stopped is exactly what somebody looking at this page needs
   // to see, so nothing is filtered out by default.
+  //
+  // Plus every ACTIVE campaign that has NO agent, which is the launch list.
+  // enrolSourcingAgent only runs at the NEW -> ACTIVE transition, so every
+  // campaign that went live before agents existed has no row; and the
+  // brand-facing console that could create one is built with
+  // PUBLIC_SOURCING_ENABLED=false in production, so it 404s there. Without
+  // these rows this page could watch agents but never start one, and an
+  // operator asked to "turn Autopilot on for that campaign" had nothing to
+  // click.
   router.get("/campaigns", async (req, res) => {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
@@ -175,7 +212,10 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       const columnFilters = parseColumnFilters(req.query);
       const params = [];
       const conds = filterConditions(columnFilters, AGENT_FILTERS, params);
-      const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+      // The set this page is about, before any filter narrows it: an agent, or
+      // a live campaign that could be given one.
+      const base = [`p.${ND}`, `(a.id IS NOT NULL OR p.status = ${CAMPAIGN_ACTIVE})`];
+      const where = `WHERE ${[...base, ...conds].join(" AND ")}`;
       params.push(limit, offset);
       const limitAt = `$${params.length - 1}`;
       const offsetAt = `$${params.length}`;
@@ -218,21 +258,27 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
         )
         SELECT
           a.id                                     AS agent_id,
-          a.product_id,
+          p.id                                     AS product_id,
           p.title                                  AS campaign_name,
           p.status                                 AS campaign_status,
           b.store_name                             AS brand_name,
-          a.mode,
-          a.status,
-          a.stopped_reason,
-          a.goal_applications,
-          a.runs_used,
-          a.max_runs,
-          a.lemlist_campaign_id <> ''              AS has_sequence,
-          a.auto_reply,
+          -- 'none' rather than 'off' for a campaign that was never enrolled.
+          -- Off is a decision somebody made and the agent honours it; none is
+          -- the absence of one, and the difference is the whole point of the
+          -- launch button.
+          COALESCE(a.mode, 'none')                 AS mode,
+          COALESCE(a.status, 'none')               AS status,
+          COALESCE(a.stopped_reason, '')           AS stopped_reason,
+          -- The house defaults, so the editor opens on the numbers a campaign
+          -- launching today would be given rather than on blanks.
+          COALESCE(a.goal_applications, ${HOUSE_GOAL})  AS goal_applications,
+          COALESCE(a.runs_used, 0)                 AS runs_used,
+          COALESCE(a.max_runs, ${HOUSE_MAX_RUNS})  AS max_runs,
+          COALESCE(a.lemlist_campaign_id, '') <> '' AS has_sequence,
+          COALESCE(a.auto_reply, false)            AS auto_reply,
           a.last_acted_at,
           a.next_action_at,
-          a.created                                AS enrolled_at,
+          COALESCE(a.created, p.activated_at)      AS enrolled_at,
           COALESCE(f.found, 0)                     AS found,
           COALESCE(f.contactable, 0)               AS contactable,
           COALESCE(f.emailed, 0)                   AS emailed,
@@ -243,14 +289,14 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
           -- agent can sit at "working" for half an hour and be perfectly fine.
           EXISTS (
             SELECT 1 FROM sourcing_runs sr
-            WHERE sr.product_id = a.product_id AND sr.${ND}
+            WHERE sr.product_id = p.id AND sr.${ND}
               AND sr.status IN ('planning', 'planned', 'running', 'enriching')
           )                                        AS run_in_flight,
           ev.created                               AS last_event_at,
           ev.action                                AS last_event_action,
           ev.summary                               AS last_event_summary,
           (SELECT COALESCE(SUM(sr.credits_spent), 0) FROM sourcing_runs sr
-            WHERE sr.product_id = a.product_id AND sr.${ND}) AS credits_spent,
+            WHERE sr.product_id = p.id AND sr.${ND}) AS credits_spent,
           -- The limit that actually stops an agent, and it is the BRAND's, not
           -- this campaign's: "waiting — this month's searches are all used"
           -- next to "searches: none yet" is the same row telling the truth
@@ -261,11 +307,13 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
             WHERE sp.user_id = p.user_id AND sr.${ND}
               AND sr.created >= date_trunc('month', current_timestamp)
           )                                        AS searches_used
-        FROM agent a
-        JOIN products p ON p.id = a.product_id AND p.${ND}
+        -- Campaigns first, agents attached where there is one: the other way
+        -- round there is no row to offer a launch on.
+        FROM products p
+        LEFT JOIN agent a ON a.product_id = p.id
         LEFT JOIN brands b ON b.user_id = p.user_id
-        LEFT JOIN funnel f ON f.product_id = a.product_id
-        LEFT JOIN replied r ON r.product_id = a.product_id
+        LEFT JOIN funnel f ON f.product_id = p.id
+        LEFT JOIN replied r ON r.product_id = p.id
         LEFT JOIN LATERAL (
           SELECT e.created, e.action, e.summary
           FROM sourcing_agent_events e
@@ -291,10 +339,10 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
         `SELECT
            count(*) FILTER (WHERE true${countConds.map((c) => ` AND ${c}`).join("")})::int AS total,
            count(*)::int                                                                  AS total_all
-         FROM sourcing_agents a
-         JOIN products p ON p.id = a.product_id AND p.${ND}
+         FROM products p
+         LEFT JOIN sourcing_agents a ON a.product_id = p.id AND a.${ND}
          LEFT JOIN brands b ON b.user_id = p.user_id
-         WHERE a.${ND}`,
+         WHERE p.${ND} AND (a.id IS NOT NULL OR p.status = ${CAMPAIGN_ACTIVE})`,
         countParams,
       );
 
@@ -344,6 +392,13 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
   // agent switched off here must land in exactly the state the brand's own
   // console would have left it in, or its next tick reads a row nothing wrote.
   //
+  // And, for a campaign that has none, the row itself — the same INSERT gRPC
+  // issues (EnsureAgentRecruiting), on the same ACTIVE-only condition. Without
+  // it this endpoint answered 404 for every campaign that went live before
+  // agents existed, which is most of them, and there was no other way in:
+  // UpdateSourcingAgent is the only RPC that creates one and the console that
+  // calls it is not built into production.
+  //
   // This does not make it act. It sets what it is allowed to do; the tick
   // still checks the campaign, the allowance and the budget before it spends.
   router.put("/campaigns/:id/agent", async (req, res) => {
@@ -360,6 +415,29 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       if (goal === null || maxRuns === null) {
         return res.status(400).json({ error: "Goal and budget must be whole numbers" });
       }
+
+      // Enrol, if it has never been. Mirrors EnsureAgentRecruiting in
+      // repository/postgres/sourcing_agent.go: same columns, same ON CONFLICT
+      // DO NOTHING, and created_by_user_id is the campaign's owner because
+      // sourcing_runs.created_by_user_id is NOT NULL and the agent acts for
+      // them. ACTIVE only — the agent's first move on anything else is to stop
+      // itself, so enrolling a paused campaign would create a row that exists
+      // to switch itself off. "off" never creates one: a campaign nobody has
+      // launched is already not recruiting, and a row saying so is noise.
+      //
+      // ON CONFLICT DO NOTHING means a second admin pressing the same button
+      // changes nothing here and everything in the UPDATE below, which is the
+      // right way round.
+      const enrolled = mode === "off" ? { rows: [] } : await query(
+        `INSERT INTO sourcing_agents (product_id, created_by_user_id, mode, goal_applications, max_runs)
+         SELECT p.id, p.user_id, $2, $3, $4
+           FROM products p
+          WHERE p.id = $1::uuid AND p.${ND} AND p.status = ${CAMPAIGN_ACTIVE}
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+        [req.params.id, mode, goal, maxRuns],
+      );
+      const justLaunched = enrolled.rows.length > 0;
 
       const { rows } = await query(
         `UPDATE sourcing_agents
@@ -381,18 +459,29 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
           RETURNING id, mode, status, goal_applications, max_runs, runs_used, next_action_at`,
         [req.params.id, mode, goal, maxRuns],
       );
-      if (!rows.length) return res.status(404).json({ error: "This campaign has no agent" });
+      if (!rows.length) {
+        // Either the campaign is not there, or it is not ACTIVE and so was not
+        // enrolled above. Says which, because "no agent" on a paused campaign
+        // read as a bug rather than as the rule it is.
+        return res.status(404).json({
+          error: "This campaign has no agent, and only an active campaign can be given one",
+        });
+      }
 
       // Into the agent's own log, because that is where anybody looking at
       // this campaign in a month will be reading — including the brand.
-      await logAgentEvent(rows[0].id, req.params.id, "settings",
-        `An admin set it to ${mode} — goal ${goal}, budget ${maxRuns} ${maxRuns === 1 ? "search" : "searches"}`,
+      const budgetWords = `budget ${maxRuns} ${maxRuns === 1 ? "search" : "searches"}`;
+      await logAgentEvent(query, rows[0].id, req.params.id, "settings",
+        justLaunched
+          ? `An admin switched Autopilot on — ${mode}, goal ${goal}, ${budgetWords}`
+          : `An admin set it to ${mode} — goal ${goal}, ${budgetWords}`,
         req.admin?.email || "");
       console.log(
         `[autopilot-agent] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
-        `product=${req.params.id} mode=${mode} goal=${goal} runs=${maxRuns}`,
+        `product=${req.params.id} mode=${mode} goal=${goal} runs=${maxRuns} ` +
+        `${justLaunched ? "launched" : "updated"}`,
       );
-      res.json({ agent: rows[0] });
+      res.json({ agent: rows[0], launched: justLaunched });
     } catch (e) {
       if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
       console.error("[autopilot/agent]", e);
@@ -421,7 +510,7 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       if (!rows.length) {
         return res.status(409).json({ error: "Only a switched-on agent that is idle or waiting can be woken" });
       }
-      await logAgentEvent(rows[0].id, req.params.id, "settings",
+      await logAgentEvent(query, rows[0].id, req.params.id, "settings",
         "An admin brought its next check forward to now", req.admin?.email || "");
       console.log(
         `[autopilot-wake] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} product=${req.params.id}`,

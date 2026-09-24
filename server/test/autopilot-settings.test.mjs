@@ -43,6 +43,63 @@ test("invalid settings, allowances and rates never reach SQL", async (t) => {
   assert.equal((await request("/provider-costs/unknown", "DELETE")).status, 400);
 });
 
+// Launching an agent from here is the only way to start one on a campaign that
+// went live before agents existed: enrolSourcingAgent runs at the NEW -> ACTIVE
+// transition, and the brand-facing console is built with
+// PUBLIC_SOURCING_ENABLED=false in production. So the INSERT is the feature,
+// and the three things it must not do are the test.
+test("an active campaign with no agent is enrolled, and only then", async (t) => {
+  const seen = [];
+  // The INSERT reports a fresh row only the first time, the way ON CONFLICT DO
+  // NOTHING does; the UPDATE always finds one afterwards.
+  let enrolled = false;
+  const request = await serve(t, async (sql, values) => {
+    seen.push({ sql: sql.trim().split(/\s+/)[0].toUpperCase(), sql_full: sql, values });
+    if (/INSERT INTO sourcing_agents/.test(sql)) {
+      if (enrolled) return { rows: [] };
+      enrolled = true;
+      return { rows: [{ id: "agent-1" }] };
+    }
+    if (/UPDATE sourcing_agents/.test(sql)) {
+      return { rows: enrolled ? [{ id: "agent-1", mode: values[1], status: "idle" }] : [] };
+    }
+    return { rows: [] };
+  });
+  const campaign = "11111111-1111-1111-1111-111111111111";
+
+  // "off" on a campaign nobody has launched writes no row: there is nothing to
+  // switch off, and a row saying so is noise the agent would then have to skip.
+  const switchedOff = await request(`/campaigns/${campaign}/agent`, "PUT",
+    { mode: "off", goal_applications: 25, max_runs: 2 });
+  assert.equal(switchedOff.status, 404);
+  assert.match(switchedOff.body.error, /only an active campaign/);
+  assert.equal(seen.filter((s) => /INSERT INTO sourcing_agents/.test(s.sql_full)).length, 0);
+
+  const launched = await request(`/campaigns/${campaign}/agent`, "PUT",
+    { mode: "autonomous", goal_applications: 30, max_runs: 3 });
+  assert.equal(launched.status, 200);
+  assert.equal(launched.body.launched, true);
+
+  // Only an ACTIVE campaign, and only a live one: the guard is in the INSERT's
+  // own WHERE rather than in a separate read that could go stale between them.
+  const insert = seen.find((s) => /INSERT INTO sourcing_agents/.test(s.sql_full));
+  assert.match(insert.sql_full, /p\.status = 2/);
+  assert.match(insert.sql_full, /p\.deleted = '-infinity'/);
+  assert.match(insert.sql_full, /ON CONFLICT DO NOTHING/);
+  assert.deepEqual(insert.values, [campaign, "autonomous", 30, 3]);
+
+  // The line in the agent's own log says it was switched on, not merely
+  // changed, and it goes through this router's query rather than round it.
+  const log = seen.find((s) => /INSERT INTO sourcing_agent_events/.test(s.sql_full));
+  assert.match(log.values[3], /switched Autopilot on — autonomous, goal 30, budget 3 searches/);
+
+  // A second press changes the settings and says so: it is not a second launch.
+  const again = await request(`/campaigns/${campaign}/agent`, "PUT",
+    { mode: "assisted", goal_applications: 40, max_runs: 2 });
+  assert.equal(again.body.launched, false);
+  assert.match(seen.at(-1).values[3], /^An admin set it to assisted/);
+});
+
 test("missing migrations are reported as unavailable", async (t) => {
   const request = await serve(t, async () => { throw Object.assign(new Error("missing"), { code: "42P01" }); });
   for (const path of ["/settings", "/provider-costs"]) {

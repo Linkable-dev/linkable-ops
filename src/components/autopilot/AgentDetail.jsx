@@ -361,7 +361,10 @@ export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllow
   });
 
   const spent = row.search_allowance != null && row.searches_used >= row.search_allowance;
-  const canWake = row.mode !== "off" && ["idle", "waiting"].includes(row.status);
+  // "none" is a campaign with no agent row yet, so there is nothing to wake
+  // and nothing to re-save: the mode buttons are the only thing that applies.
+  const notLaunched = row.mode === "none";
+  const canWake = !notLaunched && row.mode !== "off" && ["idle", "waiting"].includes(row.status);
 
   return (
     <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -649,19 +652,28 @@ export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllow
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>What it may do</div>
 
         <div style={{ ...label, marginBottom: 5 }}>Mode</div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: notLaunched ? 6 : 12 }}>
           {MODES.map(([value, text]) => (
             <Btn
               key={value}
               size="sm"
               variant={row.mode === value ? "solid" : "outline"}
               loading={busy === "agent" && row.mode !== value}
+              // Off on a campaign that was never enrolled writes nothing, and
+              // is what it already is.
+              disabled={notLaunched && value === "off"}
               onClick={() => saveAgent(value)}
             >
               {text}
             </Btn>
           ))}
         </div>
+        {notLaunched && (
+          <div style={{ ...muted, marginBottom: 12 }}>
+            Autopilot has never been switched on for this campaign. Picking a mode starts it with
+            the goal and budget below, and it takes its first action within a couple of minutes.
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 6 }}>
           <div>
@@ -674,13 +686,20 @@ export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllow
             <input style={input} type="number" min="1" max="10" value={budget}
               onChange={(e) => setBudget(e.target.value)} />
           </div>
-          <Btn size="sm" variant="outline" loading={busy === "agent"} onClick={() => saveAgent(row.mode)}>
+          <Btn
+            size="sm"
+            variant="outline"
+            disabled={notLaunched}
+            loading={busy === "agent"}
+            onClick={() => saveAgent(row.mode)}
+          >
             Save
           </Btn>
         </div>
         <div style={{ ...muted, marginBottom: 14 }}>
-          Applications to stop at, and searches it may spend getting there. Widening either wakes a
-          finished agent rather than leaving it stopped.
+          {notLaunched
+            ? "Applications to stop at, and searches it may spend getting there. Set them before picking a mode — that is what it starts with."
+            : "Applications to stop at, and searches it may spend getting there. Widening either wakes a finished agent rather than leaving it stopped."}
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
