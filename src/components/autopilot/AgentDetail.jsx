@@ -85,12 +85,6 @@ const EMAIL_TYPE_LABEL = {
   emailsReplied: "Replied", linkedinInviteAccepted: "LinkedIn accepted", paused: "Paused",
 };
 
-const MODES = [
-  ["autonomous", "Autonomous"],
-  ["assisted", "Assisted"],
-  ["off", "Off"],
-];
-
 function whole(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return "—";
@@ -164,7 +158,7 @@ function buildThread(chats) {
   return messages;
 }
 
-export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllowanceChanged, onError }) {
+export default function AgentDetail({ row, defaultLimit, onManage, onAgentChanged, onAllowanceChanged, onError }) {
   const { theme, mode } = useTheme();
   const dark = mode === "dark";
   const [tab, setTab] = useState("timeline");
@@ -181,8 +175,6 @@ export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllow
   const [replies, setReplies] = useState(null);
 
   const [busy, setBusy] = useState("");
-  const [goal, setGoal] = useState(String(row.goal_applications ?? ""));
-  const [budget, setBudget] = useState(String(row.max_runs ?? ""));
   const [limit, setLimit] = useState(String(row.search_allowance ?? ""));
 
   const fail = useCallback((e) => onError?.(e.message || String(e)), [onError]);
@@ -282,27 +274,6 @@ export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllow
       live = false;
     };
   }, [tab, replies, row.product_id, fail]);
-
-  async function saveAgent(mode) {
-    setBusy("agent");
-    try {
-      const d = await api.setAutopilotAgent(row.product_id, {
-        mode,
-        goal_applications: Number(goal),
-        max_runs: Number(budget),
-      });
-      onAgentChanged?.(row.product_id, d.agent);
-      // The change is a line in the agent's own log, so the timeline it is
-      // sitting next to has to be re-read or it is a page describing a state
-      // nothing on it explains.
-      const fresh = await api.getAutopilotEvents(row.product_id);
-      setLog({ events: fresh.events || [], runs: fresh.runs || [] });
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy("");
-    }
-  }
 
   async function wake() {
     setBusy("wake");
@@ -651,55 +622,33 @@ export default function AgentDetail({ row, defaultLimit, onAgentChanged, onAllow
       <div style={{ flex: "0 1 300px", minWidth: 240 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>What it may do</div>
 
-        <div style={{ ...label, marginBottom: 5 }}>Mode</div>
-        <div style={{ display: "flex", gap: 6, marginBottom: notLaunched ? 6 : 12 }}>
-          {MODES.map(([value, text]) => (
-            <Btn
-              key={value}
-              size="sm"
-              variant={row.mode === value ? "solid" : "outline"}
-              loading={busy === "agent" && row.mode !== value}
-              // Off on a campaign that was never enrolled writes nothing, and
-              // is what it already is.
-              disabled={notLaunched && value === "off"}
-              onClick={() => saveAgent(value)}
-            >
-              {text}
-            </Btn>
-          ))}
+        {/* What it is doing, then one way to change it.
+            This used to be three mode buttons that took effect on the press,
+            and the press that mattered spent credits and emailed several
+            hundred strangers. Reading the state and changing it are different
+            jobs; only the first belongs on a panel you scroll past. */}
+        <div style={{ fontSize: 13, marginBottom: 4 }}>
+          {notLaunched
+            ? "Never launched"
+            : row.mode === "off"
+              ? "Switched off — not searching, not sending"
+              : row.mode === "autonomous"
+                ? `Running it — ${row.runs_used} of ${row.max_runs} searches used`
+                : `Finding creators only — ${row.runs_used} of ${row.max_runs} searches used`}
         </div>
-        {notLaunched && (
-          <div style={{ ...muted, marginBottom: 12 }}>
-            Autopilot has never been switched on for this campaign. Picking a mode starts it with
-            the goal and budget below, and it takes its first action within a couple of minutes.
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 6 }}>
-          <div>
-            <div style={{ ...label, marginBottom: 4 }}>Goal</div>
-            <input style={input} type="number" min="1" max="500" value={goal}
-              onChange={(e) => setGoal(e.target.value)} />
-          </div>
-          <div>
-            <div style={{ ...label, marginBottom: 4 }}>Searches</div>
-            <input style={input} type="number" min="1" max="10" value={budget}
-              onChange={(e) => setBudget(e.target.value)} />
-          </div>
+        <div style={{ ...muted, marginBottom: 10 }}>
+          {notLaunched
+            ? "Nothing has been searched, spent or sent for this campaign."
+            : `Stops at ${row.goal_applications} applications. ${row.applied} so far.`}
+        </div>
+        <div style={{ marginBottom: 14 }}>
           <Btn
             size="sm"
-            variant="outline"
-            disabled={notLaunched}
-            loading={busy === "agent"}
-            onClick={() => saveAgent(row.mode)}
+            variant={notLaunched || row.mode === "off" ? "solid" : "outline"}
+            onClick={() => onManage?.()}
           >
-            Save
+            {notLaunched || row.mode === "off" ? "Launch Autopilot" : "Manage Autopilot"}
           </Btn>
-        </div>
-        <div style={{ ...muted, marginBottom: 14 }}>
-          {notLaunched
-            ? "Applications to stop at, and searches it may spend getting there. Set them before picking a mode — that is what it starts with."
-            : "Applications to stop at, and searches it may spend getting there. Widening either wakes a finished agent rather than leaving it stopped."}
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>

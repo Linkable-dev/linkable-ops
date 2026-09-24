@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import OutreachSettings from "../components/autopilot/OutreachSettings";
@@ -20,6 +20,7 @@ import {
   fitWidths,
 } from "../components/table/tableTools";
 import AgentDetail from "../components/autopilot/AgentDetail";
+import AutopilotControlModal from "../components/autopilot/AutopilotControlModal";
 import { ago, friendlyDate, whenNext } from "../lib/relativeTime";
 
 /**
@@ -89,6 +90,10 @@ const AGENT_COLUMNS = [
   { key: "runs_used", label: "Searches", sort: "desc", right: true, width: 110 },
   { key: "last_event_at", label: "Last did", sort: "desc", width: 120 },
   { key: "next_action_at", label: "Next", sort: "asc", width: 120 },
+  // Neither sortable nor filterable, and never resized: it holds one control.
+  // The header is blank because "Actions" over a single icon is a word doing
+  // no work.
+  { key: "actions", label: "", width: 56, resizable: false },
 ];
 // Floors, widened to whatever each header actually needs. See fitWidths.
 const AGENT_DEFAULT_WIDTHS = fitWidths(AGENT_COLUMNS);
@@ -124,7 +129,19 @@ function agentCellStyle(col, { td, num, theme }) {
 // One switch, not a dozen inline <td>s — so the body can map over whatever
 // order the header is currently in. Each case is exactly what used to sit
 // directly in the JSX for that column.
-function renderAgentCell(key, r, { theme, pill }) {
+// The gear that opens the launch/stop dialog. Drawn rather than imported so
+// the one icon on this page does not pull a second icon set in behind it.
+function SettingsIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function renderAgentCell(key, r, { theme, pill, onManage }) {
   switch (key) {
     case "campaign_name":
       return (
@@ -215,6 +232,24 @@ function renderAgentCell(key, r, { theme, pill }) {
       return ["off", "none"].includes(r.mode) || ["done", "failed"].includes(r.status)
         ? "—"
         : whenNext(r.next_action_at);
+    case "actions":
+      // Grouped right, header left — the same shape the other tables' action
+      // columns use. Stops the row having to be expanded to reach the only
+      // control on it that does anything.
+      return (
+        <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+          <Btn
+            size="sm"
+            variant="secondary"
+            aria-label={`Autopilot settings for ${r.campaign_name || "this campaign"}`}
+            title={r.mode === "none" ? "Launch Autopilot" : "Autopilot settings"}
+            onClick={(e) => { e.stopPropagation(); onManage(r); }}
+            style={{ padding: "5px 8px", lineHeight: 0 }}
+          >
+            <SettingsIcon />
+          </Btn>
+        </div>
+      );
     default:
       return null;
   }
@@ -265,6 +300,10 @@ export default function AutopilotPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState(null);
+  // The row whose launch/stop dialog is open, or null. Holds the row itself
+  // rather than its id so the dialog can name the campaign and read its
+  // current settings without going back to the list.
+  const [managing, setManaging] = useState(null);
   const [filters, setFilters] = useState({});
   const [sort, setSort] = useState({ sortBy: "", sortDir: "" });
   const [total, setTotal] = useState(null);
@@ -357,6 +396,24 @@ export default function AutopilotPage() {
   const handleSort = (key, defaultDir) => { setSort((s2) => nextSort(s2, key, defaultDir)); setPage(1); };
 
   const toggle = (productId) => setOpenId((open) => (open === productId ? null : productId));
+
+  // How wide the expanded panel may be. The table can be wider than the
+  // screen, so the panel is pinned to the scroll container's own width rather
+  // than the table's — measured, because it changes with the window, the
+  // sidebar and every column resize.
+  const scrollRef = useRef(null);
+  const [panelWidth, setPanelWidth] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setPanelWidth(el.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+    // Re-attached when the table appears: the container does not exist while
+    // the page is loading or the feature is off, so a ref captured then is null.
+  }, [available, loading]);
 
   // The row and the panel are one thing: a mode changed in the panel has to
   // show in the row behind it, or the table is describing the agent as it was
@@ -548,7 +605,7 @@ export default function AutopilotPage() {
 
       {available && (
         <Card style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ overflowX: "auto" }}>
+          <div ref={scrollRef} style={{ overflowX: "auto" }}>
             <table
               style={{
                 width: "100%",
@@ -602,15 +659,23 @@ export default function AutopilotPage() {
                             />
                           )}
                         >
-                          <SortLabel
-                            theme={theme}
-                            label={col.label}
-                            colKey={col.key}
-                            sortBy={sort.sortBy}
-                            sortDir={sort.sortDir}
-                            defaultDir={col.sort}
-                            onSort={handleSort}
-                          />
+                          {/* A column with no sort direction declared is not
+                              sortable, and SortLabel would give it a clickable
+                              arrow that reorders by a key the server does not
+                              know. */}
+                          {col.sort ? (
+                            <SortLabel
+                              theme={theme}
+                              label={col.label}
+                              colKey={col.key}
+                              sortBy={sort.sortBy}
+                              sortDir={sort.sortDir}
+                              defaultDir={col.sort}
+                              onSort={handleSort}
+                            />
+                          ) : (
+                            <span style={{ color: theme.textMuted }}>{col.label}</span>
+                          )}
                         </HeaderCell>
                         {col.resizable !== false && (
                           <ResizeHandle colKey={col.key} startResize={startResize} resetWidth={resetWidth} theme={theme} />
@@ -667,21 +732,37 @@ export default function AutopilotPage() {
                         </td>
                         {orderedColumns.map((col) => (
                           <td key={col.key} style={agentCellStyle(col, { td, num, theme })}>
-                            {renderAgentCell(col.key, r, { theme, pill })}
+                            {renderAgentCell(col.key, r, { theme, pill, onManage: setManaging })}
                           </td>
                         ))}
                       </tr>
 
                       {openId === r.product_id && (
                         <tr>
-                          <td style={{ ...td, background: theme.bg }} colSpan={orderedColumns.length + 1}>
-                            <AgentDetail
-                              row={r}
-                              defaultLimit={defaultLimit}
-                              onAgentChanged={patchAgent}
-                              onAllowanceChanged={patchAllowance}
-                              onError={setError}
-                            />
+                          <td style={{ ...td, background: theme.bg, padding: 0 }} colSpan={orderedColumns.length + 1}>
+                            {/* The table is wider than the screen, and a cell
+                                spanning all of it put the right-hand panel a
+                                thousand pixels off the edge — its text read as
+                                cut off because it was, by the viewport. Pinned
+                                to the left of the scroll container and held to
+                                the container's own width, the panel stays where
+                                it can be read however far the table is scrolled. */}
+                            <div style={{
+                              position: "sticky",
+                              left: 0,
+                              width: panelWidth || "auto",
+                              boxSizing: "border-box",
+                              padding: 10,
+                            }}>
+                              <AgentDetail
+                                row={r}
+                                defaultLimit={defaultLimit}
+                                onManage={() => setManaging(r)}
+                                onAgentChanged={patchAgent}
+                                onAllowanceChanged={patchAllowance}
+                                onError={setError}
+                              />
+                            </div>
                           </td>
                         </tr>
                       )}
@@ -711,6 +792,18 @@ export default function AutopilotPage() {
             onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
           />
         </>
+      )}
+
+      {/* Mounted once at the page, not per row: a dialog inside a <td> of a
+          scrolling table inherits its clipping and its stacking order. */}
+      {managing && (
+        <AutopilotControlModal
+          key={managing.product_id}
+          row={managing}
+          onClose={() => setManaging(null)}
+          onSaved={patchAgent}
+          onError={setError}
+        />
       )}
     </div>
   );
