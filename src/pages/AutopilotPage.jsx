@@ -80,7 +80,10 @@ const AGENT_COLUMNS = [
   { key: "enrolled_at", label: "Launched", sort: "desc", width: 110 },
   { key: "found", label: "Found", sort: "desc", right: true, width: 90 },
   { key: "contactable", label: "Contactable", sort: "desc", right: true, width: 110 },
-  { key: "emailed", label: "Emailed", sort: "desc", right: true, width: 110 },
+  // "Queued", not "Emailed": the number is how many were handed to the
+  // sequence, and the sequence then takes days to send them. The count that
+  // actually left is the line underneath.
+  { key: "emailed", label: "Queued", sort: "desc", right: true, width: 110 },
   { key: "replied", label: "Replied", sort: "desc", right: true, width: 90 },
   { key: "applied", label: "Applied", sort: "desc", right: true, width: 100 },
   { key: "runs_used", label: "Searches", sort: "desc", right: true, width: 110 },
@@ -157,9 +160,17 @@ function renderAgentCell(key, r, { theme, pill }) {
       return (
         <>
           {r.emailed}
-          {!r.has_sequence && r.found > 0 && (
+          {/* Handed over vs actually gone. A campaign whose sequence has not
+              caught up yet is the normal state for its first few days, not a
+              fault — but reading the top number as "emailed" made a four-day
+              drip look like a blast that had already happened. */}
+          {!r.has_sequence && r.found > 0 ? (
             <div style={{ color: theme.textMuted, fontSize: 11 }}>no sequence</div>
-          )}
+          ) : r.emailed > 0 ? (
+            <div style={{ color: theme.textMuted, fontSize: 11, fontWeight: 400 }}>
+              {r.sent === r.emailed ? "all sent" : `${r.sent ?? 0} sent`}
+            </div>
+          ) : null}
         </>
       );
     case "replied":

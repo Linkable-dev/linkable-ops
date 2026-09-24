@@ -282,6 +282,20 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
           COALESCE(f.found, 0)                     AS found,
           COALESCE(f.contactable, 0)               AS contactable,
           COALESCE(f.emailed, 0)                   AS emailed,
+          -- What the provider says actually LEFT, which is a different number
+          -- and a slower one: a push hands the whole list over at once and the
+          -- sequence then drips it at its own rate for days. "Emailed 454"
+          -- next to a Sent tab reading 7 was one word covering both.
+          --
+          -- Distinct candidates, not events: the sequence has three steps, so
+          -- once the follow-ups start firing an event count would climb past
+          -- the number of creators who have heard anything at all. NULL
+          -- candidate ids are leads that came from somewhere other than a
+          -- search, and are not this campaign's to claim.
+          (SELECT count(DISTINCT e.sourcing_candidate_id)::int
+             FROM sourcing_outreach_events e
+            WHERE e.product_id = p.id AND e.event_type = 'emailsSent'
+              AND e.sourcing_candidate_id IS NOT NULL) AS sent,
           COALESCE(r.replied, 0)                   AS replied,
           COALESCE(f.applied, 0)                   AS applied,
           COALESCE(f.accepted, 0)                  AS accepted,
