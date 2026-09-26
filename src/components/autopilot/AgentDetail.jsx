@@ -20,8 +20,9 @@ import { ago, whenNext } from "../../lib/relativeTime";
  *
  * On what the controls may do, see the contract at the top of
  * server/routes/autopilot.js: this sets what the agent is ALLOWED to do. It
- * never makes it search, email or reply — those spend money and leave the
- * building, and they belong to gRPC.
+ * never makes it search or email — those spend money and leave the building,
+ * and they belong to gRPC. A reply can be marked "send", which gRPC's reply
+ * tick then sends through its own guards.
  */
 
 const TABS = [
@@ -156,6 +157,113 @@ function buildThread(chats) {
     }
   }
   return messages;
+}
+
+// One creator's reply, and the answer to it. An unsent answer can be
+// rewritten, sent, or dismissed. "Send" marks it and nothing more: grpc's
+// reply tick sends it within five minutes, through ApproveAndSend, so the
+// row reads "queued" until the tick has actually sent it.
+function ReplyRow({ r, theme, onChange, onError }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(r.draft || "");
+  const [busy, setBusy] = useState("");
+  const line = { padding: "9px 0", borderBottom: `1px solid ${theme.border}`, fontSize: 13 };
+  const muted = { color: theme.textMuted, fontSize: 12 };
+  const open = r.status === "pending" || r.status === "failed";
+  const queued = r.status === "pending" && r.send_requested_at;
+
+  async function act(kind, call) {
+    setBusy(kind);
+    try {
+      const d = await call();
+      onChange({ ...r, ...d.reply });
+      if (kind === "save") setEditing(false);
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div style={{ ...line, display: "flex", gap: 10, alignItems: "flex-start" }}>
+      <Avatar src={r.profile_image} name={r.instagram_username || r.lead_email} theme={theme} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 600 }}>
+            {r.instagram_username ? `@${r.instagram_username}` : r.lead_email}
+          </span>
+          <span style={muted}>{ago(r.received_at || r.created)}</span>
+          {r.intent && <span style={muted}>· {r.intent}</span>}
+          {r.needs_human && open && !queued && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#B45309" }}>
+              needs a human{r.escalation_reason ? ` — ${r.escalation_reason}` : ""}
+            </span>
+          )}
+          <span style={{ ...muted, marginLeft: "auto" }}>
+            {r.sent_at
+              ? `answered ${ago(r.sent_at)}`
+              : queued
+                ? `queued by ${r.send_requested_by || "an admin"} — goes within 5 min`
+                : r.status || "unanswered"}
+          </span>
+        </div>
+        {r.body && <div style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap" }}>{r.body}</div>}
+        {editing ? (
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={6}
+            style={{
+              width: "100%", marginTop: 6, padding: 8, borderRadius: 6, boxSizing: "border-box",
+              border: `1px solid ${theme.border}`, background: theme.surface, color: theme.text,
+              fontSize: 12, fontFamily: "inherit",
+            }}
+          />
+        ) : (
+          r.draft && !r.sent_at && (
+            <div style={{ ...muted, marginTop: 4, whiteSpace: "pre-wrap" }}>Answer: {r.draft}</div>
+          )
+        )}
+        {r.error && r.status !== "dismissed" && (
+          <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 3 }}>{r.error}</div>
+        )}
+        {open && (
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            {editing ? (
+              <>
+                <Btn size="sm" loading={busy === "save"} disabled={!draft.trim()}
+                  onClick={() => act("save", () => api.editAutopilotReply(r.id, draft))}>
+                  Save answer
+                </Btn>
+                <Btn size="sm" variant="outline" onClick={() => { setDraft(r.draft || ""); setEditing(false); }}>
+                  Cancel
+                </Btn>
+              </>
+            ) : (
+              <>
+                {!queued && (
+                  <Btn size="sm" loading={busy === "send"} disabled={!r.draft}
+                    onClick={() => act("send", () => api.sendAutopilotReply(r.id))}>
+                    {r.status === "failed" ? "Retry send" : "Send"}
+                  </Btn>
+                )}
+                {!queued && (
+                  <Btn size="sm" variant="outline" onClick={() => setEditing(true)}>
+                    Edit answer
+                  </Btn>
+                )}
+                <Btn size="sm" variant="secondary" loading={busy === "dismiss"}
+                  onClick={() => act("dismiss", () => api.dismissAutopilotReply(r.id))}>
+                  Dismiss
+                </Btn>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function AgentDetail({ row, defaultLimit, onManage, onAgentChanged, onAllowanceChanged, onError }) {
@@ -588,31 +696,13 @@ export default function AgentDetail({ row, defaultLimit, onManage, onAgentChange
             <div style={muted}>Nobody has written back yet.</div>
           ) : (
             replies.map((r) => (
-              <div key={r.id} style={{ ...line, display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <Avatar src={r.profile_image} name={r.instagram_username || r.lead_email} theme={theme} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 600 }}>
-                      {r.instagram_username ? `@${r.instagram_username}` : r.lead_email}
-                    </span>
-                    <span style={muted}>{ago(r.received_at || r.created)}</span>
-                    {r.intent && <span style={muted}>· {r.intent}</span>}
-                    {r.needs_human && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#B45309" }}>
-                        needs a human{r.escalation_reason ? ` — ${r.escalation_reason}` : ""}
-                      </span>
-                    )}
-                    <span style={{ ...muted, marginLeft: "auto" }}>
-                      {r.sent_at ? `answered ${ago(r.sent_at)}` : r.status || "unanswered"}
-                    </span>
-                  </div>
-                  {r.body && <div style={{ fontSize: 12, marginTop: 4 }}>{r.body}</div>}
-                  {r.draft && !r.sent_at && (
-                    <div style={{ ...muted, marginTop: 4 }}>Draft reply: {r.draft}</div>
-                  )}
-                  {r.error && <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 3 }}>{r.error}</div>}
-                </div>
-              </div>
+              <ReplyRow
+                key={r.id}
+                r={r}
+                theme={theme}
+                onError={fail}
+                onChange={(next) => setReplies((all) => all.map((x) => (x.id === next.id ? next : x)))}
+              />
             ))
           )
         )}
@@ -693,9 +783,10 @@ export default function AgentDetail({ row, defaultLimit, onManage, onAgentChange
         </div>
 
         <div style={{ ...muted, marginTop: 14, lineHeight: 1.5 }}>
-          Searching, emailing and replying are not done from here — they spend credits and leave
-          the building, so they stay with the agent and its guards. Everything above is what it is
-          allowed to do when it next looks.
+          Searching and emailing are not done from here — they spend credits and leave the
+          building, so they stay with the agent and its guards. Everything above is what it is
+          allowed to do when it next looks. A reply marked Send goes out on the agent's next
+          reply check, through the same guards.
         </div>
       </div>
     </div>

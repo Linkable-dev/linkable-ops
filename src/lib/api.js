@@ -160,6 +160,12 @@ export const api = {
     request(`/autopilot/campaigns/${id}/creators?${buildQs({ limit, offset, state })}`),
   getAutopilotReplies: (id, { limit = 25 } = {}) =>
     request(`/autopilot/campaigns/${id}/replies?${buildQs({ limit })}`),
+  // Answering a creator. Send only MARKS the reply: grpc's reply tick sends it
+  // within five minutes, through the path that owns the send guards.
+  editAutopilotReply: (id, draft) =>
+    request(`/autopilot/replies/${id}/draft`, { method: "PUT", body: JSON.stringify({ draft }) }),
+  sendAutopilotReply: (id) => request(`/autopilot/replies/${id}/send`, { method: "POST" }),
+  dismissAutopilotReply: (id) => request(`/autopilot/replies/${id}/dismiss`, { method: "POST" }),
   // The send-side of outreach (sent/opened/clicked), separate from a person
   // writing back.
   getAutopilotEmails: (id, { limit = 25, offset = 0, type } = {}) =>

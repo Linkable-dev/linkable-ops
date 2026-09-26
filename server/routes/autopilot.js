@@ -28,6 +28,10 @@ import {
 // would walk straight past both. The line is "what it is allowed to do" vs
 // "do it now, on the brand's money".
 //
+// Replies sit on that line deliberately: an admin may rewrite an answer and
+// mark it "send this" (send_requested_at), but the sending is still gRPC's —
+// the agent's reply tick picks the mark up and sends through ApproveAndSend.
+//
 // The counts deliberately mirror SourcingRepository.ProgressForAgent in
 // service-grpc, because those are the numbers the agent itself acts on. If this
 // page and the agent disagreed about how many creators applied, the page would
@@ -1002,10 +1006,15 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       const { rows } = await query(
         `SELECT r.id, r.created, r.received_at, r.lead_email, r.intent, r.status, r.needs_human,
                 r.escalation_reason, r.channel, r.sent_at, r.error, r.subject,
-                -- The reply and the answer, trimmed: this is a list to scan,
-                -- and the whole thread lives in the main app.
-                left(r.body, 400)  AS body,
-                left(r.draft, 400) AS draft,
+                -- Read through to_jsonb so a database whose grpc has not yet
+                -- booted the build that adds these columns still lists replies.
+                to_jsonb(r)->>'send_requested_at' AS send_requested_at,
+                to_jsonb(r)->>'send_requested_by' AS send_requested_by,
+                -- The reply in full: an admin answers from here, and cannot
+                -- answer what they cannot read. The draft in full too, since
+                -- it is what gets edited and sent.
+                r.body,
+                r.draft,
                 c.instagram_username, c.profile_image
            FROM sourcing_replies r
            LEFT JOIN sourcing_candidates c ON c.id = r.sourcing_candidate_id
@@ -1019,6 +1028,90 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false, replies: [] });
       console.error("[autopilot/replies]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PUT /api/autopilot/replies/:id/draft   { draft }
+  //
+  // Rewrite the answer before it goes. Only while nobody has sent it: an edit
+  // to a sent reply would change the record, not the email.
+  router.put("/replies/:id/draft", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid reply id" });
+      const draft = String(req.body?.draft ?? "").trim();
+      if (!draft) return res.status(400).json({ error: "The answer is empty" });
+      if (draft.length > 5000) return res.status(400).json({ error: "The answer is too long" });
+      const { rows } = await query(
+        `UPDATE sourcing_replies SET draft = $2
+          WHERE id = $1::uuid AND status IN ('pending', 'failed')
+          RETURNING id, draft, status`,
+        [req.params.id, draft],
+      );
+      if (!rows.length) return res.status(409).json({ error: "This reply has already been sent or dismissed" });
+      console.log(`[autopilot-reply-edit] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} reply=${req.params.id}`);
+      res.json({ reply: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/reply-edit]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/autopilot/replies/:id/send
+  //
+  // Records that a person decided to send this answer. It does NOT send: the
+  // agent's reply tick in grpc picks it up within five minutes and sends it
+  // through ApproveAndSend, the one path that claims the row before anything
+  // leaves (so two clicks are one email), picks the right sender, and never
+  // sends from a non-production deployment. A failed send can be asked again.
+  router.post("/replies/:id/send", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid reply id" });
+      const { rows } = await query(
+        `UPDATE sourcing_replies
+            SET status = 'pending', error = '',
+                send_requested_at = current_timestamp, send_requested_by = $2
+          WHERE id = $1::uuid AND status IN ('pending', 'failed') AND draft <> ''
+          RETURNING id, status, send_requested_at, send_requested_by`,
+        [req.params.id, req.admin?.email || "ops"],
+      );
+      if (!rows.length) {
+        return res.status(409).json({ error: "Only an unsent reply with an answer written can be sent" });
+      }
+      console.log(`[autopilot-reply-send] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} reply=${req.params.id}`);
+      res.json({ reply: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      // 42703: the column arrives with a grpc deploy; before it, there is
+      // nothing on the other side to do the sending.
+      if (e.code === "42703") {
+        return res.status(409).json({ error: "Sending from here needs the latest grpc deploy on this database" });
+      }
+      console.error("[autopilot/reply-send]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/autopilot/replies/:id/dismiss
+  //
+  // Nobody should answer this one — a request to be left alone, a duplicate.
+  router.post("/replies/:id/dismiss", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid reply id" });
+      const note = `dismissed by ${req.admin?.email || "ops"}`;
+      const { rows } = await query(
+        `UPDATE sourcing_replies SET status = 'dismissed', error = $2
+          WHERE id = $1::uuid AND status IN ('pending', 'failed')
+          RETURNING id, status`,
+        [req.params.id, note],
+      );
+      if (!rows.length) return res.status(409).json({ error: "This reply has already been sent or dismissed" });
+      console.log(`[autopilot-reply-dismiss] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} reply=${req.params.id}`);
+      res.json({ reply: rows[0] });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      console.error("[autopilot/reply-dismiss]", e);
       res.status(500).json({ error: e.message });
     }
   });

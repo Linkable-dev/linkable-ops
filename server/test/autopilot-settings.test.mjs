@@ -177,3 +177,44 @@ test("HTTP saves, resets and estimates use actual Postgres values", {
   await request("/provider-costs/influencers_club", "DELETE");
   assert.equal((await request("/provider-costs")).body.providers[0].estimated_cost, null);
 });
+
+// Sending a reply from here records a decision and nothing else: grpc's reply
+// tick does the sending, through the one path that claims the row first and
+// never sends from dev. So what the route may write — and what it must refuse
+// — is the test.
+test("a reply is marked to send, never sent, and only while unsent", async (t) => {
+  const seen = [];
+  let state = "pending";
+  const request = await serve(t, async (sql, values) => {
+    seen.push({ sql, values });
+    if (/UPDATE sourcing_replies/.test(sql)) {
+      if (!["pending", "failed"].includes(state)) return { rows: [] };
+      if (/send_requested_at = current_timestamp/.test(sql)) return { rows: [{ id: values[0], status: "pending", send_requested_by: values[1] }] };
+      if (/status = 'dismissed'/.test(sql)) { state = "dismissed"; return { rows: [{ id: values[0], status: "dismissed" }] }; }
+      return { rows: [{ id: values[0], draft: values[1], status: state }] };
+    }
+    return { rows: [] };
+  });
+  const reply = "22222222-2222-2222-2222-222222222222";
+
+  assert.equal((await request("/replies/not-a-uuid/send", "POST")).status, 400);
+  assert.equal((await request(`/replies/${reply}/draft`, "PUT", { draft: "   " })).status, 400);
+  assert.equal(seen.length, 0, "invalid input reached SQL");
+
+  const edited = await request(`/replies/${reply}/draft`, "PUT", { draft: " Hi Ada — thanks! " });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.reply.draft, "Hi Ada — thanks!");
+
+  const sent = await request(`/replies/${reply}/send`, "POST");
+  assert.equal(sent.status, 200);
+  assert.equal(sent.body.reply.send_requested_by, "settings-test@example.com");
+  const mark = seen.at(-1).sql;
+  assert.match(mark, /status IN \('pending', 'failed'\)/);
+  assert.match(mark, /draft <> ''/);
+  // A mark, not a send: nothing here may touch the sent state.
+  assert.doesNotMatch(mark, /'sent'|sent_at/);
+
+  assert.equal((await request(`/replies/${reply}/dismiss`, "POST")).status, 200);
+  assert.equal((await request(`/replies/${reply}/send`, "POST")).status, 409);
+  assert.equal((await request(`/replies/${reply}/draft`, "PUT", { draft: "late" })).status, 409);
+});
