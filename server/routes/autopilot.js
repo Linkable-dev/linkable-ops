@@ -188,6 +188,29 @@ const DEFAULT_ORDER =
   "COALESCE(a.status, '') = 'working' DESC, ev.created DESC NULLS LAST, " +
   "COALESCE(a.created, p.activated_at) DESC";
 
+// Puts addresses on the sequence provider's unsubscribe list. Best-effort:
+// Linkable's own list is the one every sender here checks, and a provider
+// outage must not undo that. Returns what happened, for the log line.
+async function lemlistUnsubscribe(emails) {
+  const key = process.env.LEMLIST_KEY || process.env.LEMLIST_API_KEY;
+  if (!key) return "no key";
+  const auth = "Basic " + Buffer.from(":" + key).toString("base64");
+  let ok = 0;
+  for (const email of emails) {
+    try {
+      const r = await fetch(`https://api.lemlist.com/api/unsubscribes/${encodeURIComponent(email)}`, {
+        method: "POST",
+        headers: { Authorization: auth },
+      });
+      if (r.ok) ok++;
+      else console.error(`[autopilot/no-contact] lemlist unsubscribe answered ${r.status}`);
+    } catch (e) {
+      console.error("[autopilot/no-contact] lemlist unsubscribe failed", e.message);
+    }
+  }
+  return `${ok}/${emails.length}`;
+}
+
 export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
   const router = Router();
   router.use("/provider-costs", providerCostRoutes({ query }));
@@ -1112,6 +1135,62 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
     } catch (e) {
       if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
       console.error("[autopilot/reply-dismiss]", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/autopilot/replies/:id/no-contact
+  //
+  // The creator asked not to be emailed again. Their address goes on
+  // email_opt_outs — which the outreach push, the campaign-launch email, the
+  // brand's invite and grpc's reply send all check — and, on prod, on the
+  // sequence provider's unsubscribe list too, so no sequence follows up. The
+  // reply is dismissed: nobody answers somebody who asked to be left alone.
+  // grpc does the same by itself for replies that say so in words it knows.
+  router.post("/replies/:id/no-contact", async (req, res) => {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ error: "Invalid reply id" });
+      const { rows: found } = await query(
+        `SELECT lower(trim(r.lead_email)) AS lead, lower(trim(coalesce(c.email, ''))) AS sourced
+           FROM sourcing_replies r
+           LEFT JOIN sourcing_candidates c ON c.id = r.sourcing_candidate_id
+          WHERE r.id = $1::uuid`,
+        [req.params.id],
+      );
+      if (!found.length) return res.status(404).json({ error: "No such reply" });
+      const emails = [...new Set([found[0].lead, found[0].sourced].filter(Boolean))];
+      if (!emails.length) return res.status(409).json({ error: "This reply has no address to opt out" });
+      const who = req.admin?.email || "ops";
+      for (const email of emails) {
+        await query(
+          `INSERT INTO email_opt_outs (email, source, note) VALUES ($1, 'ops', $2)
+           ON CONFLICT (email) DO NOTHING`,
+          [email, `marked "don't contact" by ${who}`],
+        );
+      }
+      const { rows } = await query(
+        `UPDATE sourcing_replies SET status = 'dismissed', error = $2
+          WHERE id = $1::uuid AND status IN ('pending', 'failed')
+          RETURNING id, status, error`,
+        [req.params.id, `asked not to be contacted: opted out by ${who}`],
+      );
+      // The provider's list only on prod: dev's addresses are testers', and
+      // the Lemlist account is the one live one.
+      let provider = "skipped";
+      if ((req.dbTarget || "prod") === "prod") {
+        provider = await lemlistUnsubscribe(emails);
+      }
+      console.log(
+        `[autopilot-no-contact] admin=${who} db=${req.dbTarget || "prod"} reply=${req.params.id} ` +
+          `addresses=${emails.length} provider=${provider}`,
+      );
+      res.json({ reply: rows[0] || { id: req.params.id }, opted_out: emails.length, provider });
+    } catch (e) {
+      if (notPromoted(e)) return res.status(409).json({ error: "Sourcing is not on this database" });
+      if (e.code === "42P01") {
+        return res.status(409).json({ error: "The opt-out list needs the latest grpc deploy on this database" });
+      }
+      console.error("[autopilot/no-contact]", e);
       res.status(500).json({ error: e.message });
     }
   });

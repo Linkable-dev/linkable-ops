@@ -166,6 +166,9 @@ export const api = {
     request(`/autopilot/replies/${id}/draft`, { method: "PUT", body: JSON.stringify({ draft }) }),
   sendAutopilotReply: (id) => request(`/autopilot/replies/${id}/send`, { method: "POST" }),
   dismissAutopilotReply: (id) => request(`/autopilot/replies/${id}/dismiss`, { method: "POST" }),
+  // "Don't contact": the address goes on the opt-out list every sender checks
+  // (and Lemlist's, on prod), and the reply is dismissed unanswered.
+  noContactAutopilotReply: (id) => request(`/autopilot/replies/${id}/no-contact`, { method: "POST" }),
   // The send-side of outreach (sent/opened/clicked), separate from a person
   // writing back.
   getAutopilotEmails: (id, { limit = 25, offset = 0, type } = {}) =>

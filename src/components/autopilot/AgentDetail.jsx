@@ -257,6 +257,15 @@ function ReplyRow({ r, theme, onChange, onError }) {
                   onClick={() => act("dismiss", () => api.dismissAutopilotReply(r.id))}>
                   Dismiss
                 </Btn>
+                <Btn size="sm" variant="danger" loading={busy === "nocontact"}
+                  title="They asked not to be emailed: opt them out everywhere and leave this unanswered"
+                  onClick={() => {
+                    if (window.confirm("Opt this creator out of every Linkable email and leave the reply unanswered?")) {
+                      act("nocontact", () => api.noContactAutopilotReply(r.id));
+                    }
+                  }}>
+                  Don't contact
+                </Btn>
               </>
             )}
           </div>

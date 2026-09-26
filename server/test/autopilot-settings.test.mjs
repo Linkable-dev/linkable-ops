@@ -5,10 +5,14 @@ import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { autopilotRoutes } from "../routes/autopilot.js";
 
-async function serve(t, query) {
+async function serve(t, query, { dbTarget } = {}) {
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => { req.admin = { email: "settings-test@example.com" }; next(); });
+  app.use((req, _res, next) => {
+    req.admin = { email: "settings-test@example.com" };
+    if (dbTarget) req.dbTarget = dbTarget;
+    next();
+  });
   app.use(autopilotRoutes({ query }));
   const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -217,4 +221,29 @@ test("a reply is marked to send, never sent, and only while unsent", async (t) =
   assert.equal((await request(`/replies/${reply}/dismiss`, "POST")).status, 200);
   assert.equal((await request(`/replies/${reply}/send`, "POST")).status, 409);
   assert.equal((await request(`/replies/${reply}/draft`, "PUT", { draft: "late" })).status, 409);
+});
+
+// "Don't contact" puts every address the creator is known by on the opt-out
+// list, dismisses the reply, and never answers it. The provider's list is only
+// touched on prod, and this test runs as dev.
+test("don't contact opts every address out and leaves the reply unanswered", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, values) => {
+    seen.push({ sql, values });
+    if (/FROM sourcing_replies r/.test(sql)) return { rows: [{ lead: "ada@example.com", sourced: "ada.work@example.com" }] };
+    if (/UPDATE sourcing_replies/.test(sql)) return { rows: [{ id: values[0], status: "dismissed", error: values[1] }] };
+    return { rows: [] };
+  }, { dbTarget: "dev" });
+  const reply = "33333333-3333-3333-3333-333333333333";
+  assert.equal((await request("/replies/nope/no-contact", "POST")).status, 400);
+
+  const res = await request(`/replies/${reply}/no-contact`, "POST");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.opted_out, 2);
+  assert.equal(res.body.provider, "skipped", "dev must never reach the provider");
+  const inserted = seen.filter((s) => /INSERT INTO email_opt_outs/.test(s.sql)).map((s) => s.values[0]);
+  assert.deepEqual(inserted.sort(), ["ada.work@example.com", "ada@example.com"]);
+  const dismiss = seen.find((s) => /UPDATE sourcing_replies/.test(s.sql));
+  assert.match(dismiss.sql, /status = 'dismissed'/);
+  assert.doesNotMatch(dismiss.sql, /send_requested_at/);
 });
