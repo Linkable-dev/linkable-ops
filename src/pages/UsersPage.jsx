@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useDbTarget } from "../contexts/DbTargetContext";
 import { api, friendlyDate, friendlyNumber } from "../lib/api";
@@ -176,7 +176,14 @@ export default function UsersPage() {
   };
 
   const offset = (page - 1) * pageSize;
+  // Only the newest request may fill the table. Switching from Brands to
+  // Creators while the (slower) brands query is still out used to let it land
+  // last and overwrite the creators: brand accounts listed as creators, and
+  // "View" signing in as the brand.
+  const latestFetch = useRef(0);
   const fetchRows = useCallback(async () => {
+    const fetchId = ++latestFetch.current;
+    const isLatest = () => fetchId === latestFetch.current;
     setLoading(true);
     setError("");
     try {
@@ -190,12 +197,13 @@ export default function UsersPage() {
           : filters;
         data = await fn({ q, limit: pageSize, offset, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
       }
-      setRows(data);
+      if (isLatest()) setRows(data);
     } catch (err) {
+      if (!isLatest()) return;
       setError(err.message);
       setRows([]);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   }, [tab, q, sort, filters, showHidden, pageSize, offset]);
 
