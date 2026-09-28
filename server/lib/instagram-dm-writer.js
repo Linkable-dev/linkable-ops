@@ -209,8 +209,10 @@ export function finishDraft(raw, lead) {
   // The pitch is not only affiliate, and the one creator number is ours.
   const affiliate = message.match(/\b(commission\w*|affiliat\w*|provvigion\w*|commission[ei])\b/gi);
   if (affiliate) problems.push(`pitched it as affiliate: ${affiliate.join(", ")}`);
-  // A number in their own name or post ("Studio 54", "5 UGC creators") is theirs.
-  const theirs = `${brandNameFor(lead)} ${lead.ig_full_name || ""} ${lead.handle} ${lead.intent_caption || ""}`;
+  // A number in their own name, bio or post ("Studio 54", "9ct gold", "5 UGC
+  // creators") is theirs.
+  const theirs = [brandNameFor(lead), lead.ig_full_name, lead.handle, lead.ig_biography, lead.intent_caption]
+    .filter(Boolean).join(" ");
   const numbers = (message.match(/\d[\d.,]*\+?/g) || [])
     .filter((n) => !/^10[.,]000\+?$/.test(n) && n !== "24" && !theirs.includes(n.replace(/[.,+]+$/, "")));
   if (numbers.length) problems.push(`quoted a number other than ${CREATOR_CLAIM}: ${numbers.join(", ")}`);

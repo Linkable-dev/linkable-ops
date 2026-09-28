@@ -76,6 +76,7 @@ test("a draft pitched as affiliate, or quoting another creator number, is refuse
   assert.ok(other.problems.some((p) => p.includes("600+")));
   // A number that is part of the brand's own name is not a claim.
   assert.deepEqual(finishDraft("Hey Studio 54!", { ...lead, brand_name: "Studio 54" }).problems, []);
+  assert.deepEqual(finishDraft("You make 9ct gold jewellery.", { ...lead, ig_biography: "Sterling Silver, 9ct Gold" }).problems, []);
 });
 
 test("a signature the model wrote is removed; the real one is added by code", () => {
