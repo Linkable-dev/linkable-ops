@@ -18,6 +18,7 @@ import { claudeMessage, cachedSystem } from "../lib/anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
 import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-club.js";
 import { draftInstagramDm, languageFor, LANGUAGES, MAX_DM_CHARS } from "../lib/instagram-dm-writer.js";
+import { creatorPool } from "../lib/creator-pool.js";
 
 const TABLE = "prospector_leads";
 const CAMPAIGNS = "prospector_campaigns";
@@ -1036,7 +1037,8 @@ export function prospectingRoutes() {
     if (error) return dmError(res, error, "choosing leads to draft");
     if (!leads?.length) return res.json({ drafted: [], failed: [], costUsd: 0 });
 
-    const senderName = process.env.PROSPECTOR_DM_SENDER_NAME || "";
+    // Counted once per batch: the number every DM in it quotes.
+    const pool = await creatorPool();
     const drafted = [];
     const failed = [];
     let costUsd = 0;
@@ -1046,7 +1048,7 @@ export function prospectingRoutes() {
       while (queue.length) {
         const lead = queue.shift();
         try {
-          const out = await draftInstagramDm(lead, { language, senderName });
+          const out = await draftInstagramDm(lead, { language, pool });
           costUsd += out.costUsd;
           const { data: saved, error: saveError } = await supabase
             .from(TABLE)

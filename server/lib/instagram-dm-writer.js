@@ -8,12 +8,10 @@
 // side writing first, so a cold DM is sent by a person or not at all.
 //
 // The draft is built ONLY from the lead row - what the pipeline observed - and
-// from facts.md, the list of things about Linkable we are allowed to say.
-// Nothing the browser sends reaches the prompt except the choice of language.
+// the live creator count (creator-pool.js). The shape is Federico's own DMs;
+// the only claims about Linkable are the ones in that shape. Nothing the
+// browser sends reaches the prompt except the choice of language.
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { claudeMessage, cachedSystem } from "./anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
 
@@ -21,11 +19,19 @@ export const DM_MODEL = "claude-sonnet-5";
 // Sonnet list price, $/million tokens. Mirrors PRICE in nudge-writer.js.
 const PRICE = { in: 2, out: 10 };
 
-// A DM is read on a phone, in a list of requests from strangers. Anything near
-// Instagram's own 1,000-character limit reads as a mail-merge. The model is
-// asked for TARGET; a draft over MAX is refused and written again.
-export const TARGET_DM_CHARS = 400;
-export const MAX_DM_CHARS = 550;
+// A DM is read on a phone, in a list of requests from strangers. These are
+// the body, before the signature the code appends. The model is asked for
+// TARGET; a draft over MAX is refused and written again.
+export const TARGET_DM_CHARS = 380;
+export const MAX_DM_CHARS = 520;
+
+// Who the DM is from. Appended by code, not written by the model, so it is the
+// same on every message and never a name the model picked.
+export function signature() {
+  const name = process.env.PROSPECTOR_DM_SENDER_NAME || "Federico";
+  const title = process.env.PROSPECTOR_DM_SENDER_TITLE || "Founder @ Linkable";
+  return `${name}\n${title}`;
+}
 
 export const LANGUAGES = { en: "British English", it: "Italian" };
 
@@ -46,11 +52,6 @@ export function languageFor(lead) {
   return (text.match(ITALIAN_WORDS) || []).length >= 3 ? "it" : "en";
 }
 
-const FACTS = fs.readFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "blog", "facts.md"),
-  "utf8",
-);
-
 const DRAFT_TOOL = {
   name: "draft_dm",
   description: "Return the finished Instagram message.",
@@ -63,47 +64,74 @@ const DRAFT_TOOL = {
   },
 };
 
+// The house style is Federico's own DMs, the ones he sent by hand. Their
+// numbers are replaced with [N] here: the examples teach the shape, and the
+// number comes from the live creator count in the facts, never from a sample.
 const SYSTEM = `You write the first Instagram DM from Linkable to an ecommerce brand
-that has never heard of us. A person on the Linkable team reads it, pastes it
-into Instagram and sends it from their own account, so it must be something
-they would put their name to.
+that has never heard of us. It is sent by Federico, Linkable's founder, from his
+own account, and it must read like the ones he writes by hand.
 
-Why we are writing: the brand either posted asking for creators (UGC creators,
-ambassadors, influencers), or creators are already posting about it, or it is
-simply the kind of brand that works with creators. Linkable is where brands get
-creators applying to their campaigns and track what those creators sell.
+His DMs, which are the house style (numbers replaced with [N]):
 
-Rules, most important first:
-- Under ${TARGET_DM_CHARS} characters. Three short paragraphs at most.
-- Open with the specific reason we are writing to THIS brand, taken from the
-  facts: what their post asked for, the creators already posting about them,
-  or what they sell and where. Never open with a greeting paragraph, "I hope
-  you're well", "I came across your page" or a compliment.
-- If they posted a creator call, answer that call: say plainly that Linkable
-  can bring them creators who apply to exactly that kind of campaign.
-- ONE sentence on Linkable, using ONLY the facts about Linkable below: the
-  part that answers why we are writing (creators applying to their campaign,
-  or tracking what creators sell). Not a feature list. No prices, no plans, no
-  numbers that are not in those facts.
-- You cannot see their posts, photos or videos. Never compliment their content,
-  their aesthetic or their feed.
-- End with one easy question the brand can answer in a word, like whether they
-  would like to see how it works. Not a meeting request.
-- Never write a URL, an email address or a phone number. Never mention a
-  handle that is not in the facts.
-- Plain sentences, the way a person texts for work. No markdown, no hashtags,
-  no em dashes, no exclamation marks. At most one emoji, and only if it does
-  work.
-- Do not say you are an AI, and do not mention how the brand was found beyond
-  what the facts say they posted.
-- Write in the language you are told to use. In Italian use "voi" for the brand
-  and a natural, direct register, not a translation of English.
+---
+Hey Izzy Rose Skin! Quick question.
 
-Facts about Linkable (the only things you may claim about it):
+We already have [N]+ skincare, beauty and wellness creators interested in creating content around clean skincare brands like Izzy Rose Skin and promoting their products on a commission basis.
 
-${FACTS}
+Brands typically start receiving creator applications within 24 hours.
 
-Call draft_dm with the finished message.`;
+Would you be open to giving it a try?
+---
+Hey ddg!
+
+Just came across your post looking for new brand ambassadors.
+
+We have [N]+ beauty and skincare creators on Linkable who can apply to collaborate with ddg, create content around your products and promote them to their audiences. Brands typically start receiving creator applications within 24 hours.
+
+Would you be open to giving it a try?
+---
+Hey Still Skin!
+
+Quick question.
+
+We already have [N]+ beauty, skincare and lifestyle creators interested in creating content around Still Skin and promoting your products on a commission basis.
+
+Brands typically start receiving creator applications within 24 hours.
+
+Would you be open to giving it a try?
+---
+
+The shape, every time:
+1. "Hey {brand}!" with the brand's name as the brand itself writes it (keep
+   their casing, drop taglines after | or -). Then "Quick question." when
+   there is no post to mention.
+2. When the facts include a post where they asked for creators, ambassadors or
+   UGC: "Just came across your post looking for ..." naming what the post
+   actually asked for, in a few words. Never claim a post the facts do not give.
+3. The creator line: we have [N]+ {niche} creators on Linkable who can apply to
+   collaborate with {brand}, create content around their products and promote
+   them on a commission basis. [N] and the niche words come ONLY from the
+   "Creators on Linkable" facts, copied exactly. Pick the niche line that fits
+   this brand; if none fits, use the all-niches number and just say
+   "creators". If the facts give no number, write the sentence without one.
+4. "Brands typically start receiving creator applications within 24 hours."
+5. "Would you be open to giving it a try?"
+
+Rules:
+- Body under ${TARGET_DM_CHARS} characters. Do NOT sign it: the signature is
+  added after you.
+- No other claims about Linkable: no prices, no free trial, no "free to get
+  started", no features, no numbers except the one from the facts.
+- You cannot see their posts, photos or videos. Never compliment their content.
+- Never write a URL, an email address or a phone number, and never mention a
+  handle.
+- No markdown, no hashtags, no em dashes. The only exclamation mark is the one
+  after the greeting.
+- Write in the language you are told to use. In Italian keep the same shape in
+  natural Italian ("Ciao {brand}!", "voi" for the brand), not a word-for-word
+  translation.
+
+Call draft_dm with the finished body.`;
 
 const clean = (value) => {
   const text = String(value ?? "").trim();
@@ -125,9 +153,11 @@ function creatorHandles(lead) {
 }
 
 // Every line is something the operator could have read off the lead.
-export function factSheet(lead, { language, senderName } = {}) {
+export function factSheet(lead, { language, pool } = {}) {
   const lines = [];
   lines.push(`Brand: ${brandNameFor(lead)} (@${lead.handle} on Instagram)`);
+  // How the brand names itself on Instagram, which is what the greeting uses.
+  if (clean(lead.ig_full_name)) lines.push(`Their Instagram display name: ${clean(lead.ig_full_name)}`);
   if (clean(lead.country)) lines.push(`Country of the store: ${lead.country}`);
   if (clean(lead.ig_category)) lines.push(`Instagram category: ${lead.ig_category}`);
   if (clean(lead.ig_biography)) lines.push(`Their Instagram bio: "${clean(lead.ig_biography).slice(0, 400)}"`);
@@ -147,27 +177,19 @@ export function factSheet(lead, { language, senderName } = {}) {
     lines.push("They recently posted asking for creators (the caption was not captured).");
   }
 
-  const handles = creatorHandles(lead);
-  if (handles.length) {
-    const n = Number(lead.distinct_creators_90d) || handles.length;
-    lines.push("");
-    lines.push(`Creators already posting about them in the last 90 days: ${n}, including ${handles.map((h) => `@${h}`).join(", ")}.`);
-  }
-
-  const app = clean(lead.affiliate_app);
-  if (!onShopify) {
-    // Never enriched, so there is nothing known about their tracking either way.
-  } else if (app && app !== "none") {
-    lines.push(`They already run an affiliate app (${app}), so do not say they have no tracking.`);
+  lines.push("");
+  if (pool?.total) {
+    lines.push("Creators on Linkable (the ONLY numbers you may use, exactly as written):");
+    lines.push(`- all niches: ${pool.total.toLocaleString("en-GB")}+`);
+    for (const niche of pool.niches || []) {
+      lines.push(`- ${niche.label}: ${niche.count.toLocaleString("en-GB")}+`);
+    }
   } else {
-    lines.push("We could not see an affiliate or creator-tracking app on their store. Do not state this as certain.");
+    lines.push("Creators on Linkable: no count available. Do not state any number of creators.");
   }
 
   lines.push("");
   lines.push(`Write in: ${LANGUAGES[language] || LANGUAGES.en}`);
-  lines.push(senderName
-    ? `The sender is ${senderName} from the Linkable team. Introduce them by first name once.`
-    : "The sender is someone on the Linkable team. Do not invent a name for them.");
   return lines.join("\n");
 }
 
@@ -183,6 +205,9 @@ const URL_RE = /\b(?:https?:\/\/|www\.)\S+|(?<![@\w.-])[\w-][\w.-]*\.(?:com|co\.
 export function finishDraft(raw, lead) {
   let message = sanitizeStyle(String(raw || "").replace(/[ \t]+\n/g, "\n"));
   message = message.replace(/\n{3,}/g, "\n\n").trim();
+  // A signature the model wrote anyway comes off; the real one goes on after.
+  const [sender] = signature().split("\n");
+  message = message.replace(new RegExp(`\\n+${sender}\\b[\\s\\S]*$`), "").trim();
 
   const problems = [];
   if (!message) problems.push("empty message");
@@ -199,9 +224,9 @@ export function finishDraft(raw, lead) {
 }
 
 // → { message, language, model, costUsd, styleIssues }
-export async function draftInstagramDm(lead, { language, senderName } = {}) {
+export async function draftInstagramDm(lead, { language, pool } = {}) {
   const lang = LANGUAGES[language] ? language : languageFor(lead);
-  const facts = factSheet(lead, { language: lang, senderName });
+  const facts = factSheet(lead, { language: lang, pool });
 
   // Two attempts: the second only when the first broke a rule we check in
   // code, which is rare and cheaper than a person catching it.
@@ -231,7 +256,7 @@ export async function draftInstagramDm(lead, { language, senderName } = {}) {
     throw new Error(`the draft broke a rule: ${last.problems.join("; ")}`);
   }
   return {
-    message: last.message,
+    message: `${last.message}\n\n${signature()}`,
     language: lang,
     model: DM_MODEL,
     costUsd: Math.round(cost * 10000) / 10000,
