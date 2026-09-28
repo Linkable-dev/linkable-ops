@@ -3,9 +3,12 @@ import {useLocation} from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useDbTarget } from "../../contexts/DbTargetContext";
 import { Link } from "react-router-dom";
-import { api } from "../../lib/api";
+import { api, friendlyName } from "../../lib/api";
 import { ALERTS_CHANGED } from "../../lib/alerts";
 
+// The title is the sidebar item that is lit for this page, in the sidebar's
+// own words, so the two never disagree. A page the sidebar does not list
+// falls back to its section name rather than a generic "Admin".
 function getPageInfo(pathname) {
   if (pathname === "/") return { title: "Home", subtitle: "Live business metrics" };
   if (pathname === "/alerts") return { title: "Alerts", subtitle: "Brands that need a nudge" };
@@ -20,22 +23,33 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/users")) return { title: "Impersonation", subtitle: "Open the main app as a brand or creator" };
   if (pathname.startsWith("/trials")) return { title: "Trials", subtitle: "Trial grants and subscription health" };
   if (pathname.startsWith("/team")) return { title: "Team", subtitle: "Admins of this panel" };
-  if (pathname.startsWith("/ai/campaigns/")) return { title: "Outbound", subtitle: "Campaign detail" };
-  if (pathname.startsWith("/ai/agents")) return { title: "Outbound", subtitle: "Agents with a goal and a budget" };
-  if (pathname.startsWith("/ai/inbox")) return { title: "Replies", subtitle: "Replies that need a human" };
+  // GTM. The old outbound pages sit under Brands in the sidebar, so they are
+  // titled Brands here too.
+  if (pathname.startsWith("/gtm/brands/instagram")) return { title: "Brands", subtitle: "Instagram DMs" };
+  if (pathname.startsWith("/gtm/brands/replies")) return { title: "Brands", subtitle: "Replies" };
+  if (pathname.startsWith("/gtm/brands") || pathname.startsWith("/ai/prospecting")) {
+    return { title: "Brands", subtitle: "Brands to pitch Linkable to" };
+  }
+  if (pathname.startsWith("/gtm/creators/outreach")) return { title: "Creators", subtitle: "Outreach" };
+  if (pathname.startsWith("/gtm/creators/replies")) return { title: "Creators", subtitle: "Replies" };
+  if (pathname.startsWith("/gtm/creators")) return { title: "Creators", subtitle: "Creators to invite" };
+  if (pathname.startsWith("/ai/campaigns/")) return { title: "Brands", subtitle: "Outbound campaign" };
+  if (pathname.startsWith("/ai/agents")) return { title: "Brands", subtitle: "Outbound agents" };
+  if (pathname.startsWith("/ai/inbox")) return { title: "Brands", subtitle: "Outbound inbox" };
   if (pathname === "/blog") return { title: "Blog", subtitle: "Articles published on linkable.link" };
   if (pathname === "/blog/new") return { title: "Blog", subtitle: "New article" };
   if (pathname.startsWith("/blog/")) return { title: "Blog", subtitle: "Edit article" };
   const match = pathname.match(/^\/tables\/([^/]+)/);
   if (match) {
-    const table = match[1].replace(/_/g, " ");
+    const table = friendlyName(match[1]);
     if (pathname.endsWith("/analytics")) return { title: `${table}`, subtitle: "Analytics" };
     if (pathname.endsWith("/new")) return { title: `${table}`, subtitle: "New record" };
     const idMatch = pathname.match(/^\/tables\/[^/]+\/(.+)$/);
     if (idMatch && idMatch[1] !== "analytics" && idMatch[1] !== "new") return { title: `${table}`, subtitle: `Record #${idMatch[1]}` };
     return { title: table, subtitle: "Browse and manage records" };
   }
-  return { title: "Admin", subtitle: "" };
+  const section = pathname.split("/").filter(Boolean)[0];
+  return { title: section ? friendlyName(section) : "Home", subtitle: "" };
 }
 
 export default function Header() {
