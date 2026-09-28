@@ -63,3 +63,13 @@ test("both Meta secrets are trusted, blanks are not", () => {
   assert.deepEqual(webhookSecrets({ IG_APP_SECRET: "b" }), ["b"]);
   assert.deepEqual(webhookSecrets({ META_APP_SECRET: "  " }), []);
 });
+
+test("the dashboard's Test payload is read like a live message", () => {
+  const body = { object: "instagram", entry: [{ id: "0", time: 1, changes: [{ field: "messages", value: {
+    sender: { id: "12334" }, recipient: { id: "23245" }, timestamp: "1527459824",
+    message: { mid: "random_mid", text: "random_text" } } }] }] };
+  const [m] = messagesIn(body);
+  assert.equal(m.igsid, "12334");
+  assert.equal(m.direction, "in");
+  assert.equal(m.text, "random_text");
+});

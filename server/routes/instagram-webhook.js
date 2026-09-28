@@ -40,7 +40,13 @@ export function webhookSecrets(env = process.env) {
 export function messagesIn(body) {
   const out = [];
   for (const entry of body?.entry || []) {
-    for (const ev of entry.messaging || []) {
+    // Live messages come as `messaging`; the dashboard's Test button sends the
+    // same event as a `changes` item instead.
+    const events = [
+      ...(entry.messaging || []),
+      ...(entry.changes || []).filter((c) => c.field === "messages").map((c) => c.value),
+    ];
+    for (const ev of events) {
       const msg = ev.message;
       if (!msg || msg.is_deleted) continue;
       const echo = msg.is_echo === true;
@@ -64,6 +70,22 @@ async function leadFor(igsid) {
   const { data } = await supabase.from(TABLE).update({ ig_user_id: igsid })
     .eq("handle", handle).select("*").maybeSingle();
   return data || null;
+}
+
+// The last delivery Meta made, accepted or not, so "are webhooks arriving at
+// all" can be answered from the database instead of the Vercel logs. Nothing
+// from an unverified body is kept beyond its shape.
+async function noteDelivery(body, signed, secrets) {
+  const entry = body?.entry?.[0] || {};
+  const value = {
+    at: new Date().toISOString(), signed, secrets,
+    object: String(body?.object || ""),
+    kinds: [...Object.keys(entry)].filter((k) => !["id", "time"].includes(k)),
+    fields: (entry.changes || []).map((c) => String(c.field || "")),
+  };
+  await supabase.from("prospector_settings")
+    .upsert({ key: "instagram_webhook_last", value, updated_by: "meta" })
+    .then(() => {}, () => {});
 }
 
 export async function recordMessage(m) {
@@ -105,7 +127,9 @@ export function instagramWebhookRoutes() {
   router.post("/webhook", async (req, res) => {
     const header = req.headers["x-hub-signature-256"];
     const secrets = webhookSecrets();
-    if (!secrets.some((secret) => validSignature(req.rawBody, header, secret))) {
+    const signed = secrets.some((secret) => validSignature(req.rawBody, header, secret));
+    await noteDelivery(req.body, signed, secrets.length);
+    if (!signed) {
       console.warn("[instagram-webhook] signature refused", {
         secrets: secrets.length, signed: Boolean(header), body: req.rawBody?.length || 0,
       });
