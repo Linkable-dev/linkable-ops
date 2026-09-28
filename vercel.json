@@ -42,7 +42,7 @@
     },
     {
       "path": "/api/cron/instagram-drafts",
-      "schedule": "30 8 * * 1-5"
+      "schedule": "30 9 * * 1-5"
     }
   ]
 }
