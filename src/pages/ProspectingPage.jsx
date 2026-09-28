@@ -482,14 +482,16 @@ function Campaigns({ theme }) {
               {c.state}{asked && !actually ? " (starting)" : ""}
             </span>
             <span style={{ color: theme.textMuted, fontSize: 12 }}>
-              tier {c.goal_tiers} · {c.source}
+              tier {c.goal_tiers} · {c.source}{c.continuous ? " · daily" : ""}
             </span>
             <div style={{ flex: 1 }} />
             <span style={{ color: theme.text, fontVariantNumeric: "tabular-nums" }}>
               {c.leads_found}/{c.goal_leads}
             </span>
             <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>
-              ${Number(c.spent_usd || 0).toFixed(2)} of ${Number(c.budget_usd).toFixed(2)}
+              {c.continuous
+                ? `$${Number(c.budget_usd).toFixed(2)}/month · $${Number(c.spent_usd || 0).toFixed(2)} spent`
+                : `$${Number(c.spent_usd || 0).toFixed(2)} of $${Number(c.budget_usd).toFixed(2)}`}
             </span>
             <span style={{ color: theme.textMuted, fontSize: 12 }}>
               {c.passes} pass{c.passes === 1 ? "" : "es"}
@@ -523,7 +525,7 @@ function NewCampaign({ theme, onCreated }) {
   const [error, setError] = useState(null);
   const [form, setForm] = useState({
     name: "", goal_leads: 20, goal_tiers: "A", budget_usd: 5,
-    source: "creator_calls", hashtags: "", countries: "",
+    source: "creator_calls", hashtags: "", countries: "", continuous: false,
   });
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -541,6 +543,7 @@ function NewCampaign({ theme, onCreated }) {
         budget_usd: Number(form.budget_usd),
         hashtags: form.hashtags || null,
         countries: form.countries || null,
+        continuous: form.continuous,
       });
       setForm((f) => ({ ...f, name: "", hashtags: "" }));
       setOpen(false);
@@ -589,6 +592,13 @@ function NewCampaign({ theme, onCreated }) {
                placeholder="ugccreatorwanted, creatorswanted"
                style={{ ...field, width: "100%" }} />
       </Labelled>
+      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
+                      color: theme.textMid, paddingBottom: 8 }}
+             title="Runs once a day on a rotating slice of its hashtags and never stops on its own. The budget is per calendar month.">
+        <input type="checkbox" checked={form.continuous} style={{ margin: 0 }}
+               onChange={(e) => setForm((f) => ({ ...f, continuous: e.target.checked }))} />
+        Daily, budget per month
+      </label>
       <Btn onClick={create} disabled={busy || !form.name.trim()}>Create</Btn>
       <Btn variant="secondary" onClick={() => { setOpen(false); setError(null); }}>Cancel</Btn>
       <div style={{ width: "100%", color: theme.textMuted, fontSize: 11 }}>

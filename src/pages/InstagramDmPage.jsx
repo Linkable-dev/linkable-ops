@@ -35,6 +35,7 @@ export default function InstagramDmPage() {
   const [problem, setProblem] = useState(null);
   const [drafting, setDrafting] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [savingSetting, setSavingSetting] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -75,7 +76,22 @@ export default function InstagramDmPage() {
     }
   }
 
+  // Whether brands not on Shopify are in the queue. One setting for the whole
+  // team, chosen by an admin, so two people working the queue see the same list.
+  async function setNonShopify(value) {
+    setSavingSetting(true);
+    try {
+      await api.setProspectingSetting("dm_include_non_shopify", value);
+      await load(true);
+    } catch (err) {
+      setNotice({ tone: "danger", text: err?.message || "could not save the setting" });
+    } finally {
+      setSavingSetting(false);
+    }
+  }
+
   const counts = data?.counts || {};
+  const includeNonShopify = data?.settings?.dm_include_non_shopify === true;
   const tiles = [
     { label: "To send", value: counts.todo, hint: "not yet written to" },
     { label: "Drafted", value: counts.drafted, hint: "message ready" },
@@ -126,6 +142,15 @@ export default function InstagramDmPage() {
           </Btn>
         ))}
         <div style={{ flex: 1 }} />
+        {data && (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
+                          color: theme.textMid, cursor: savingSetting ? "wait" : "pointer" }}
+                 title="Brands whose store is not on Shopify are never emailed. This decides whether they are offered here, for everyone.">
+            <input type="checkbox" checked={includeNonShopify} disabled={savingSetting}
+                   onChange={(e) => setNonShopify(e.target.checked)} style={{ margin: 0 }} />
+            Include brands not on Shopify{counts.nonShopify ? ` (${counts.nonShopify})` : ""}
+          </label>
+        )}
         {view === "todo" && (
           <Btn size="sm" onClick={draftNext} loading={drafting} disabled={!counts.todo}>
             Draft the next 10
@@ -272,6 +297,7 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {lead.intent_signal === "open_call" && <Tag tone="success">Asked for creators</Tag>}
+          {lead.status === "not_shopify" && <Tag tone="warning">Not on Shopify</Tag>}
           {lead.distinct_creators_90d > 0 && <Tag>{lead.distinct_creators_90d} creators posting</Tag>}
           {lead.tier && <Tag>Tier {lead.tier}</Tag>}
           {lead.email_queued && <Tag tone="warning">Queued for email</Tag>}

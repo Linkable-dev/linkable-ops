@@ -69,6 +69,9 @@ export const api = {
     request("/prospecting/instagram/draft", {
       method: "POST", body: JSON.stringify({ handles, language, limit }),
     }),
+  getProspectingSettings: () => request("/prospecting/settings"),
+  setProspectingSetting: (key, value) =>
+    request("/prospecting/settings", { method: "POST", body: JSON.stringify({ key, value }) }),
   updateInstagramDm: (handle, action, text) =>
     request(`/prospecting/instagram/${encodeURIComponent(handle)}`, {
       method: "POST", body: JSON.stringify({ action, text }),

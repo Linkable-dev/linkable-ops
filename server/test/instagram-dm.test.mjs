@@ -74,3 +74,17 @@ test("a lower-case store name is title-cased, a shouted one is left alone", () =
   assert.equal(brandNameFor(lead), "Wildmoor Skincare");
   assert.equal(brandNameFor({ handle: "promixx", brand_name: "PROMIXX" }), "PROMIXX");
 });
+
+test("a brand not on Shopify is never pitched the Shopify integration", () => {
+  const facts = factSheet({ ...lead, status: "not_shopify", domain: "wildmoor.com" }, { language: "en" });
+  assert.match(facts, /is NOT on Shopify/);
+  assert.doesNotMatch(facts, /a Shopify store/);
+  assert.doesNotMatch(facts, /affiliate/);
+});
+
+test("with no country, the language comes from what the brand wrote", () => {
+  assert.equal(languageFor({ intent_caption: "Cerchiamo creator per la nostra nuova collezione, scrivici!" }), "it");
+  assert.equal(languageFor({ intent_caption: "We're looking for creators for our new collection" }), "en");
+  // A country, when there is one, wins over the words.
+  assert.equal(languageFor({ country: "GB", intent_caption: "Cerchiamo creator per la nostra nuova collezione" }), "en");
+});

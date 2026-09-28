@@ -135,9 +135,15 @@ export function prospectingRoutes() {
     blocked: (qy) => qy.neq("status", "routed").is("pushed_at", null),
   };
 
+  // Brands whose store is not on Shopify are published only for the Instagram
+  // queue. They are never routed or emailed, so the email funnel below does not
+  // count them: 107 of them in "Needs review" would bury the six that do.
+  const EMAIL_LEADS = (qy) => qy.neq("status", "not_shopify");
+  const isEmailLead = (r) => r.status !== "not_shopify";
+
   router.get("/leads", async (req, res) => {
     const { tier, decision, status, view, q, sortBy, sortDir, limit = 100, offset = 0 } = req.query;
-    let query = supabase.from(TABLE).select(LIST_COLUMNS, { count: "exact" });
+    let query = EMAIL_LEADS(supabase.from(TABLE).select(LIST_COLUMNS, { count: "exact" }));
 
     if (tier) query = query.in("tier", String(tier).split(","));
     if (decision) query = query.in("decision", String(decision).split(","));
@@ -168,7 +174,7 @@ export function prospectingRoutes() {
       .select("tier,decision,status,contact_email,affiliate_app,pushed_at");
     if (error) return handleError(res, error, "loading stats");
 
-    const rows = data || [];
+    const rows = (data || []).filter(isEmailLead);
     const tally = (key) =>
       rows.reduce((acc, row) => {
         const k = row[key] || "unknown";
@@ -880,15 +886,64 @@ export function prospectingRoutes() {
     "dm_sent_by", "dm_replied_at",
   ].join(",");
 
+  // --- settings an admin chooses for the whole team ----------------------
+
+  const SETTINGS = "prospector_settings";
+  const SETTING_DEFAULTS = { dm_include_non_shopify: false };
+
+  async function readSettings() {
+    const { data, error } = await supabase.from(SETTINGS).select("key,value");
+    // A missing table reads as the defaults: the queue must keep working in the
+    // window between a deploy and the migration.
+    if (error) return { ...SETTING_DEFAULTS };
+    const out = { ...SETTING_DEFAULTS };
+    for (const row of data || []) {
+      if (row.key in SETTING_DEFAULTS) out[row.key] = row.value;
+    }
+    return out;
+  }
+
+  router.get("/settings", async (_req, res) => {
+    res.json(await readSettings());
+  });
+
+  router.post("/settings", async (req, res) => {
+    const { key, value } = req.body || {};
+    if (!(key in SETTING_DEFAULTS)) {
+      return res.status(400).json({ error: `unknown setting: ${key}` });
+    }
+    if (typeof value !== typeof SETTING_DEFAULTS[key]) {
+      return res.status(400).json({ error: `${key} must be a ${typeof SETTING_DEFAULTS[key]}` });
+    }
+    const { error } = await supabase.from(SETTINGS).upsert({
+      key, value, updated_at: new Date().toISOString(),
+      updated_by: req.admin?.name || req.admin?.email || null,
+    }, { onConflict: "key" });
+    if (error) {
+      if (/prospector_settings/.test(error.message || "")) {
+        return res.status(503).json({
+          error: "settings are not set up",
+          hint: "apply supabase/migrations/026_prospector_continuous.sql",
+        });
+      }
+      return handleError(res, error, "saving the setting");
+    }
+    res.json(await readSettings());
+  });
+
   // Waiting to be written to on Instagram. The same predicate the counts use
-  // below, so a tile and the list it opens cannot disagree.
-  const dmOpen = (qy) => qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null)
-                           .neq("decision", "hide").not("tier", "is", null);
-  const isDmOpen = (r) => ["none", "drafted"].includes(r.dm_state || "none") && !r.pushed_at
-                          && r.decision !== "hide" && r.tier;
+  // below, so a tile and the list it opens cannot disagree. Brands not on
+  // Shopify have no tier; they are in the queue only when an admin has said so.
+  const dmOpen = (qy, { nonShopify }) => {
+    const open = qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null).neq("decision", "hide");
+    return nonShopify ? open.or("tier.not.is.null,status.eq.not_shopify") : open.not("tier", "is", null);
+  };
+  const isDmOpen = (r, { nonShopify }) => ["none", "drafted"].includes(r.dm_state || "none")
+    && !r.pushed_at && r.decision !== "hide"
+    && (r.tier || (nonShopify && r.status === "not_shopify"));
 
   const DM_VIEWS = {
-    todo: (qy) => dmOpen(qy)
+    todo: (qy, opts) => dmOpen(qy, opts)
       // Brands that asked for creators in public first: they have already said
       // the thing the message answers. Then the pipeline's own ranking.
       .order("intent_signal", { ascending: true, nullsFirst: false })
@@ -927,11 +982,13 @@ export function prospectingRoutes() {
     const view = DM_VIEWS[req.query.view] ? req.query.view : "todo";
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const settings = await readSettings();
+    const opts = { nonShopify: settings.dm_include_non_shopify === true };
 
     const [list, all] = await Promise.all([
-      DM_VIEWS[view](supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }))
+      DM_VIEWS[view](supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), opts)
         .range(offset, offset + limit - 1),
-      supabase.from(TABLE).select("tier,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
+      supabase.from(TABLE).select("tier,status,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
     ]);
     if (list.error) return dmError(res, list.error, "listing the Instagram queue");
     if (all.error) return dmError(res, all.error, "counting the Instagram queue");
@@ -942,9 +999,13 @@ export function prospectingRoutes() {
     res.json({
       leads: (list.data || []).map(shapeDm),
       total: list.count ?? (list.data || []).length,
+      settings,
       counts: {
-        todo: rows.filter(isDmOpen).length,
-        drafted: rows.filter((r) => isDmOpen(r) && r.dm_text).length,
+        todo: rows.filter((r) => isDmOpen(r, opts)).length,
+        drafted: rows.filter((r) => isDmOpen(r, opts) && r.dm_text).length,
+        // Waiting behind the setting, so switching it on is not a leap in the dark.
+        nonShopify: rows.filter((r) => r.status === "not_shopify"
+          && isDmOpen(r, { nonShopify: true })).length,
         sentToday: rows.filter((r) => r.dm_sent_at && new Date(r.dm_sent_at) >= startOfDay).length,
         sent: rows.filter((r) => ["sent", "replied"].includes(r.dm_state)).length,
         replied: rows.filter((r) => r.dm_state === "replied").length,
@@ -965,10 +1026,11 @@ export function prospectingRoutes() {
       : [];
     const language = LANGUAGES[req.body?.language] ? req.body.language : undefined;
 
+    const opts = { nonShopify: (await readSettings()).dm_include_non_shopify === true };
     const base = supabase.from(TABLE).select(DM_COLUMNS);
     const query = named.length
-      ? dmOpen(base).in("handle", named)
-      : DM_VIEWS.todo(base.is("dm_text", null))
+      ? dmOpen(base, opts).in("handle", named)
+      : DM_VIEWS.todo(base.is("dm_text", null), opts)
           .limit(Math.min(Number(req.body?.limit) || DRAFT_BATCH, DRAFT_BATCH));
     const { data: leads, error } = await query;
     if (error) return dmError(res, error, "choosing leads to draft");
@@ -1098,7 +1160,7 @@ export function prospectingRoutes() {
   });
 
   router.post("/campaigns", async (req, res) => {
-    const { name, goal_leads, goal_tiers, budget_usd, source, hashtags, countries } = req.body || {};
+    const { name, goal_leads, goal_tiers, budget_usd, source, hashtags, countries, continuous } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: "a campaign needs a name" });
     }
@@ -1119,6 +1181,9 @@ export function prospectingRoutes() {
       hashtags: hashtags || null,
       countries: countries || null,
     };
+    // Only sent when asked for, so creating a normal campaign still works on a
+    // database that has not had 026 yet.
+    if (continuous === true) row.continuous = true;
     const { data, error } = await supabase.from(CAMPAIGNS).insert(row).select("*").maybeSingle();
     if (error) {
       if (error.code === "23505") {

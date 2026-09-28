@@ -34,8 +34,16 @@ export const LANGUAGES = { en: "British English", it: "Italian" };
 // not listed gets English.
 const LANGUAGE_BY_COUNTRY = { IT: "it", SM: "it", VA: "it" };
 
+// Words common in Italian and rare in English. Used only when the store gave
+// no country - brands not on Shopify are never enriched, so for them the
+// caption and the bio are the only evidence of where they are.
+const ITALIAN_WORDS = /\b(il|gli|che|per|con|siamo|cerchiamo|cercasi|della|delle|nostro|nostra|nostri|sono|anche|più|questo|nuova|nuovo|spedizione|scopri|ciao)\b/gi;
+
 export function languageFor(lead) {
-  return LANGUAGE_BY_COUNTRY[String(lead?.country || "").toUpperCase()] || "en";
+  const byCountry = LANGUAGE_BY_COUNTRY[String(lead?.country || "").toUpperCase()];
+  if (byCountry || lead?.country) return byCountry || "en";
+  const text = `${lead?.intent_caption || ""} ${lead?.ig_biography || ""}`;
+  return (text.match(ITALIAN_WORDS) || []).length >= 3 ? "it" : "en";
 }
 
 const FACTS = fs.readFileSync(
@@ -123,7 +131,12 @@ export function factSheet(lead, { language, senderName } = {}) {
   if (clean(lead.country)) lines.push(`Country of the store: ${lead.country}`);
   if (clean(lead.ig_category)) lines.push(`Instagram category: ${lead.ig_category}`);
   if (clean(lead.ig_biography)) lines.push(`Their Instagram bio: "${clean(lead.ig_biography).slice(0, 400)}"`);
-  if (clean(lead.domain)) lines.push(`Store: ${lead.domain} (a Shopify store${lead.product_count ? `, ${lead.product_count} products` : ""})`);
+  const onShopify = lead.status !== "not_shopify";
+  if (onShopify && clean(lead.domain)) {
+    lines.push(`Store: ${lead.domain} (a Shopify store${lead.product_count ? `, ${lead.product_count} products` : ""})`);
+  } else if (!onShopify) {
+    lines.push(`Their store${clean(lead.domain) ? ` (${lead.domain})` : ""} is NOT on Shopify. Do not mention Shopify, and do not claim Linkable connects to their store, syncs their catalogue or tracks their sales.`);
+  }
 
   if (lead.intent_signal === "open_call" && clean(lead.intent_caption)) {
     lines.push("");
@@ -142,7 +155,9 @@ export function factSheet(lead, { language, senderName } = {}) {
   }
 
   const app = clean(lead.affiliate_app);
-  if (app && app !== "none") {
+  if (!onShopify) {
+    // Never enriched, so there is nothing known about their tracking either way.
+  } else if (app && app !== "none") {
     lines.push(`They already run an affiliate app (${app}), so do not say they have no tracking.`);
   } else {
     lines.push("We could not see an affiliate or creator-tracking app on their store. Do not state this as certain.");
