@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -10,37 +10,58 @@ import { Skeleton } from "../components/ui/Skeleton";
  *
  * Instagram does not let software open a conversation - its API only answers
  * accounts that wrote first - so the send stays human. Everything around it
- * does not have to: the brand is already found, what it asked for is already
- * read, and the message is already written from that. One card is copy, open,
- * paste, mark sent.
+ * does not have to: the brand is found, what it asked for is read, and the
+ * message is written before anybody needs it.
+ *
+ * Laid out as a queue, not a feed. A compact list on the left, one brand open
+ * on the right, and "Mark sent" moves to the next one. The first version gave
+ * every brand a full-width card with its own text box, which made fifty brands
+ * fifty screens of scrolling.
  *
  * One brand, one channel. A brand already handed to the email sequence is not
  * offered here, and marking one sent keeps it out of the email sequence.
  */
 
 const VIEWS = [
-  { value: "todo", label: "To send" },
-  { value: "sent", label: "Sent" },
-  { value: "skipped", label: "Skipped" },
+  { value: "todo", label: "To send", count: "todo" },
+  { value: "sent", label: "Sent", count: "sent" },
+  { value: "skipped", label: "Skipped", count: "skipped" },
 ];
 
 const LANGUAGE_LABEL = { en: "English", it: "Italiano" };
 const dmLink = (handle) => `https://ig.me/m/${encodeURIComponent(handle)}`;
+const nameOf = (lead) => lead.brand_name || lead.ig_full_name || lead.handle;
+const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+
+// Wide enough for the list beside the message; below this they stack.
+function useWide(min = 1100) {
+  const [wide, setWide] = useState(() => window.innerWidth >= min);
+  useEffect(() => {
+    const onResize = () => setWide(window.innerWidth >= min);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [min]);
+  return wide;
+}
 
 export default function InstagramDmPage() {
   const { theme } = useTheme();
+  const wide = useWide();
   const [view, setView] = useState("todo");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState(null);
-  const [drafting, setDrafting] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [drafting, setDrafting] = useState(null); // { done, failed } while writing
   const [savingSetting, setSavingSetting] = useState(false);
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      setData(await api.getInstagramDms({ view, limit: 50 }));
+      setData(await api.getInstagramDms({ view, limit: 100 }));
       setProblem(null);
     } catch (err) {
       setProblem(err?.message || "could not load the queue");
@@ -49,35 +70,77 @@ export default function InstagramDmPage() {
     }
   }, [view]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setSelected(null); load(); }, [load]);
 
-  // Replace one lead in place, or drop it when it has left this view.
+  const leads = useMemo(() => data?.leads || [], [data]);
+  const counts = data?.counts || {};
+  const current = leads.find((l) => l.handle === selected) || leads[0] || null;
+
+  // Merge one changed lead into the list, or drop it when it has left this view.
+  const leadsRef = useRef([]);
+  useEffect(() => { leadsRef.current = leads; }, [leads]);
+
   const settle = useCallback((updated, stillHere) => {
-    setData((prev) => prev && ({
-      ...prev,
-      leads: stillHere
-        ? prev.leads.map((l) => (l.handle === updated.handle ? { ...l, ...updated } : l))
-        : prev.leads.filter((l) => l.handle !== updated.handle),
-    }));
+    if (!stillHere) {
+      // Move to the next brand, so marking sent is also "next".
+      const list = leadsRef.current;
+      const index = list.findIndex((l) => l.handle === updated.handle);
+      const next = index >= 0 ? list[index + 1] || list[index - 1] : null;
+      setSelected(next ? next.handle : null);
+    }
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        leads: stillHere
+          ? prev.leads.map((l) => (l.handle === updated.handle ? { ...l, ...updated } : l))
+          : prev.leads.filter((l) => l.handle !== updated.handle),
+      };
+    });
     load(true);
   }, [load]);
 
-  async function draftNext() {
-    setDrafting(true);
-    setNotice(null);
+  // Messages are written without anybody asking: a brand in the queue with no
+  // message is a brand nobody can send to. Ten at a time (one serverless call),
+  // until the list on screen is covered.
+  const draftMissing = useCallback(async () => {
+    let done = 0;
+    let failed = 0;
+    setDrafting({ done, failed });
     try {
-      const out = await api.draftInstagramDms({});
-      setNotice(summarise(out));
-      await load(true);
+      for (let round = 0; round < 10 && viewRef.current === "todo"; round++) {
+        const out = await api.draftInstagramDms({});
+        done += out.drafted?.length || 0;
+        failed += out.failed?.length || 0;
+        for (const d of out.drafted || []) settle(d, true);
+        setDrafting({ done, failed });
+        if (!out.drafted?.length) {
+          if (out.failed?.length) {
+            setNotice({ tone: "danger",
+                        text: `Could not write a message for @${out.failed[0].handle}: ${out.failed[0].error}` });
+          }
+          break;
+        }
+      }
     } catch (err) {
-      setNotice({ tone: "danger", text: err?.message || "could not draft" });
+      setNotice({ tone: "danger", text: err?.message || "could not write messages" });
     } finally {
-      setDrafting(false);
+      setDrafting(null);
     }
-  }
+  }, [settle]);
 
-  // Whether brands not on Shopify are in the queue. One setting for the whole
-  // team, chosen by an admin, so two people working the queue see the same list.
+  const missing = view === "todo" ? leads.filter((l) => !l.dm_text).length : 0;
+  const startedFor = useRef(null);
+  useEffect(() => {
+    // Once per shape of the queue, and only when something is missing, so a
+    // brand whose message keeps failing does not loop.
+    if (!data || view !== "todo" || !missing || drafting) return;
+    const key = `${counts.todo}:${counts.nonShopify}:${data?.settings?.dm_include_non_shopify}`;
+    if (startedFor.current === key) return;
+    startedFor.current = key;
+    draftMissing();
+  }, [data, view, missing, drafting, counts.todo, counts.nonShopify, draftMissing]);
+
   async function setNonShopify(value) {
     setSavingSetting(true);
     try {
@@ -90,58 +153,55 @@ export default function InstagramDmPage() {
     }
   }
 
-  const counts = data?.counts || {};
+  // j / k or the arrow keys move through the list, outside the text box.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName)) return;
+      if (!["ArrowDown", "ArrowUp", "j", "k"].includes(e.key) || !leads.length) return;
+      e.preventDefault();
+      const index = Math.max(0, leads.findIndex((l) => l.handle === current?.handle));
+      const step = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
+      setSelected(leads[Math.min(leads.length - 1, Math.max(0, index + step))].handle);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [leads, current]);
+
   const includeNonShopify = data?.settings?.dm_include_non_shopify === true;
-  const tiles = [
-    { label: "To send", value: counts.todo, hint: "not yet written to" },
-    { label: "Drafted", value: counts.drafted, hint: "message ready" },
-    { label: "Sent today", value: counts.sentToday, hint: "marked sent since midnight" },
-    { label: "Sent", value: counts.sent, hint: "all time" },
-    { label: "Replied", value: counts.replied, hint: "answered on Instagram" },
-  ];
-  const leads = data?.leads || [];
-  const undrafted = view === "todo" && leads.some((l) => !l.dm_text);
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
+    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Instagram DMs</h1>
-        <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 720 }}>
-          Instagram does not let software send a first message, so this page does everything
-          else. Brands that asked for creators come first. Copy the message, send it in the
-          conversation that opens, then mark it sent. A brand marked sent is kept out of the
-          email sequence.
-        </p>
+        <span style={{ color: theme.textMuted, fontSize: 13 }}>
+          Copy the message, send it in the conversation that opens, mark it sent.
+          Brands marked sent stay out of the email sequence.
+        </span>
       </div>
 
       {problem && (
-        <Card style={{ padding: 16 }}>
+        <Card style={{ padding: 16, marginBottom: 0 }}>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>
             <strong style={{ color: theme.text }}>Not set up yet.</strong> {problem}
           </div>
         </Card>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        {tiles.map((t) => (
-          <Card key={t.label} style={{ padding: 14, marginBottom: 0 }}>
-            <div style={{ color: theme.textMuted, fontSize: 12 }}>{t.label}</div>
-            {loading && !data
-              ? <Skeleton style={{ height: 26, width: 48, marginTop: 6 }} />
-              : <div style={{ fontSize: 24, color: theme.text, fontWeight: 600 }}>{t.value ?? 0}</div>}
-            <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{t.hint}</div>
-          </Card>
-        ))}
-      </div>
-
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {VIEWS.map((v) => (
           <Btn key={v.value} size="sm" variant={view === v.value ? "solid" : "secondary"}
                onClick={() => { setView(v.value); setNotice(null); }}>
-            {v.label}
+            {v.label}{data ? ` ${counts[v.count] ?? 0}` : ""}
           </Btn>
         ))}
+        <Stat theme={theme} label="sent today" value={counts.sentToday} />
+        <Stat theme={theme} label="replied" value={counts.replied} />
         <div style={{ flex: 1 }} />
+        {drafting && (
+          <span style={{ fontSize: 12, color: theme.textMid }}>
+            Writing messages… {drafting.done} done{drafting.failed ? `, ${drafting.failed} failed` : ""}
+          </span>
+        )}
         {data && (
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
                           color: theme.textMid, cursor: savingSetting ? "wait" : "pointer" }}
@@ -150,11 +210,6 @@ export default function InstagramDmPage() {
                    onChange={(e) => setNonShopify(e.target.checked)} style={{ margin: 0 }} />
             Include brands not on Shopify{counts.nonShopify ? ` (${counts.nonShopify})` : ""}
           </label>
-        )}
-        {view === "todo" && (
-          <Btn size="sm" onClick={draftNext} loading={drafting} disabled={!counts.todo}>
-            Draft the next 10
-          </Btn>
         )}
       </div>
 
@@ -165,25 +220,26 @@ export default function InstagramDmPage() {
       )}
 
       {loading && !data ? (
-        <Card><Skeleton style={{ height: 120 }} /></Card>
+        <Card style={{ marginBottom: 0 }}><Skeleton style={{ height: 240 }} /></Card>
       ) : !leads.length ? (
-        <Card style={{ padding: 16 }}>
+        <Card style={{ padding: 16, marginBottom: 0 }}>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>{emptyText(view)}</div>
         </Card>
       ) : view === "todo" ? (
-        <>
-          {undrafted && !drafting && (
-            <div style={{ fontSize: 12, color: theme.textMuted }}>
-              Brands without a message yet: press Draft the next 10, or write one on its card.
-            </div>
+        <div style={{
+          display: "grid", gap: 12, alignItems: "start",
+          gridTemplateColumns: wide ? "minmax(300px, 380px) minmax(0, 1fr)" : "minmax(0, 1fr)",
+        }}>
+          <QueueList leads={leads} current={current} onSelect={setSelected} theme={theme}
+                     drafting={Boolean(drafting)} maxHeight={wide ? "calc(100vh - 210px)" : 320} />
+          {current && (
+            <DmPanel key={current.handle} lead={current} maxChars={data?.maxChars || 520}
+                     drafting={Boolean(drafting) && !current.dm_text}
+                     onSettled={settle} onNotice={setNotice} sticky={wide} />
           )}
-          {leads.map((lead) => (
-            <DmCard key={lead.handle} lead={lead} maxChars={data?.maxChars || 500}
-                    onSettled={settle} onNotice={setNotice} />
-          ))}
-        </>
+        </div>
       ) : (
-        <Card style={{ padding: 0 }}>
+        <Card style={{ padding: 0, marginBottom: 0 }}>
           {leads.map((lead, i) => (
             <SentRow key={lead.handle} lead={lead} last={i === leads.length - 1}
                      onSettled={settle} onNotice={setNotice} />
@@ -200,29 +256,26 @@ export default function InstagramDmPage() {
   );
 }
 
-function summarise(out) {
-  const parts = [];
-  if (out.drafted?.length) parts.push(`Drafted ${out.drafted.length}`);
-  if (!out.drafted?.length && !out.failed?.length) parts.push("Nothing left to draft");
-  if (out.costUsd) parts.push(`$${out.costUsd.toFixed(3)}`);
-  if (out.failed?.length) {
-    parts.push(`${out.failed.length} failed (${out.failed[0].handle}: ${out.failed[0].error})`);
-  }
-  return { tone: out.failed?.length && !out.drafted?.length ? "danger" : "info", text: parts.join(" · ") };
+function Stat({ theme, label, value }) {
+  return (
+    <span style={{ fontSize: 12, color: theme.textMuted, marginLeft: 6 }}>
+      <strong style={{ color: theme.text, fontWeight: 600 }}>{value ?? 0}</strong> {label}
+    </span>
+  );
 }
 
 function emptyText(view) {
   if (view === "sent") return "Nothing sent yet.";
   if (view === "skipped") return "Nothing skipped.";
-  return "No brands waiting. New ones arrive when the prospector finds them.";
+  return "No brands waiting. New ones arrive every morning from the Instagram searches.";
 }
 
-function Tag({ children, tone }) {
+function Tag({ children, tone, title }) {
   const { theme } = useTheme();
   const color = tone ? theme[tone] : theme.textMid;
   return (
-    <span style={{
-      fontSize: 11, padding: "2px 8px", borderRadius: 999, whiteSpace: "nowrap",
+    <span title={title} style={{
+      fontSize: 10.5, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap", lineHeight: "16px",
       border: `1px solid ${tone ? color : theme.border}`, color,
     }}>
       {children}
@@ -230,19 +283,78 @@ function Tag({ children, tone }) {
   );
 }
 
-function DmCard({ lead, maxChars, onSettled, onNotice }) {
+function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
+  const activeRef = useRef(null);
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest" }); }, [current?.handle]);
+
+  return (
+    <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
+      <div style={{ maxHeight, overflowY: "auto" }}>
+        {leads.map((lead, i) => {
+          const active = lead.handle === current?.handle;
+          const ready = Boolean(lead.dm_text);
+          return (
+            <button
+              key={lead.handle}
+              ref={active ? activeRef : null}
+              type="button"
+              onClick={() => onSelect(lead.handle)}
+              aria-current={active ? "true" : undefined}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+                padding: "9px 12px", border: "none", font: "inherit", cursor: "pointer",
+                borderTop: i ? `1px solid ${theme.border}` : "none",
+                background: active ? theme.accentLight : "transparent",
+                boxShadow: active ? `inset 3px 0 0 ${theme.accent}` : "none",
+              }}
+            >
+              <span
+                title={ready ? "Message ready" : drafting ? "Writing…" : "No message yet"}
+                style={{
+                  width: 7, height: 7, borderRadius: 99, flexShrink: 0,
+                  background: ready ? theme.success : theme.border,
+                }}
+              />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: theme.text,
+                               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {nameOf(lead)}
+                </span>
+                <span style={{ display: "block", fontSize: 11.5, color: theme.textMuted,
+                               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  @{lead.handle}
+                  {lead.country ? ` · ${lead.country}` : ""}
+                  {lead.ig_followers ? ` · ${compact(lead.ig_followers)}` : ""}
+                </span>
+              </span>
+              <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                {lead.intent_signal === "open_call" && <Tag tone="success" title="Posted asking for creators">Call</Tag>}
+                {lead.status === "not_shopify" && <Tag tone="warning" title="Store is not on Shopify">No Shopify</Tag>}
+                {lead.email_queued && <Tag tone="warning" title="Goes to the email sequence on the next run">Email</Tag>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
   const { theme } = useTheme();
   const [text, setText] = useState(lead.dm_text || "");
   const [busy, setBusy] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [showPost, setShowPost] = useState(false);
 
   // A redraft replaces the text; typing in the box does not come back here.
   useEffect(() => { setText(lead.dm_text || ""); }, [lead.dm_text]);
 
-  const name = lead.brand_name || lead.ig_full_name || lead.handle;
+  const name = nameOf(lead);
   const language = lead.dm_language || lead.default_language || "en";
   const other = language === "it" ? "en" : "it";
   const dirty = text.trim() !== (lead.dm_text || "").trim();
+  const caption = (lead.intent_caption || "").trim();
 
   async function run(label, fn) {
     setBusy(label);
@@ -280,13 +392,11 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
     onSettled(await api.updateInstagramDm(lead.handle, action), false);
   });
 
-  const caption = (lead.intent_caption || "").trim();
-
   return (
-    <Card style={{ padding: 18, marginBottom: 0 }}>
+    <Card style={{ padding: 18, marginBottom: 0, ...(sticky ? { position: "sticky", top: 12 } : {}) }}>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: theme.text }}>{name}</div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: theme.text }}>{name}</div>
           <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
             @{lead.handle}
             {lead.country ? ` · ${lead.country}` : ""}
@@ -295,27 +405,42 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
             {lead.domain ? ` · ${lead.domain}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {lead.intent_signal === "open_call" && <Tag tone="success">Asked for creators</Tag>}
           {lead.status === "not_shopify" && <Tag tone="warning">Not on Shopify</Tag>}
-          {lead.distinct_creators_90d > 0 && <Tag>{lead.distinct_creators_90d} creators posting</Tag>}
           {lead.tier && <Tag>Tier {lead.tier}</Tag>}
-          {lead.email_queued && <Tag tone="warning">Queued for email</Tag>}
+          <Btn size="sm" variant="secondary"
+               href={lead.instagram_url || `https://www.instagram.com/${lead.handle}/`} target="_blank">
+            Profile
+          </Btn>
+          {lead.intent_post_url && (
+            <Btn size="sm" variant="secondary" href={lead.intent_post_url} target="_blank">Their post</Btn>
+          )}
         </div>
       </div>
 
       {caption && (
-        <div style={{
-          marginTop: 12, padding: "8px 12px", borderLeft: `3px solid ${theme.border}`,
-          color: theme.textMid, fontSize: 12, whiteSpace: "pre-wrap",
-        }}>
-          {caption.length > 280 ? `${caption.slice(0, 280)}…` : caption}
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowPost((v) => !v)}
+          title={showPost ? "Show less" : "Show the whole post"}
+          style={{
+            display: "block", width: "100%", textAlign: "left", marginTop: 12, padding: "6px 10px",
+            border: "none", borderLeft: `3px solid ${theme.border}`, background: "transparent",
+            color: theme.textMid, fontSize: 12, lineHeight: 1.45, font: "inherit", cursor: "pointer",
+            whiteSpace: "pre-wrap",
+            ...(showPost ? {} : {
+              display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+            }),
+          }}
+        >
+          {caption}
+        </button>
       )}
 
       {lead.email_queued && (
         <div style={{ marginTop: 10, fontSize: 12, color: theme.warning }}>
-          This brand goes to the email sequence on the next run. Marking the DM sent takes it out.
+          Goes to the email sequence on the next run unless it is DMed first.
         </div>
       )}
 
@@ -323,8 +448,8 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
         value={text}
         onChange={(e) => { setText(e.target.value); setCopied(false); }}
         onBlur={save}
-        rows={6}
-        placeholder={busy?.startsWith("draft") ? "Writing…" : "No message yet. Draft one, or write it here."}
+        rows={11}
+        placeholder={drafting || busy?.startsWith("draft") ? "Writing the message…" : "No message yet."}
         aria-label={`Message to ${name}`}
         style={{
           width: "100%", marginTop: 12, padding: "10px 12px", borderRadius: 10,
@@ -334,8 +459,8 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
         }}
       />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
-        <span>{lead.dm_text ? `Drafted in ${LANGUAGE_LABEL[language] || language}` : ""}</span>
-        <span style={{ color: text.length > maxChars ? theme.warning : theme.textMuted }}>
+        <span>{lead.dm_text ? `In ${LANGUAGE_LABEL[language] || language}` : ""}</span>
+        <span style={{ color: text.length > maxChars + 60 ? theme.warning : theme.textMuted }}>
           {text.length} characters
         </span>
       </div>
@@ -346,7 +471,7 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
         </Btn>
         <Btn size="sm" variant="outline" onClick={() => mark("sent")} loading={busy === "sent"}
              disabled={!text.trim() || Boolean(busy)}>
-          Mark sent
+          Mark sent, next
         </Btn>
         <div style={{ flex: 1 }} />
         <Btn size="sm" variant="secondary" onClick={() => draft()} loading={busy === "draft"} disabled={Boolean(busy)}>
@@ -355,13 +480,6 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
         <Btn size="sm" variant="secondary" onClick={() => draft(other)} loading={busy === `draft-${other}`}
              disabled={Boolean(busy)}>
           In {LANGUAGE_LABEL[other]}
-        </Btn>
-        {lead.intent_post_url && (
-          <Btn size="sm" variant="secondary" href={lead.intent_post_url} target="_blank">Their post</Btn>
-        )}
-        <Btn size="sm" variant="secondary" href={lead.instagram_url || `https://www.instagram.com/${lead.handle}/`}
-             target="_blank">
-          Profile
         </Btn>
         <Btn size="sm" variant="secondary" onClick={() => mark("skip")} loading={busy === "skip"} disabled={Boolean(busy)}>
           Skip
@@ -374,7 +492,6 @@ function DmCard({ lead, maxChars, onSettled, onNotice }) {
 function SentRow({ lead, last, onSettled, onNotice }) {
   const { theme } = useTheme();
   const [busy, setBusy] = useState(null);
-  const name = lead.brand_name || lead.ig_full_name || lead.handle;
 
   const act = async (action) => {
     setBusy(action);
@@ -389,11 +506,11 @@ function SentRow({ lead, last, onSettled, onNotice }) {
 
   return (
     <div style={{
-      display: "flex", gap: 12, alignItems: "center", padding: "12px 16px", flexWrap: "wrap",
+      display: "flex", gap: 12, alignItems: "center", padding: "10px 16px", flexWrap: "wrap",
       borderBottom: last ? "none" : `1px solid ${theme.border}`,
     }}>
       <div style={{ flex: 1, minWidth: 220 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{name}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{nameOf(lead)}</div>
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           @{lead.handle}
           {lead.dm_sent_at ? ` · sent ${new Date(lead.dm_sent_at).toLocaleString()}` : ""}

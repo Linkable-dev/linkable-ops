@@ -23,6 +23,7 @@ import { enforceInboxHealth } from "../lib/deliverability.js";
 import { sendMorningBrief } from "../lib/morning-brief.js";
 import { loadRules, selectTargets } from "../lib/auto-nudge.js";
 import { buildAlerts, loadDismissals, sendBrandNudge } from "./insights.js";
+import { draftAllMissing } from "../lib/instagram-dm-queue.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -138,6 +139,19 @@ export function cronRoutes() {
       res.json({ enabled: rules.filter((r) => r.auto).map((r) => r.kind), targets: targets.length, sent, dryRun });
     } catch (err) {
       console.error("/cron/auto-nudge error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Writes the Instagram DM for every brand in the queue that has none, after
+  // the prospector's 9am run has added the day's brands. Sonnet, about $0.004
+  // a message; a brand is drafted once, so a day costs what it found.
+  router.get("/instagram-drafts", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      res.json(await draftAllMissing());
+    } catch (err) {
+      console.error("/cron/instagram-drafts error:", err);
       res.status(500).json({ error: err.message });
     }
   });

@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/auto-nudge",
       "schedule": "0 10 * * 1-5"
+    },
+    {
+      "path": "/api/cron/instagram-drafts",
+      "schedule": "30 8 * * 1-5"
     }
   ]
 }
