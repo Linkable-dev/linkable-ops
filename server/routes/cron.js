@@ -24,6 +24,7 @@ import { sendMorningBrief } from "../lib/morning-brief.js";
 import { loadRules, selectTargets } from "../lib/auto-nudge.js";
 import { buildAlerts, loadDismissals, sendBrandNudge } from "./insights.js";
 import { draftAllMissing } from "../lib/instagram-dm-queue.js";
+import { classifyMissing } from "../lib/lead-classifier.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -149,7 +150,13 @@ export function cronRoutes() {
   router.get("/instagram-drafts", async (req, res) => {
     if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {
-      res.json(await draftAllMissing());
+      // Classify first, so no message is written for an agency; then first
+      // messages, then follow-ups for DMs unanswered for three days. Budgets
+      // add up to under the sixty seconds a serverless function gets.
+      const classified = await classifyMissing({ limit: 40 }).catch((e) => ({ error: e.message }));
+      const drafted = await draftAllMissing({ budgetMs: 28_000 });
+      const followUps = await draftAllMissing({ budgetMs: 12_000, followUp: true });
+      res.json({ classified, drafted, followUps });
     } catch (err) {
       console.error("/cron/instagram-drafts error:", err);
       res.status(500).json({ error: err.message });

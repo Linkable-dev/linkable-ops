@@ -227,10 +227,38 @@ export function finishDraft(raw, lead) {
   return { message, problems, styleIssues: findStyleIssues(message) };
 }
 
-// → { message, language, model, costUsd, styleIssues }
-export async function draftInstagramDm(lead, { language, pool } = {}) {
+// Two ways of writing the first message, so reply rates can be compared. A is
+// Federico's own shape, unchanged. B is the same claims in three lines, the
+// question first: the bet is that a shorter message reads less like outreach.
+export const VARIANTS = {
+  A: "",
+  B: [
+    "Variant B for this one: the same greeting, then at most three short lines",
+    "in total. Line 1: the post they made, or what they sell. Line 2: the creator",
+    "line and the 24 hours in one sentence. Line 3: \"Worth a try?\" (or the",
+    "natural equivalent in the language you are told to use). No \"Quick question\".",
+  ].join(" "),
+};
+export const pickVariant = () => (Math.random() < 0.5 ? "A" : "B");
+
+// The one follow-up, for a brand that did not answer the first DM.
+const FOLLOWUP_INSTRUCTION = [
+  "This is a FOLLOW-UP to the first message below, which got no answer.",
+  "Write at most three short lines, with no greeting paragraph: open with",
+  "\"Hey {brand}\", then bring the first message back in one line from a",
+  "different angle (for example that setting up a campaign takes a few minutes,",
+  "or that they only choose the creators they like), then an easy yes/no",
+  "question. Make no claim that is not in the first message or the facts. Do",
+  "not apologise for following up and do not say \"just checking in\".",
+].join(" ");
+
+// → { message, language, model, costUsd, styleIssues, variant }
+export async function draftInstagramDm(lead, { language, pool, variant = "A", followUp = false } = {}) {
   const lang = LANGUAGES[language] ? language : languageFor(lead);
   const facts = factSheet(lead, { language: lang, pool });
+  const extra = followUp
+    ? `${FOLLOWUP_INSTRUCTION}\n\nThe first message:\n"""${String(lead.dm_text || "").trim()}"""`
+    : VARIANTS[variant] || "";
 
   // Two attempts: the second only when the first broke a rule we check in
   // code, which is rare and cheaper than a person catching it.
@@ -244,7 +272,10 @@ export async function draftInstagramDm(lead, { language, pool } = {}) {
       temperature: null, // rejected by claude-sonnet-5
       tools: [DRAFT_TOOL],
       toolChoice: { type: "tool", name: "draft_dm" },
-      messages: [{ role: "user", content: `Facts about the brand:\n\n${facts}\n\nWrite the DM.` }],
+      messages: [{
+        role: "user",
+        content: `Facts about the brand:\n\n${facts}\n\n${extra ? `${extra}\n\n` : ""}Write the DM.`,
+      }],
     });
     const u = res.usage || {};
     cost += ((u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25
@@ -260,7 +291,9 @@ export async function draftInstagramDm(lead, { language, pool } = {}) {
     throw new Error(`the draft broke a rule: ${last.problems.join("; ")}`);
   }
   return {
-    message: `${last.message}\n\n${signature()}`,
+    // A follow-up is a reply in the same conversation: no second signature.
+    message: followUp ? last.message : `${last.message}\n\n${signature()}`,
+    variant: followUp ? null : variant,
     language: lang,
     model: DM_MODEL,
     costUsd: Math.round(cost * 10000) / 10000,

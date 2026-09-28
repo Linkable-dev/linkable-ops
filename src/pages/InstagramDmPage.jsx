@@ -24,9 +24,21 @@ import { Skeleton } from "../components/ui/Skeleton";
 
 const VIEWS = [
   { value: "todo", label: "To send", count: "todo" },
+  { value: "followup", label: "Follow up", count: "followup" },
   { value: "sent", label: "Sent", count: "sent" },
   { value: "skipped", label: "Skipped", count: "skipped" },
+  { value: "results", label: "Results", count: "converted", suffix: " signed up" },
 ];
+
+// Instagram throttles an account that opens too many new conversations in a
+// day; well before that, a burst of identical-looking DMs reads as spam.
+const DAILY_SOFT_CAP = 40;
+
+const ago = (iso) => {
+  if (!iso) return "";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  return days <= 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
+};
 
 const LANGUAGE_LABEL = { en: "English", it: "Italiano" };
 const dmLink = (handle) => `https://ig.me/m/${encodeURIComponent(handle)}`;
@@ -77,10 +89,16 @@ export default function InstagramDmPage() {
     const request = ++requestRef.current;
     if (!quiet) setLoading(true);
     try {
-      const out = await api.getInstagramDms({ view, limit: 100, verticals: verticals.join(",") });
+      // Results has its own endpoint; the queue call still refreshes the counts.
+      const out = await api.getInstagramDms({
+        view: view === "results" ? "todo" : view, limit: view === "results" ? 1 : 100,
+        verticals: verticals.join(","),
+      });
       if (request !== requestRef.current) return;
       setData(out);
       setMeta({ counts: out.counts, settings: out.settings, countries: out.countries || {},
+                feedStatus: out.feedStatus, instagramReplies: out.instagramReplies,
+                followupDays: out.followupDays,
                 verticals: out.verticals || {}, verticalLabels: out.verticalLabels || {} });
       setProblem(null);
     } catch (err) {
@@ -123,13 +141,19 @@ export default function InstagramDmPage() {
   // Messages are written without anybody asking: a brand in the queue with no
   // message is a brand nobody can send to. Ten at a time (one serverless call),
   // until the list on screen is covered.
-  const draftMissing = useCallback(async () => {
+  const draftMissing = useCallback(async (followUp = false) => {
     let done = 0;
     let failed = 0;
+    const mode = followUp ? "followup" : "todo";
     setDrafting({ done, failed });
     try {
-      for (let round = 0; round < 10 && viewRef.current === "todo"; round++) {
-        const out = await api.draftInstagramDms({});
+      if (!followUp) {
+        // Agencies first: a message written for one is money spent on nobody.
+        const verdict = await api.classifyInstagramLeads().catch(() => null);
+        if (verdict?.agencies) await load(true);
+      }
+      for (let round = 0; round < 10 && viewRef.current === mode; round++) {
+        const out = await api.draftInstagramDms({ followUp });
         done += out.drafted?.length || 0;
         failed += out.failed?.length || 0;
         for (const d of out.drafted || []) settle(d, true);
@@ -147,19 +171,20 @@ export default function InstagramDmPage() {
     } finally {
       setDrafting(null);
     }
-  }, [settle]);
+  }, [settle, load]);
 
-  const missing = view === "todo" ? leads.filter((l) => !l.dm_text).length : 0;
+  const missing = view === "todo" ? leads.filter((l) => !l.dm_text).length
+    : view === "followup" ? leads.filter((l) => !l.dm_followup_text).length : 0;
   const startedFor = useRef(null);
   useEffect(() => {
     // Once per shape of the queue, and only when something is missing, so a
     // brand whose message keeps failing does not loop.
-    if (!data || view !== "todo" || !missing || drafting) return;
-    const key = `${counts.todo}:${counts.nonShopify}:${JSON.stringify(meta?.settings)}`;
+    if (!data || !["todo", "followup"].includes(view) || !missing || drafting) return;
+    const key = `${view}:${counts.todo}:${counts.followup}:${counts.nonShopify}:${JSON.stringify(meta?.settings)}`;
     if (startedFor.current === key) return;
     startedFor.current = key;
-    draftMissing();
-  }, [data, view, missing, drafting, counts.todo, counts.nonShopify, meta?.settings, draftMissing]);
+    draftMissing(view === "followup");
+  }, [data, view, missing, drafting, counts.todo, counts.followup, counts.nonShopify, meta?.settings, draftMissing]);
 
   // Admin choices for the whole team: which brands are in the queue at all.
   async function saveSetting(key, value) {
@@ -174,10 +199,17 @@ export default function InstagramDmPage() {
     }
   }
 
-  // j / k or the arrow keys move through the list, outside the text box.
+  // The open brand's two main buttons, for the keyboard.
+  const panelActions = useRef({});
+
+  // Outside a text box: j / k or the arrows move through the list, c copies
+  // and opens the conversation, s marks it sent and moves on.
   useEffect(() => {
     const onKey = (e) => {
       if (["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "c" && panelActions.current.copy) { e.preventDefault(); panelActions.current.copy(); return; }
+      if (e.key === "s" && panelActions.current.sent) { e.preventDefault(); panelActions.current.sent(); return; }
       if (!["ArrowDown", "ArrowUp", "j", "k"].includes(e.key) || !leads.length) return;
       e.preventDefault();
       const index = Math.max(0, leads.findIndex((l) => l.handle === current?.handle));
@@ -215,12 +247,13 @@ export default function InstagramDmPage() {
         {VIEWS.map((v) => (
           <Btn key={v.value} size="sm" variant={view === v.value ? "solid" : "secondary"}
                onClick={() => { if (v.value !== view) { setView(v.value); setNotice(null); } }}>
-            {v.label}{meta ? ` ${counts[v.count] ?? 0}` : ""}
+            {v.label}{meta && (v.value !== "results" || counts.converted) ? ` ${counts[v.count] ?? 0}${v.suffix || ""}` : ""}
           </Btn>
         ))}
         {meta ? (
           <>
-            <Stat theme={theme} label="sent today" value={counts.sentToday} />
+            <Stat theme={theme} label="sent today" value={counts.sentToday}
+                  warn={counts.sentToday >= DAILY_SOFT_CAP} />
             <Stat theme={theme} label="replied" value={counts.replied} />
           </>
         ) : (
@@ -271,19 +304,29 @@ export default function InstagramDmPage() {
         </div>
       )}
 
+      <FeedBanner status={meta?.feedStatus} theme={theme} />
+      {counts.sentToday >= DAILY_SOFT_CAP && view === "todo" && (
+        <div style={{ fontSize: 12.5, color: theme.warning }}>
+          {counts.sentToday} sent today from this account. Instagram limits how many new
+          conversations one account opens in a day; past about {DAILY_SOFT_CAP}, spread the rest over tomorrow.
+        </div>
+      )}
+
       {notice && (
         <div style={{ fontSize: 13, color: notice.tone === "danger" ? theme.danger : theme.textMid }}>
           {notice.text}
         </div>
       )}
 
-      {loading && !data ? (
+      {view === "results" ? (
+        <ResultsView theme={theme} />
+      ) : loading && !data ? (
         <LoadingShape view={view} wide={wide} theme={theme} />
       ) : !leads.length ? (
         <Card style={{ padding: 16, marginBottom: 0 }}>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>{emptyText(view)}</div>
         </Card>
-      ) : view === "todo" ? (
+      ) : view === "todo" || view === "followup" ? (
         <div style={{
           display: "grid", gap: 12, alignItems: "start",
           gridTemplateColumns: wide ? "minmax(300px, 380px) minmax(0, 1fr)" : "minmax(0, 1fr)",
@@ -291,8 +334,9 @@ export default function InstagramDmPage() {
           <QueueList leads={leads} current={current} onSelect={setSelected} theme={theme}
                      drafting={Boolean(drafting)} maxHeight={wide ? "calc(100vh - 210px)" : 320} />
           {current && (
-            <DmPanel key={current.handle} lead={current} maxChars={data?.maxChars || 520}
-                     drafting={Boolean(drafting) && !current.dm_text}
+            <DmPanel key={`${view}:${current.handle}`} lead={current} maxChars={data?.maxChars || 520}
+                     followUp={view === "followup"} actionsRef={panelActions}
+                     drafting={Boolean(drafting) && !(view === "followup" ? current.dm_followup_text : current.dm_text)}
                      onSettled={settle} onNotice={setNotice} sticky={wide} />
           )}
         </div>
@@ -300,12 +344,13 @@ export default function InstagramDmPage() {
         <Card style={{ padding: 0, marginBottom: 0 }}>
           {leads.map((lead, i) => (
             <SentRow key={lead.handle} lead={lead} last={i === leads.length - 1}
+                     canReply={meta?.instagramReplies === true}
                      onSettled={settle} onNotice={setNotice} />
           ))}
         </Card>
       )}
 
-      {data && data.total > leads.length && (
+      {data && view !== "results" && data.total > leads.length && (
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           Showing the first {leads.length} of {data.total}. They move up as these are sent.
         </div>
@@ -328,7 +373,7 @@ function LoadingShape({ view, wide, theme }) {
       <Skeleton style={{ height: 16, width: 34, borderRadius: 99 }} />
     </div>
   );
-  if (view !== "todo") {
+  if (!["todo", "followup"].includes(view)) {
     return <Card style={{ padding: 0, marginBottom: 0 }}>{rows.slice(0, 5).map((_, i) => listRow(i))}</Card>;
   }
   return (
@@ -438,16 +483,121 @@ function countedOptions(counts, chosen, labelOf) {
   return codes.map((code) => ({ code, label: labelOf(code), count: counts?.[code] ?? 0 }));
 }
 
-function Stat({ theme, label, value }) {
+function Stat({ theme, label, value, warn }) {
   return (
-    <span style={{ fontSize: 12, color: theme.textMuted, marginLeft: 6 }}>
-      <strong style={{ color: theme.text, fontWeight: 600 }}>{value ?? 0}</strong> {label}
+    <span style={{ fontSize: 12, color: warn ? theme.warning : theme.textMuted, marginLeft: 6 }}>
+      <strong style={{ color: warn ? theme.warning : theme.text, fontWeight: 600 }}>{value ?? 0}</strong> {label}
     </span>
+  );
+}
+
+// The logged-in Instagram read feeds the queue. When it stops - an expired
+// session, most often - the queue quietly stops growing, so it is said here.
+function FeedBanner({ status, theme }) {
+  if (!status) return null;
+  const last = status.last_scraped_at ? new Date(status.last_scraped_at) : null;
+  // `stale` is worked out by the server: three days with no read.
+  if (!status.last_error && !status.stale) return null;
+  return (
+    <Card style={{ padding: "10px 14px", marginBottom: 0, borderColor: theme.warning }}>
+      <div style={{ fontSize: 12.5, color: theme.text }}>
+        <strong style={{ color: theme.warning }}>Instagram search is paused.</strong>{" "}
+        {status.last_error || `No read since ${last ? last.toLocaleDateString() : "it was set up"}.`}{" "}
+        <span style={{ color: theme.textMuted }}>
+          Fix: on the Mac, in linkable-prospector, run <code>uv run prospector feed-login</code>.
+          Paid hashtag search covers for it meanwhile.
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+function Funnel({ theme, f }) {
+  const cell = (label, value, sub) => (
+    <div style={{ minWidth: 120 }}>
+      <div style={{ fontSize: 12, color: theme.textMuted }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: theme.text }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: theme.textMuted }}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+      {cell("DMs sent", f.sent)}
+      {cell("Followed up", f.followedUp)}
+      {cell("Replied", f.replied, `${f.replyRate}% of sent`)}
+      {cell("Signed up", f.converted, `${f.conversionRate}% of sent`)}
+    </div>
+  );
+}
+
+// What the DMs did: the funnel, and where it works best.
+function ResultsView({ theme }) {
+  const [data, setData] = useState(null);
+  const [problem, setProblem] = useState(null);
+  useEffect(() => {
+    api.getInstagramResults().then(setData).catch((err) => setProblem(err?.message || "could not load results"));
+  }, []);
+  if (problem) return <Card style={{ padding: 16, marginBottom: 0 }}><span style={{ fontSize: 13, color: theme.danger }}>{problem}</span></Card>;
+  if (!data) return <Card style={{ padding: 18, marginBottom: 0 }}><Skeleton style={{ display: "block", height: 60 }} /></Card>;
+  if (!data.total.sent) {
+    return (
+      <Card style={{ padding: 16, marginBottom: 0 }}>
+        <div style={{ fontSize: 13, color: theme.textMuted }}>
+          No DMs sent yet. Replies and signups show here as they happen; a signup is matched to a DMed
+          brand by its store address or email.
+        </div>
+      </Card>
+    );
+  }
+  const table = (title, rows) => (
+    <Card style={{ padding: 0, marginBottom: 0 }}>
+      <div style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, color: theme.text,
+                    borderBottom: `1px solid ${theme.border}` }}>{title}</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+        <thead>
+          <tr style={{ color: theme.textMuted }}>
+            {["", "Sent", "Replied", "Reply rate", "Signed up"].map((h, i) => (
+              <th key={h || i} style={{ textAlign: i ? "right" : "left", padding: "6px 14px", fontWeight: 500 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key} style={{ borderTop: `1px solid ${theme.border}`, color: theme.text }}>
+              <td style={{ padding: "6px 14px" }}>{r.label}</td>
+              <td style={{ padding: "6px 14px", textAlign: "right" }}>{r.sent}</td>
+              <td style={{ padding: "6px 14px", textAlign: "right" }}>{r.replied}</td>
+              <td style={{ padding: "6px 14px", textAlign: "right" }}>{r.replyRate}%</td>
+              <td style={{ padding: "6px 14px", textAlign: "right" }}>{r.converted}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card style={{ padding: 18, marginBottom: 0 }}>
+        <Funnel theme={theme} f={data.total} />
+        {data.converted.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: theme.textMid }}>
+            Signed up after a DM: {data.converted.map((c) => `@${c.handle}`).join(", ")}
+          </div>
+        )}
+      </Card>
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))" }}>
+        {table("By message variant", data.byVariant)}
+        {table("By vertical", data.byVertical)}
+        {table("By country", data.byCountry)}
+        {table("By week sent", data.byWeek)}
+      </div>
+    </div>
   );
 }
 
 function emptyText(view) {
   if (view === "sent") return "Nothing sent yet.";
+  if (view === "followup") return "No follow-ups due. A DM unanswered for three days shows up here.";
   if (view === "skipped") return "Nothing skipped.";
   return "No brands waiting. New ones arrive every morning from the Instagram searches.";
 }
@@ -507,7 +657,9 @@ function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
                   @{lead.handle}
                   {lead.country ? ` · ${lead.country}` : ""}
                   {lead.ig_followers ? ` · ${compact(lead.ig_followers)}` : ""}
-                  {lead.vertical ? ` · ${verticalShort(lead.vertical)}` : ""}
+                  {lead.vertical_effective ? ` · ${verticalShort(lead.vertical_effective)}` : ""}
+                  {lead.intent_posted_at ? ` · posted ${ago(lead.intent_posted_at)}` : ""}
+                  {lead.dm_sent_at && !lead.intent_posted_at ? ` · sent ${ago(lead.dm_sent_at)}` : ""}
                 </span>
               </span>
               <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -523,20 +675,23 @@ function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
   );
 }
 
-function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
+function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky, followUp = false, actionsRef }) {
   const { theme } = useTheme();
-  const [text, setText] = useState(lead.dm_text || "");
+  // The same panel writes the first DM and, three days later, the follow-up.
+  const saved = (followUp ? lead.dm_followup_text : lead.dm_text) || "";
+  const [text, setText] = useState(saved);
   const [busy, setBusy] = useState(null);
   const [copied, setCopied] = useState(false);
   const [showPost, setShowPost] = useState(false);
 
   // A redraft replaces the text; typing in the box does not come back here.
-  useEffect(() => { setText(lead.dm_text || ""); }, [lead.dm_text]);
+  useEffect(() => { setText(saved); }, [saved]);
 
   const name = nameOf(lead);
   const language = lead.dm_language || lead.default_language || "en";
   const other = language === "it" ? "en" : "it";
-  const dirty = text.trim() !== (lead.dm_text || "").trim();
+  const dirty = text.trim() !== saved.trim();
+  const editAction = followUp ? "edit_followup" : "edit";
   const caption = (lead.intent_caption || "").trim();
 
   async function run(label, fn) {
@@ -552,11 +707,11 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
 
   const save = () => run("save", async () => {
     if (!dirty) return;
-    onSettled(await api.updateInstagramDm(lead.handle, "edit", text), true);
+    onSettled(await api.updateInstagramDm(lead.handle, editAction, text), true);
   });
 
   const draft = (lang) => run(lang ? `draft-${lang}` : "draft", async () => {
-    const out = await api.draftInstagramDms({ handles: [lead.handle], language: lang });
+    const out = await api.draftInstagramDms({ handles: [lead.handle], language: lang, followUp });
     if (out.failed?.length) throw new Error(out.failed[0].error);
     if (out.drafted?.[0]) onSettled(out.drafted[0], true);
   });
@@ -564,15 +719,28 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
   // Copy first, then open: the conversation opens in another tab and the
   // message is already on the clipboard when it does.
   const copyAndOpen = () => run("copy", async () => {
-    if (dirty) onSettled(await api.updateInstagramDm(lead.handle, "edit", text), true);
+    if (dirty) onSettled(await api.updateInstagramDm(lead.handle, editAction, text), true);
     await navigator.clipboard.writeText(text.trim());
     setCopied(true);
     window.open(dmLink(lead.handle), "_blank", "noopener");
   });
 
   const mark = (action) => run(action, async () => {
-    if (action === "sent" && dirty) await api.updateInstagramDm(lead.handle, "edit", text);
+    if (["sent", "followup_sent"].includes(action) && dirty) {
+      await api.updateInstagramDm(lead.handle, editAction, text);
+    }
     onSettled(await api.updateInstagramDm(lead.handle, action), false);
+  });
+  const sentAction = followUp ? "followup_sent" : "sent";
+
+  // For the page's keyboard shortcuts: c and s act on the open brand.
+  useEffect(() => {
+    if (!actionsRef) return undefined;
+    actionsRef.current = {
+      copy: () => { if (text.trim() && !busy) copyAndOpen(); },
+      sent: () => { if (text.trim() && !busy) mark(sentAction); },
+    };
+    return () => { actionsRef.current = {}; };
   });
 
   return (
@@ -589,7 +757,7 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          {lead.vertical && <Tag>{verticalShort(lead.vertical)}</Tag>}
+          {lead.vertical_effective && <Tag>{verticalShort(lead.vertical_effective)}</Tag>}
           {lead.intent_signal === "open_call" && <Tag tone="success">Asked for creators</Tag>}
           {lead.status === "not_shopify" && <Tag tone="warning">Not on Shopify</Tag>}
           {lead.tier && <Tag>Tier {lead.tier}</Tag>}
@@ -624,6 +792,16 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
         </button>
       )}
 
+      {followUp && lead.dm_text && (
+        <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted }}>
+          First message, sent {ago(lead.dm_sent_at)}, no answer yet:
+          <div style={{ marginTop: 4, padding: "6px 10px", borderLeft: `3px solid ${theme.border}`,
+                        color: theme.textMid, whiteSpace: "pre-wrap", maxHeight: 90, overflow: "hidden" }}>
+            {lead.dm_text}
+          </div>
+        </div>
+      )}
+
       {lead.email_queued && (
         <div style={{ marginTop: 10, fontSize: 12, color: theme.warning }}>
           Goes to the email sequence on the next run unless it is DMed first.
@@ -634,8 +812,9 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
         value={text}
         onChange={(e) => { setText(e.target.value); setCopied(false); }}
         onBlur={save}
-        rows={Math.min(18, Math.max(8, text.split("\n").length + 2))}
-        placeholder={drafting || busy?.startsWith("draft") ? "Writing the message…" : "No message yet."}
+        rows={Math.min(18, Math.max(followUp ? 5 : 8, text.split("\n").length + 2))}
+        placeholder={drafting || busy?.startsWith("draft")
+          ? (followUp ? "Writing the follow-up…" : "Writing the message…") : "No message yet."}
         aria-label={`Message to ${name}`}
         style={{
           width: "100%", marginTop: 12, padding: "10px 12px", borderRadius: 10,
@@ -645,7 +824,11 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
         }}
       />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
-        <span>{lead.dm_text ? `In ${LANGUAGE_LABEL[language] || language}` : ""}</span>
+        <span>
+          {saved ? `In ${LANGUAGE_LABEL[language] || language}` : ""}
+          {!followUp && lead.dm_variant ? ` · variant ${lead.dm_variant}` : ""}
+          {" · keys: c copy and open, s mark sent, j/k move"}
+        </span>
         <span style={{ color: text.length > maxChars + 60 ? theme.warning : theme.textMuted }}>
           {text.length} characters
         </span>
@@ -655,29 +838,37 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
         <Btn size="sm" onClick={copyAndOpen} loading={busy === "copy"} disabled={!text.trim() || Boolean(busy)}>
           {copied ? "Copied, open again" : "Copy and open DM"}
         </Btn>
-        <Btn size="sm" variant="outline" onClick={() => mark("sent")} loading={busy === "sent"}
+        <Btn size="sm" variant="outline" onClick={() => mark(sentAction)} loading={busy === sentAction}
              disabled={!text.trim() || Boolean(busy)}>
-          Mark sent, next
+          {followUp ? "Follow-up sent, next" : "Mark sent, next"}
         </Btn>
         <div style={{ flex: 1 }} />
         <Btn size="sm" variant="secondary" onClick={() => draft()} loading={busy === "draft"} disabled={Boolean(busy)}>
-          {lead.dm_text ? "Rewrite" : "Write message"}
+          {saved ? "Rewrite" : "Write message"}
         </Btn>
         <Btn size="sm" variant="secondary" onClick={() => draft(other)} loading={busy === `draft-${other}`}
              disabled={Boolean(busy)}>
           In {LANGUAGE_LABEL[other]}
         </Btn>
-        <Btn size="sm" variant="secondary" onClick={() => mark("skip")} loading={busy === "skip"} disabled={Boolean(busy)}>
-          Skip
-        </Btn>
+        {followUp ? (
+          <Btn size="sm" variant="secondary" onClick={() => mark("replied")} loading={busy === "replied"}
+               disabled={Boolean(busy)}>
+            They replied
+          </Btn>
+        ) : (
+          <Btn size="sm" variant="secondary" onClick={() => mark("skip")} loading={busy === "skip"} disabled={Boolean(busy)}>
+            Skip
+          </Btn>
+        )}
       </div>
     </Card>
   );
 }
 
-function SentRow({ lead, last, onSettled, onNotice }) {
+function SentRow({ lead, last, onSettled, onNotice, canReply }) {
   const { theme } = useTheme();
   const [busy, setBusy] = useState(null);
+  const [answer, setAnswer] = useState("");
 
   const act = async (action) => {
     setBusy(action);
@@ -690,33 +881,67 @@ function SentRow({ lead, last, onSettled, onNotice }) {
     }
   };
 
+  // Their reply came through Instagram's API, so the answer can go back the
+  // same way - inside the 24 hours Instagram allows.
+  const sendAnswer = async () => {
+    setBusy("answer");
+    try {
+      await api.sendInstagramReply(lead.handle, answer);
+      setAnswer("");
+      onNotice({ tone: "info", text: `Answer sent to @${lead.handle}.` });
+    } catch (err) {
+      onNotice({ tone: "danger", text: `@${lead.handle}: ${err?.message || "failed"}` });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
-    <div style={{
-      display: "flex", gap: 12, alignItems: "center", padding: "10px 16px", flexWrap: "wrap",
-      borderBottom: last ? "none" : `1px solid ${theme.border}`,
-    }}>
-      <div style={{ flex: 1, minWidth: 220 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{nameOf(lead)}</div>
-        <div style={{ fontSize: 12, color: theme.textMuted }}>
-          @{lead.handle}
-          {lead.dm_sent_at ? ` · sent ${new Date(lead.dm_sent_at).toLocaleString()}` : ""}
-          {lead.dm_sent_by ? ` by ${lead.dm_sent_by}` : ""}
+    <div style={{ padding: "10px 16px", borderBottom: last ? "none" : `1px solid ${theme.border}` }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{nameOf(lead)}</div>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>
+            @{lead.handle}
+            {lead.dm_sent_at ? ` · sent ${new Date(lead.dm_sent_at).toLocaleString()}` : ""}
+            {lead.dm_sent_by ? ` by ${lead.dm_sent_by}` : ""}
+            {lead.dm_followup_sent_at ? ` · followed up ${ago(lead.dm_followup_sent_at)}` : ""}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
+          {lead.converted_at && <Tag tone="success" title={`Matched by ${lead.converted_match}`}>Signed up</Tag>}
+          {lead.dm_state === "replied" && <Tag tone="success">Replied</Tag>}
+          {lead.dm_state === "sent" && (
+            <Btn size="sm" variant="secondary" onClick={() => act("replied")} loading={busy === "replied"}
+                 disabled={Boolean(busy)}>
+              They replied
+            </Btn>
+          )}
+          <Btn size="sm" variant="secondary" href={dmLink(lead.handle)} target="_blank">Open DM</Btn>
+          <Btn size="sm" variant="secondary" onClick={() => act("reopen")} loading={busy === "reopen"}
+               disabled={Boolean(busy)}>
+            {lead.dm_state === "skipped" ? "Restore" : "Undo"}
+          </Btn>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
-        {lead.dm_state === "replied" && <Tag tone="success">Replied</Tag>}
-        {lead.dm_state === "sent" && (
-          <Btn size="sm" variant="secondary" onClick={() => act("replied")} loading={busy === "replied"}
-               disabled={Boolean(busy)}>
-            They replied
+      {lead.dm_reply_text && (
+        <div style={{ marginTop: 8, padding: "6px 10px", borderLeft: `3px solid ${theme.success}`,
+                      fontSize: 12.5, color: theme.textMid, whiteSpace: "pre-wrap" }}>
+          {lead.dm_reply_text}
+        </div>
+      )}
+      {canReply && lead.ig_user_id && lead.dm_state === "replied" && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
+          <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} rows={2}
+                    placeholder="Answer on Instagram…" aria-label={`Answer to ${nameOf(lead)}`}
+                    style={{ flex: 1, padding: "8px 10px", borderRadius: 10, fontFamily: "inherit", fontSize: 13,
+                             border: `1.5px solid ${theme.border}`, background: theme.bg, color: theme.text,
+                             resize: "vertical" }} />
+          <Btn size="sm" onClick={sendAnswer} loading={busy === "answer"} disabled={!answer.trim() || Boolean(busy)}>
+            Send on Instagram
           </Btn>
-        )}
-        <Btn size="sm" variant="secondary" href={dmLink(lead.handle)} target="_blank">Open DM</Btn>
-        <Btn size="sm" variant="secondary" onClick={() => act("reopen")} loading={busy === "reopen"}
-             disabled={Boolean(busy)}>
-          {lead.dm_state === "skipped" ? "Restore" : "Undo"}
-        </Btn>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

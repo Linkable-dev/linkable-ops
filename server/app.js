@@ -8,6 +8,7 @@ import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import { conversationsRoutes, conversationsWebhookRoutes } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
 import { prospectingRoutes } from "./routes/prospecting.js";
+import { instagramWebhookRoutes } from "./routes/instagram-webhook.js";
 import { outboundRoutes } from "./routes/outbound.js";
 import { outboundCampaignsRoutes } from "./routes/outbound-campaigns.js";
 import { outboundAgentsRoutes } from "./routes/outbound-agents.js";
@@ -69,6 +70,8 @@ app.use("/api/auth", authRoutes());
 app.use("/api/conversations", conversationsWebhookRoutes());
 // Cron — secured by the CRON_SECRET bearer token.
 app.use("/api/cron", cronRoutes());
+// Meta calls this, so no admin auth; every POST is signature-checked inside.
+app.use("/api/instagram", instagramWebhookRoutes());
 
 // Everything below is admin-only. dbTargetMiddleware reads the x-db-target
 // header the ops UI sends and binds it for the request, so cloudSqlQuery picks

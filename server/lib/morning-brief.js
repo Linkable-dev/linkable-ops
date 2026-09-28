@@ -11,6 +11,9 @@ import { brandHealth } from "./brand-health.js";
 import { inboxHealth } from "./deliverability.js";
 import { attributionSummary } from "./outbound-attribution.js";
 import { sendNudgeEmail } from "./nudge-mailer.js";
+import { supabase } from "./supabase.js";
+import { refreshConversions } from "./dm-conversions.js";
+import { isFollowupDue } from "./instagram-dm-queue.js";
 
 const plural = (n, w) => `${n} ${w}${Number(n) === 1 ? "" : "s"}`;
 
@@ -43,7 +46,7 @@ export async function briefRecipients() {
 export async function gatherBrief() {
   const safe = (p, fallback) => p.catch((e) => { console.warn("[brief]", e.message); return fallback; });
 
-  const [alerts, dismissals, health, inboxes, attribution, money30] = await Promise.all([
+  const [alerts, dismissals, health, inboxes, attribution, money30, instagram] = await Promise.all([
     safe(buildAlerts(), []),
     safe(loadDismissals("prod"), new Map()),
     safe(brandHealth({ limit: 200 }), null),
@@ -60,6 +63,7 @@ export async function gatherBrief() {
             AND status IN ('accepted','shipped')) AS samples_accepted,
         (SELECT COUNT(*) FROM sample_requests WHERE deleted = '-infinity'::timestamptz
             AND status = 'shipped') AS samples_shipped`).then((r) => r.rows[0]), null),
+    safe(instagramBrief(), null),
   ]);
 
   const open = alerts.filter((a) => {
@@ -77,6 +81,34 @@ export async function gatherBrief() {
     inboxTrouble: inboxes.filter((b) => b.breaches.length || (!b.is_active && /auto-paused/.test(b.notes || ""))),
     attribution,
     money30,
+    instagram,
+  };
+}
+
+// The Instagram DM loop in four facts: is the login alive, what went out
+// yesterday, what came back, and what is waiting to be followed up.
+export async function instagramBrief() {
+  await refreshConversions().catch(() => null);
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const [{ data: rows }, { data: feed }] = await Promise.all([
+    supabase.from("prospector_leads")
+      .select("dm_state,dm_sent_at,dm_replied_at,dm_followup_sent_at,converted_at,dm_text,tier,status,is_agency,pushed_at,decision"),
+    supabase.from("prospector_feed_status").select("*").eq("id", 1).maybeSingle(),
+  ]);
+  const list = rows || [];
+  const recent = (v) => v && v >= since;
+  const lastRead = feed?.last_scraped_at ? new Date(feed.last_scraped_at) : null;
+  return {
+    sent: list.filter((r) => recent(r.dm_sent_at)).length,
+    replied: list.filter((r) => recent(r.dm_replied_at)).length,
+    converted: list.filter((r) => recent(r.converted_at)).length,
+    followupsDue: list.filter(isFollowupDue).length,
+    ready: list.filter((r) => ["none", "drafted"].includes(r.dm_state || "none") && r.dm_text
+      && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true && r.tier).length,
+    loginProblem: feed?.last_error || null,
+    // The worker reads once a weekday; two days without a read is a problem
+    // even when nothing has said so.
+    readStale: lastRead ? Date.now() - lastRead.getTime() > 3 * 24 * 3600 * 1000 : false,
   };
 }
 
@@ -132,6 +164,22 @@ export function renderBrief(b, { date = new Date() } = {}) {
   }
   lines.push("");
 
+  // Instagram DMs: what went out and came back, and the login they depend on.
+  const ig = b.instagram;
+  if (ig) {
+    if (ig.loginProblem || ig.readStale) {
+      lines.push(`Instagram search is not running: ${ig.loginProblem || "no read for 3 days"}.`);
+      lines.push("  Fix: run `uv run prospector feed-login` in linkable-prospector on the Mac.");
+    }
+    const bits = [];
+    if (ig.sent) bits.push(`${plural(ig.sent, "DM")} sent`);
+    if (ig.replied) bits.push(`${ig.replied} ${ig.replied === 1 ? "reply" : "replies"} in`);
+    if (ig.converted) bits.push(`${plural(ig.converted, "brand")} signed up after a DM`);
+    lines.push(bits.length ? `Instagram DMs, last 24 hours: ${bits.join(", ")}.` : "Instagram DMs: none sent in the last 24 hours.");
+    lines.push(`  ${ig.ready} messages ready to send${ig.followupsDue ? `, ${plural(ig.followupsDue, "follow-up")} due` : ""}.`);
+    lines.push("");
+  }
+
   // 5. Anything broken in the machinery.
   if (b.inboxTrouble.length) {
     lines.push("Sending inboxes needing attention:");
@@ -148,6 +196,7 @@ export function renderBrief(b, { date = new Date() } = {}) {
   if (base) {
     lines.push(`Alerts: ${base}/alerts`);
     lines.push(`Brand health: ${base}/health`);
+    lines.push(`Instagram DMs: ${base}/gtm/brands/instagram`);
   }
   return lines.join("\n");
 }

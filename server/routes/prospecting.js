@@ -18,9 +18,13 @@ import { claudeMessage, cachedSystem } from "../lib/anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
 import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-club.js";
 import { LANGUAGES, MAX_DM_CHARS } from "../lib/instagram-dm-writer.js";
+import { classifyMissing } from "../lib/lead-classifier.js";
+import { refreshConversions } from "../lib/dm-conversions.js";
+import { dmResults } from "../lib/dm-results.js";
+import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-graph.js";
 import {
   DM_COLUMNS, SETTINGS, readSettings, settingProblem, optionsFrom, countryOf, dmOpen, isDmOpen, todoOrder,
-  VERTICALS, NO_VERTICAL, verticalOf, filterVerticals,
+  VERTICALS, NO_VERTICAL, verticalOf, filterVerticals, followupDue, isFollowupDue, FOLLOWUP_DAYS,
   shapeDm, draftBatch, DRAFT_BATCH,
 } from "../lib/instagram-dm-queue.js";
 
@@ -887,6 +891,8 @@ export function prospectingRoutes() {
       .order("dm_sent_at", { ascending: false, nullsFirst: false }),
     skipped: (qy) => qy.eq("dm_state", "skipped")
       .order("first_seen_at", { ascending: false, nullsFirst: false }),
+    // Sent, unanswered for FOLLOWUP_DAYS, not followed up: the second message.
+    followup: (qy) => followupDue(qy).order("dm_sent_at", { ascending: true }),
   };
 
   // --- settings an admin chooses for the whole team ----------------------
@@ -936,10 +942,12 @@ export function prospectingRoutes() {
       .map((v) => v.trim().toUpperCase())
       .filter((v) => v in VERTICALS || v === NO_VERTICAL);
 
-    const [list, all] = await Promise.all([
+    const [list, all, feed] = await Promise.all([
       DM_VIEWS[view](filterVerticals(supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), verticals), opts)
         .range(offset, offset + limit - 1),
-      supabase.from(TABLE).select("tier,status,country,vertical,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
+      supabase.from(TABLE).select("tier,status,country,vertical,vertical_ai,vertical_effective,is_agency,decision,"
+        + "pushed_at,dm_state,dm_text,dm_sent_at,dm_followup_sent_at,converted_at"),
+      supabase.from("prospector_feed_status").select("*").eq("id", 1).maybeSingle(),
     ]);
     if (list.error) return dmError(res, list.error, "listing the Instagram queue");
     if (all.error) return dmError(res, all.error, "counting the Instagram queue");
@@ -961,7 +969,19 @@ export function prospectingRoutes() {
         sent: rows.filter((r) => ["sent", "replied"].includes(r.dm_state)).length,
         replied: rows.filter((r) => r.dm_state === "replied").length,
         skipped: rows.filter((r) => r.dm_state === "skipped").length,
+        followup: rows.filter(isFollowupDue).length,
+        converted: rows.filter((r) => r.converted_at).length,
+        agencies: rows.filter((r) => r.is_agency === true).length,
       },
+      // How the logged-in Instagram read is doing, for the "log in again"
+      // banner. Missing table or row reads as unknown, not as broken.
+      feedStatus: feed?.data ? {
+        ...feed.data,
+        stale: Boolean(feed.data.last_scraped_at)
+          && Date.now() - new Date(feed.data.last_scraped_at).getTime() > 3 * 86_400_000,
+      } : null,
+      instagramReplies: instagramConfigured(),
+      followupDays: FOLLOWUP_DAYS,
       // Every country waiting, whether or not it is chosen, so an admin can see
       // what the country setting leaves out before changing it.
       countries: rows
@@ -985,10 +1005,74 @@ export function prospectingRoutes() {
       : [];
     const language = LANGUAGES[req.body?.language] ? req.body.language : undefined;
     try {
-      res.json(await draftBatch({ handles, language, limit: Number(req.body?.limit) || DRAFT_BATCH }));
+      res.json(await draftBatch({
+        handles, language, limit: Number(req.body?.limit) || DRAFT_BATCH, followUp: req.body?.followUp === true,
+      }));
     } catch (error) {
       return dmError(res, error, "choosing leads to draft");
     }
+  });
+
+  // Claude's verdict on leads nobody has classified: a vertical where the
+  // keywords found none, and whether the account is an agency (which takes it
+  // out of the queue). The page calls this before writing messages, so no
+  // message is written for an agency.
+  router.post("/instagram/classify", async (_req, res) => {
+    try {
+      res.json(await classifyMissing({ limit: 40 }));
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "could not classify" });
+    }
+  });
+
+  // What the DMs did: sent, followed up, replied, became customers - overall
+  // and by vertical, country, message variant and week. Conversions are
+  // re-matched against the product database first, so the page is current.
+  router.get("/instagram/results", async (_req, res) => {
+    try {
+      const conversions = await refreshConversions().catch((err) => ({ error: err.message }));
+      res.json({ ...(await dmResults()), conversions });
+    } catch (err) {
+      return dmError(res, err, "loading the results");
+    }
+  });
+
+  // Answer a brand that replied, through Instagram's API. Only possible inside
+  // the 24 hours after their message - Instagram's rule, not ours - and only
+  // when the Meta connection is configured (see lib/instagram-graph.js).
+  router.post("/instagram/:handle/reply", async (req, res) => {
+    const handle = String(req.params.handle).toLowerCase();
+    const text = String(req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "write the reply first" });
+    if (text.length > 1000) return res.status(400).json({ error: "Instagram stops at 1,000 characters" });
+    const { data: lead, error } = await supabase.from(TABLE).select("handle,ig_user_id").eq("handle", handle).maybeSingle();
+    if (error) return dmError(res, error, "loading the lead");
+    if (!lead?.ig_user_id) return res.status(409).json({ error: "this brand has not written to us on Instagram" });
+    const { data: last } = await supabase.from("prospector_dm_messages").select("sent_at")
+      .eq("ig_user_id", lead.ig_user_id).eq("direction", "in")
+      .order("sent_at", { ascending: false }).limit(1).maybeSingle();
+    if (!last || Date.now() - new Date(last.sent_at).getTime() > 24 * 3600 * 1000) {
+      return res.status(409).json({ error: "their last message is over 24 hours old; answer from the Instagram app" });
+    }
+    try {
+      const sent = await sendInstagramMessage(lead.ig_user_id, text);
+      await supabase.from("prospector_dm_messages").insert({
+        mid: sent.message_id || null, ig_user_id: lead.ig_user_id, handle,
+        direction: "out", text, sent_at: new Date().toISOString(),
+      });
+      res.json({ sent: true });
+    } catch (err) {
+      res.status(502).json({ error: err?.message || "Instagram refused the message" });
+    }
+  });
+
+  // The conversation with one brand, as Instagram delivered it.
+  router.get("/instagram/:handle/messages", async (req, res) => {
+    const { data, error } = await supabase.from("prospector_dm_messages")
+      .select("direction,text,sent_at").eq("handle", String(req.params.handle).toLowerCase())
+      .order("sent_at", { ascending: true }).limit(50);
+    if (error) return dmError(res, error, "loading the conversation");
+    res.json({ messages: data || [] });
   });
 
   // One lead's DM: edit the text, or record what happened to it.
@@ -1021,6 +1105,18 @@ export function prospectingRoutes() {
         return res.status(409).json({ error: "this brand was already handed to the email sequence" });
       }
       update = { dm_state: "sent", dm_sent_at: now, dm_sent_by: who };
+    } else if (action === "edit_followup") {
+      const text = String(req.body?.text ?? "").trim();
+      if (text.length > 1000) return res.status(400).json({ error: "Instagram stops at 1,000 characters" });
+      if (state !== "sent" || lead.dm_followup_sent_at) {
+        return res.status(409).json({ error: "the follow-up has already gone, or they replied" });
+      }
+      update = { dm_followup_text: text || null };
+    } else if (action === "followup_sent") {
+      if (state !== "sent" || lead.dm_followup_sent_at) {
+        return res.status(409).json({ error: "already followed up, or they replied" });
+      }
+      update = { dm_followup_sent_at: now };
     } else if (action === "replied") {
       if (!["sent", "replied"].includes(state)) {
         return res.status(409).json({ error: "mark it sent first" });
@@ -1037,10 +1133,12 @@ export function prospectingRoutes() {
       // the safe direction to be wrong in.
       update = {
         dm_state: lead.dm_text ? "drafted" : "none",
-        dm_sent_at: null, dm_sent_by: null, dm_replied_at: null,
+        dm_sent_at: null, dm_sent_by: null, dm_replied_at: null, dm_followup_sent_at: null,
       };
     } else {
-      return res.status(400).json({ error: "action must be one of edit, sent, replied, skip, reopen" });
+      return res.status(400).json({
+        error: "action must be one of edit, sent, edit_followup, followup_sent, replied, skip, reopen",
+      });
     }
 
     const { data, error: saveError } = await supabase

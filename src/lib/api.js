@@ -65,9 +65,15 @@ export const api = {
     request(`/prospecting/replies/${encodeURIComponent(activityId)}/draft`, { method: "POST" }),
   // Instagram DMs to brands: drafted here, sent by a person.
   getInstagramDms: (params = {}) => request(`/prospecting/instagram?${buildQs(params)}`),
-  draftInstagramDms: ({ handles, language, limit } = {}) =>
+  draftInstagramDms: ({ handles, language, limit, followUp } = {}) =>
     request("/prospecting/instagram/draft", {
-      method: "POST", body: JSON.stringify({ handles, language, limit }),
+      method: "POST", body: JSON.stringify({ handles, language, limit, followUp }),
+    }),
+  classifyInstagramLeads: () => request("/prospecting/instagram/classify", { method: "POST" }),
+  getInstagramResults: () => request("/prospecting/instagram/results"),
+  sendInstagramReply: (handle, text) =>
+    request(`/prospecting/instagram/${encodeURIComponent(handle)}/reply`, {
+      method: "POST", body: JSON.stringify({ text }),
     }),
   getProspectingSettings: () => request("/prospecting/settings"),
   setProspectingSetting: (key, value) =>
