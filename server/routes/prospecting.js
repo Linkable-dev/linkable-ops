@@ -893,6 +893,10 @@ export function prospectingRoutes() {
       .order("first_seen_at", { ascending: false, nullsFirst: false }),
     // Sent, unanswered for FOLLOWUP_DAYS, not followed up: the second message.
     followup: (qy) => followupDue(qy).order("dm_sent_at", { ascending: true }),
+    // Taken out of the queue as not a brand (Claude, or a person), so the
+    // verdict can be checked and undone.
+    agencies: (qy) => qy.eq("is_agency", true).in("dm_state", ["none", "drafted"])
+      .order("classified_at", { ascending: false, nullsFirst: false }),
   };
 
   // --- settings an admin chooses for the whole team ----------------------
@@ -1127,6 +1131,14 @@ export function prospectingRoutes() {
         return res.status(409).json({ error: "this one has already gone" });
       }
       update = { dm_state: "skipped" };
+    } else if (action === "brand" || action === "not_brand") {
+      // A person's verdict on "is this a brand at all". classified_at is set
+      // so the classifier, which only looks at unclassified leads, never
+      // overrules it.
+      if (!["none", "drafted"].includes(state)) {
+        return res.status(409).json({ error: "this one has already been written to" });
+      }
+      update = { is_agency: action === "not_brand", classified_at: now };
     } else if (action === "reopen") {
       // Undoing a mis-click. The pipeline may already have read the send and
       // taken the brand out of the email sequence; it is left out, which is
@@ -1137,7 +1149,7 @@ export function prospectingRoutes() {
       };
     } else {
       return res.status(400).json({
-        error: "action must be one of edit, sent, edit_followup, followup_sent, replied, skip, reopen",
+        error: "action must be one of edit, sent, edit_followup, followup_sent, replied, skip, brand, not_brand, reopen",
       });
     }
 

@@ -27,6 +27,7 @@ const VIEWS = [
   { value: "followup", label: "Follow up", count: "followup" },
   { value: "sent", label: "Sent", count: "sent" },
   { value: "skipped", label: "Skipped", count: "skipped" },
+  { value: "agencies", label: "Not brands", count: "agencies" },
   { value: "results", label: "Results", count: "converted", suffix: " signed up" },
 ];
 
@@ -348,7 +349,10 @@ export default function InstagramDmPage() {
         </div>
       ) : (
         <Card style={{ padding: 0, marginBottom: 0 }}>
-          {leads.map((lead, i) => (
+          {view === "agencies" ? leads.map((lead, i) => (
+            <NotBrandRow key={lead.handle} lead={lead} last={i === leads.length - 1}
+                         onSettled={settle} onNotice={setNotice} />
+          )) : leads.map((lead, i) => (
             <SentRow key={lead.handle} lead={lead} last={i === leads.length - 1}
                      canReply={meta?.instagramReplies === true}
                      onSettled={settle} onNotice={setNotice} />
@@ -604,6 +608,7 @@ function ResultsView({ theme }) {
 function emptyText(view) {
   if (view === "sent") return "Nothing sent yet.";
   if (view === "followup") return "No follow-ups due. A DM unanswered for three days shows up here.";
+  if (view === "agencies") return "Nothing taken out. Agencies, platforms, events and creators land here.";
   if (view === "skipped") return "Nothing skipped.";
   return "No brands waiting. New ones arrive every morning from the Instagram searches.";
 }
@@ -866,12 +871,53 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky, follow
             They replied
           </Btn>
         ) : (
-          <Btn size="sm" variant="secondary" onClick={() => mark("skip")} loading={busy === "skip"} disabled={Boolean(busy)}>
-            Skip
-          </Btn>
+          <>
+            <Btn size="sm" variant="secondary" onClick={() => mark("not_brand")} loading={busy === "not_brand"}
+                 disabled={Boolean(busy)} title="An agency, platform, event or creator: out of the queue, listed under Not brands">
+              Not a brand
+            </Btn>
+            <Btn size="sm" variant="secondary" onClick={() => mark("skip")} loading={busy === "skip"} disabled={Boolean(busy)}>
+              Skip
+            </Btn>
+          </>
         )}
       </div>
     </Card>
+  );
+}
+
+// An account taken out of the queue as not a brand, and the way back in.
+function NotBrandRow({ lead, last, onSettled, onNotice }) {
+  const { theme } = useTheme();
+  const [busy, setBusy] = useState(false);
+  const restore = async () => {
+    setBusy(true);
+    try {
+      onSettled(await api.updateInstagramDm(lead.handle, "brand"), false);
+      onNotice({ tone: "info", text: `@${lead.handle} is back in the queue.` });
+    } catch (err) {
+      onNotice({ tone: "danger", text: `@${lead.handle}: ${err?.message || "failed"}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const about = [lead.ig_category, lead.ig_biography].filter((v) => v && v !== "None").join(" · ");
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "10px 16px", flexWrap: "wrap",
+                  borderBottom: last ? "none" : `1px solid ${theme.border}` }}>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{nameOf(lead)}</div>
+        <div style={{ fontSize: 12, color: theme.textMuted, overflow: "hidden", textOverflow: "ellipsis",
+                      whiteSpace: "nowrap", maxWidth: 820 }}>
+          @{lead.handle}{about ? ` · ${about.replace(/\s+/g, " ")}` : ""}
+        </div>
+      </div>
+      <Btn size="sm" variant="secondary" href={lead.instagram_url || `https://www.instagram.com/${lead.handle}/`}
+           target="_blank">Profile</Btn>
+      <Btn size="sm" variant="outline" onClick={restore} loading={busy} disabled={busy}>
+        It's a brand
+      </Btn>
+    </div>
   );
 }
 
