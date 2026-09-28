@@ -19,7 +19,7 @@ import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js
 import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-club.js";
 import { LANGUAGES, MAX_DM_CHARS } from "../lib/instagram-dm-writer.js";
 import {
-  DM_COLUMNS, SETTINGS, SETTING_DEFAULTS, readSettings, dmOpen, isDmOpen, todoOrder,
+  DM_COLUMNS, SETTINGS, readSettings, settingProblem, optionsFrom, countryOf, dmOpen, isDmOpen, todoOrder,
   shapeDm, draftBatch, DRAFT_BATCH,
 } from "../lib/instagram-dm-queue.js";
 
@@ -896,12 +896,8 @@ export function prospectingRoutes() {
 
   router.post("/settings", async (req, res) => {
     const { key, value } = req.body || {};
-    if (!(key in SETTING_DEFAULTS)) {
-      return res.status(400).json({ error: `unknown setting: ${key}` });
-    }
-    if (typeof value !== typeof SETTING_DEFAULTS[key]) {
-      return res.status(400).json({ error: `${key} must be a ${typeof SETTING_DEFAULTS[key]}` });
-    }
+    const problem = settingProblem(key, value);
+    if (problem) return res.status(400).json({ error: problem });
     const { error } = await supabase.from(SETTINGS).upsert({
       key, value, updated_at: new Date().toISOString(),
       updated_by: req.admin?.name || req.admin?.email || null,
@@ -933,12 +929,12 @@ export function prospectingRoutes() {
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const settings = await readSettings();
-    const opts = { nonShopify: settings.dm_include_non_shopify === true };
+    const opts = optionsFrom(settings);
 
     const [list, all] = await Promise.all([
       DM_VIEWS[view](supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), opts)
         .range(offset, offset + limit - 1),
-      supabase.from(TABLE).select("tier,status,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
+      supabase.from(TABLE).select("tier,status,country,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
     ]);
     if (list.error) return dmError(res, list.error, "listing the Instagram queue");
     if (all.error) return dmError(res, all.error, "counting the Instagram queue");
@@ -961,6 +957,11 @@ export function prospectingRoutes() {
         replied: rows.filter((r) => r.dm_state === "replied").length,
         skipped: rows.filter((r) => r.dm_state === "skipped").length,
       },
+      // Every country waiting, whether or not it is chosen, so an admin can see
+      // what the country setting leaves out before changing it.
+      countries: rows
+        .filter((r) => isDmOpen(r, { nonShopify: opts.nonShopify }))
+        .reduce((acc, r) => { acc[countryOf(r)] = (acc[countryOf(r)] || 0) + 1; return acc; }, {}),
       maxChars: MAX_DM_CHARS,
     });
   });

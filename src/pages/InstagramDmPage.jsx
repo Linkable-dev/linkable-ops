@@ -49,6 +49,8 @@ export default function InstagramDmPage() {
   const wide = useWide();
   const [view, setView] = useState("todo");
   const [data, setData] = useState(null);
+  // Counts, settings and countries outlive a tab switch; the list does not.
+  const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -58,22 +60,31 @@ export default function InstagramDmPage() {
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
 
+  // Only the newest request may write. Switching tabs used to paint the "To
+  // send" list under "Sent" - with Undo buttons on brands nobody had sent to -
+  // until the slower answer arrived.
+  const requestRef = useRef(0);
+
   const load = useCallback(async (quiet = false) => {
+    const request = ++requestRef.current;
     if (!quiet) setLoading(true);
     try {
-      setData(await api.getInstagramDms({ view, limit: 100 }));
+      const out = await api.getInstagramDms({ view, limit: 100 });
+      if (request !== requestRef.current) return;
+      setData(out);
+      setMeta({ counts: out.counts, settings: out.settings, countries: out.countries || {} });
       setProblem(null);
     } catch (err) {
-      setProblem(err?.message || "could not load the queue");
+      if (request === requestRef.current) setProblem(err?.message || "could not load the queue");
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, [view]);
 
-  useEffect(() => { setSelected(null); load(); }, [load]);
+  useEffect(() => { setSelected(null); setData(null); load(); }, [load]);
 
   const leads = useMemo(() => data?.leads || [], [data]);
-  const counts = data?.counts || {};
+  const counts = meta?.counts || {};
   const current = leads.find((l) => l.handle === selected) || leads[0] || null;
 
   // Merge one changed lead into the list, or drop it when it has left this view.
@@ -135,16 +146,17 @@ export default function InstagramDmPage() {
     // Once per shape of the queue, and only when something is missing, so a
     // brand whose message keeps failing does not loop.
     if (!data || view !== "todo" || !missing || drafting) return;
-    const key = `${counts.todo}:${counts.nonShopify}:${data?.settings?.dm_include_non_shopify}`;
+    const key = `${counts.todo}:${counts.nonShopify}:${JSON.stringify(meta?.settings)}`;
     if (startedFor.current === key) return;
     startedFor.current = key;
     draftMissing();
-  }, [data, view, missing, drafting, counts.todo, counts.nonShopify, draftMissing]);
+  }, [data, view, missing, drafting, counts.todo, counts.nonShopify, meta?.settings, draftMissing]);
 
-  async function setNonShopify(value) {
+  // Admin choices for the whole team: which brands are in the queue at all.
+  async function saveSetting(key, value) {
     setSavingSetting(true);
     try {
-      await api.setProspectingSetting("dm_include_non_shopify", value);
+      await api.setProspectingSetting(key, value);
       await load(true);
     } catch (err) {
       setNotice({ tone: "danger", text: err?.message || "could not save the setting" });
@@ -167,7 +179,8 @@ export default function InstagramDmPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [leads, current]);
 
-  const includeNonShopify = data?.settings?.dm_include_non_shopify === true;
+  const includeNonShopify = meta?.settings?.dm_include_non_shopify === true;
+  const chosenCountries = meta?.settings?.dm_countries || [];
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -190,24 +203,34 @@ export default function InstagramDmPage() {
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {VIEWS.map((v) => (
           <Btn key={v.value} size="sm" variant={view === v.value ? "solid" : "secondary"}
-               onClick={() => { setView(v.value); setNotice(null); }}>
-            {v.label}{data ? ` ${counts[v.count] ?? 0}` : ""}
+               onClick={() => { if (v.value !== view) { setView(v.value); setNotice(null); } }}>
+            {v.label}{meta ? ` ${counts[v.count] ?? 0}` : ""}
           </Btn>
         ))}
-        <Stat theme={theme} label="sent today" value={counts.sentToday} />
-        <Stat theme={theme} label="replied" value={counts.replied} />
+        {meta ? (
+          <>
+            <Stat theme={theme} label="sent today" value={counts.sentToday} />
+            <Stat theme={theme} label="replied" value={counts.replied} />
+          </>
+        ) : (
+          <Skeleton style={{ height: 14, width: 150, marginLeft: 6 }} />
+        )}
         <div style={{ flex: 1 }} />
         {drafting && (
           <span style={{ fontSize: 12, color: theme.textMid }}>
             Writing messages… {drafting.done} done{drafting.failed ? `, ${drafting.failed} failed` : ""}
           </span>
         )}
-        {data && (
+        {meta && (
+          <CountryPicker theme={theme} available={meta.countries} chosen={chosenCountries}
+                         disabled={savingSetting} onChange={(codes) => saveSetting("dm_countries", codes)} />
+        )}
+        {meta && (
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
                           color: theme.textMid, cursor: savingSetting ? "wait" : "pointer" }}
                  title="Brands whose store is not on Shopify are never emailed. This decides whether they are offered here, for everyone.">
             <input type="checkbox" checked={includeNonShopify} disabled={savingSetting}
-                   onChange={(e) => setNonShopify(e.target.checked)} style={{ margin: 0 }} />
+                   onChange={(e) => saveSetting("dm_include_non_shopify", e.target.checked)} style={{ margin: 0 }} />
             Include brands not on Shopify{counts.nonShopify ? ` (${counts.nonShopify})` : ""}
           </label>
         )}
@@ -220,7 +243,7 @@ export default function InstagramDmPage() {
       )}
 
       {loading && !data ? (
-        <Card style={{ marginBottom: 0 }}><Skeleton style={{ height: 240 }} /></Card>
+        <LoadingShape view={view} wide={wide} theme={theme} />
       ) : !leads.length ? (
         <Card style={{ padding: 16, marginBottom: 0 }}>
           <div style={{ color: theme.textMuted, fontSize: 13 }}>{emptyText(view)}</div>
@@ -250,6 +273,114 @@ export default function InstagramDmPage() {
       {data && data.total > leads.length && (
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           Showing the first {leads.length} of {data.total}. They move up as these are sent.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The page's own shape while it loads, so nothing jumps when it arrives.
+function LoadingShape({ view, wide, theme }) {
+  const rows = Array.from({ length: 8 });
+  const listRow = (i) => (
+    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px",
+                          borderTop: i ? `1px solid ${theme.border}` : "none" }}>
+      <Skeleton style={{ width: 7, height: 7, borderRadius: 99 }} />
+      <div style={{ flex: 1 }}>
+        <Skeleton style={{ display: "block", height: 12, width: "55%" }} />
+        <Skeleton style={{ display: "block", height: 10, width: "35%", marginTop: 6 }} />
+      </div>
+      <Skeleton style={{ height: 16, width: 34, borderRadius: 99 }} />
+    </div>
+  );
+  if (view !== "todo") {
+    return <Card style={{ padding: 0, marginBottom: 0 }}>{rows.slice(0, 5).map((_, i) => listRow(i))}</Card>;
+  }
+  return (
+    <div style={{ display: "grid", gap: 12, alignItems: "start",
+                  gridTemplateColumns: wide ? "minmax(300px, 380px) minmax(0, 1fr)" : "minmax(0, 1fr)" }}>
+      <Card style={{ padding: 0, marginBottom: 0 }}>{rows.map((_, i) => listRow(i))}</Card>
+      <Card style={{ padding: 18, marginBottom: 0 }}>
+        <Skeleton style={{ display: "block", height: 16, width: "30%" }} />
+        <Skeleton style={{ display: "block", height: 11, width: "45%", marginTop: 8 }} />
+        <Skeleton style={{ height: 44, marginTop: 16 }} />
+        <Skeleton style={{ height: 220, marginTop: 12, borderRadius: 10 }} />
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <Skeleton style={{ height: 30, width: 150, borderRadius: 99 }} />
+          <Skeleton style={{ height: 30, width: 130, borderRadius: 99 }} />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+const COUNTRY_NAMES = (() => {
+  try { return new Intl.DisplayNames(["en"], { type: "region" }); } catch { return null; }
+})();
+const countryName = (code) => (code === "UNKNOWN" ? "Unknown country"
+  : (COUNTRY_NAMES?.of(code) || code));
+
+// Which countries' brands are in the queue, for everyone. Nothing chosen means
+// every country; the counts include the countries left out, so it is clear
+// what a change will add or remove before making it.
+function CountryPicker({ theme, available, chosen, disabled, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const codes = Object.keys(available || {})
+    .sort((a, b) => (available[b] - available[a]) || a.localeCompare(b));
+  // A chosen country with nobody waiting still shows, so it can be unticked.
+  for (const c of chosen) if (!codes.includes(c)) codes.push(c);
+  const all = !chosen.length;
+  const isOn = (c) => all || chosen.includes(c);
+
+  function toggle(code) {
+    const current = all ? codes : chosen;
+    const next = current.includes(code) ? current.filter((c) => c !== code) : [...current, code];
+    // Every country ticked is the same as no filter, and is stored as one.
+    onChange(codes.every((c) => next.includes(c)) ? [] : next);
+  }
+
+  const label = all ? "All countries"
+    : chosen.length <= 3 ? chosen.map((c) => (c === "UNKNOWN" ? "Unknown" : c)).join(", ")
+    : `${chosen.length} countries`;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <Btn size="sm" variant="secondary" onClick={() => setOpen((v) => !v)} disabled={disabled}
+           aria-expanded={open} title="Which countries' brands are in the queue, for everyone">
+        {label} ▾
+      </Btn>
+      {open && (
+        <div style={{
+          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, width: 260,
+          background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12,
+          boxShadow: theme.shadowMd, padding: 8, maxHeight: 360, overflowY: "auto",
+        }}>
+          <button type="button" onClick={() => onChange([])} disabled={disabled || all}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px",
+                           border: "none", background: "transparent", fontFamily: "inherit",
+                           fontSize: 12, color: all ? theme.textMuted : theme.text,
+                           cursor: all ? "default" : "pointer" }}>
+            All countries
+          </button>
+          {codes.map((code) => (
+            <label key={code} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
+                                       fontSize: 12.5, color: theme.text, cursor: "pointer" }}>
+              <input type="checkbox" checked={isOn(code)} disabled={disabled}
+                     onChange={() => toggle(code)} style={{ margin: 0 }} />
+              <span style={{ flex: 1 }}>{countryName(code)}</span>
+              <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>
+                {available?.[code] ?? 0}
+              </span>
+            </label>
+          ))}
         </div>
       )}
     </div>
@@ -427,7 +558,7 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
           style={{
             display: "block", width: "100%", textAlign: "left", marginTop: 12, padding: "6px 10px",
             border: "none", borderLeft: `3px solid ${theme.border}`, background: "transparent",
-            color: theme.textMid, fontSize: 12, lineHeight: 1.45, font: "inherit", cursor: "pointer",
+            fontFamily: "inherit", color: theme.textMid, fontSize: 12.5, lineHeight: 1.45, cursor: "pointer",
             whiteSpace: "pre-wrap",
             ...(showPost ? {} : {
               display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
@@ -448,7 +579,7 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
         value={text}
         onChange={(e) => { setText(e.target.value); setCopied(false); }}
         onBlur={save}
-        rows={11}
+        rows={Math.min(18, Math.max(8, text.split("\n").length + 2))}
         placeholder={drafting || busy?.startsWith("draft") ? "Writing the message…" : "No message yet."}
         aria-label={`Message to ${name}`}
         style={{

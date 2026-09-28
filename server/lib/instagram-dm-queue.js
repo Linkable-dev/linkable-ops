@@ -26,7 +26,28 @@ export const DM_COLUMNS = [
 // --- settings an admin chooses for the whole team ---------------------------
 
 export const SETTINGS = "prospector_settings";
-export const SETTING_DEFAULTS = { dm_include_non_shopify: false };
+export const SETTING_DEFAULTS = {
+  dm_include_non_shopify: false,
+  // ISO country codes the queue keeps; empty means every country. "UNKNOWN"
+  // stands for a brand with no country, which is most brands not on Shopify.
+  dm_countries: [],
+};
+
+export const UNKNOWN_COUNTRY = "UNKNOWN";
+
+// Why a value cannot be stored for a setting, or null when it can.
+export function settingProblem(key, value) {
+  if (!(key in SETTING_DEFAULTS)) return `unknown setting: ${key}`;
+  if (key === "dm_countries") {
+    if (!Array.isArray(value)) return "dm_countries must be a list of country codes";
+    const bad = value.filter((c) => typeof c !== "string" || !(/^[A-Z]{2}$/.test(c) || c === UNKNOWN_COUNTRY));
+    return bad.length ? `not a country code: ${bad.join(", ")}` : null;
+  }
+  if (typeof value !== typeof SETTING_DEFAULTS[key]) {
+    return `${key} must be a ${typeof SETTING_DEFAULTS[key]}`;
+  }
+  return null;
+}
 
 export async function readSettings() {
   const { data, error } = await supabase.from(SETTINGS).select("key,value");
@@ -40,21 +61,37 @@ export async function readSettings() {
   return out;
 }
 
+export function optionsFrom(settings) {
+  return {
+    nonShopify: settings.dm_include_non_shopify === true,
+    countries: Array.isArray(settings.dm_countries) ? settings.dm_countries : [],
+  };
+}
+
 export async function queueOptions() {
-  return { nonShopify: (await readSettings()).dm_include_non_shopify === true };
+  return optionsFrom(await readSettings());
 }
 
 // Waiting to be written to on Instagram. The same predicate the counts use, so
 // a count and the list it describes cannot disagree. Brands not on Shopify have
 // no tier; they are in the queue only when an admin has said so.
-export const dmOpen = (qy, { nonShopify }) => {
-  const open = qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null).neq("decision", "hide");
-  return nonShopify ? open.or("tier.not.is.null,status.eq.not_shopify") : open.not("tier", "is", null);
+export const dmOpen = (qy, { nonShopify, countries = [] }) => {
+  let open = qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null).neq("decision", "hide");
+  open = nonShopify ? open.or("tier.not.is.null,status.eq.not_shopify") : open.not("tier", "is", null);
+  if (!countries.length) return open;
+  // Codes are validated on the way in (settingProblem), so they are safe to
+  // put in the filter string.
+  const codes = countries.filter((c) => c !== UNKNOWN_COUNTRY);
+  if (!countries.includes(UNKNOWN_COUNTRY)) return open.in("country", codes.length ? codes : ["--"]);
+  return codes.length ? open.or(`country.in.(${codes.join(",")}),country.is.null`) : open.is("country", null);
 };
 
-export const isDmOpen = (r, { nonShopify }) => ["none", "drafted"].includes(r.dm_state || "none")
+export const countryOf = (r) => (r.country ? String(r.country).toUpperCase() : UNKNOWN_COUNTRY);
+
+export const isDmOpen = (r, { nonShopify, countries = [] }) => ["none", "drafted"].includes(r.dm_state || "none")
   && !r.pushed_at && r.decision !== "hide"
-  && (r.tier || (nonShopify && r.status === "not_shopify"));
+  && Boolean(r.tier || (nonShopify && r.status === "not_shopify"))
+  && (!countries.length || countries.includes(countryOf(r)));
 
 // Brands that asked for creators in public first: they have already said the
 // thing the message answers. Then the pipeline's own ranking.
