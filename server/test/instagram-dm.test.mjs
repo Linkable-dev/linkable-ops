@@ -120,3 +120,10 @@ test("the brand's vertical reaches the prompt, so the right niche count is quote
   assert.match(facts, /Their vertical: Beauty & skincare/);
   assert.doesNotMatch(factSheet({ ...lead, vertical: "NOT_REAL" }, { language: "en" }), /Their vertical/);
 });
+
+test("a creator call from months ago is left out of the facts", () => {
+  const old = { ...lead, intent_posted_at: new Date(Date.now() - 400 * 86_400_000).toISOString() };
+  assert.doesNotMatch(factSheet(old, { language: "en" }), /looking for UGC creators/);
+  const fresh = { ...lead, intent_posted_at: new Date(Date.now() - 3 * 86_400_000).toISOString() };
+  assert.match(factSheet(fresh, { language: "en" }), /looking for UGC creators/);
+});

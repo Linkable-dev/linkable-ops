@@ -172,7 +172,13 @@ export function factSheet(lead, { language, pool } = {}) {
     lines.push(`Their store${clean(lead.domain) ? ` (${lead.domain})` : ""} is NOT on Shopify. Do not mention Shopify, and do not claim Linkable connects to their store, syncs their catalogue or tracks their sales.`);
   }
 
-  if (lead.intent_signal === "open_call" && clean(lead.intent_caption)) {
+  // A call from months ago is not "your post" any more - keyword search finds
+  // them years old - so an old one is left out and the DM opens without it.
+  const callAgeDays = lead.intent_posted_at
+    ? (Date.now() - new Date(lead.intent_posted_at).getTime()) / 86_400_000 : 0;
+  if (lead.intent_signal === "open_call" && callAgeDays > 90) {
+    // Nothing: as if we had not seen it.
+  } else if (lead.intent_signal === "open_call" && clean(lead.intent_caption)) {
     lines.push("");
     lines.push("They recently posted asking for creators. Their caption:");
     lines.push(`"${clean(lead.intent_caption).slice(0, 900)}"`);

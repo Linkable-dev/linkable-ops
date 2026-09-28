@@ -30,6 +30,12 @@ const VIEWS = [
   { value: "results", label: "Results", count: "converted", suffix: " signed up" },
 ];
 
+// Keyword search surfaces calls from years ago. Past this they are shown as
+// old: the brand almost certainly filled it (the prospector drops their
+// priority at the same age, OLD_CALL_DAYS in ops_sync.py).
+const oldCall = (lead) => Boolean(lead.intent_posted_at)
+  && (Date.now() - new Date(lead.intent_posted_at).getTime()) / 86_400_000 > 90;
+
 // Instagram throttles an account that opens too many new conversations in a
 // day; well before that, a burst of identical-looking DMs reads as spam.
 const DAILY_SOFT_CAP = 40;
@@ -663,7 +669,9 @@ function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
                 </span>
               </span>
               <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                {lead.intent_signal === "open_call" && <Tag tone="success" title="Posted asking for creators">Call</Tag>}
+                {lead.intent_signal === "open_call" && (oldCall(lead)
+                  ? <Tag title="Asked for creators over 90 days ago; probably filled">Old call</Tag>
+                  : <Tag tone="success" title="Posted asking for creators">Call</Tag>)}
                 {lead.status === "not_shopify" && <Tag tone="warning" title="Store is not on Shopify">No Shopify</Tag>}
                 {lead.email_queued && <Tag tone="warning" title="Goes to the email sequence on the next run">Email</Tag>}
               </span>
@@ -758,7 +766,9 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky, follow
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {lead.vertical_effective && <Tag>{verticalShort(lead.vertical_effective)}</Tag>}
-          {lead.intent_signal === "open_call" && <Tag tone="success">Asked for creators</Tag>}
+          {lead.intent_signal === "open_call" && (oldCall(lead)
+            ? <Tag>Asked for creators {ago(lead.intent_posted_at)}</Tag>
+            : <Tag tone="success">Asked for creators</Tag>)}
           {lead.status === "not_shopify" && <Tag tone="warning">Not on Shopify</Tag>}
           {lead.tier && <Tag>Tier {lead.tier}</Tag>}
           <Btn size="sm" variant="secondary"
