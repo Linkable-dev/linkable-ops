@@ -103,7 +103,7 @@ export default function InstagramDmPage() {
   const undrafted = view === "todo" && leads.some((l) => !l.dm_text);
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16, maxWidth: 980 }}>
+    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
         <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Instagram DMs</h1>
         <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 720 }}>
