@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 
 import { validSignature, messagesIn, webhookSecrets } from "../routes/instagram-webhook.js";
 import { matchSignup, bareDomain } from "../lib/dm-conversions.js";
+import { fingerprint, pickToken, refreshDue, tokenProblem } from "../lib/instagram-graph.js";
 import { VARIANTS, pickVariant } from "../lib/instagram-dm-writer.js";
 
 test("a webhook body is accepted only with the app secret's signature", () => {
@@ -72,4 +73,30 @@ test("the dashboard's Test payload is read like a live message", () => {
   assert.equal(m.igsid, "12334");
   assert.equal(m.direction, "in");
   assert.equal(m.text, "random_text");
+});
+
+test("the stored token counts only while it grew from the token in Vercel", () => {
+  const stored = { token: "renewed", from: fingerprint("env-a") };
+  assert.equal(pickToken(stored, "env-a"), "renewed");
+  assert.equal(pickToken(stored, "env-b"), "env-b", "a newly pasted token wins");
+  assert.equal(pickToken(null, "env-a"), "env-a");
+  assert.equal(pickToken({ from: fingerprint("env-a"), error: "x" }, "env-a"), "env-a", "a failed first renewal has no token");
+});
+
+test("the token is renewed weekly, and at once for a new Vercel token", () => {
+  const now = Date.parse("2026-10-10T09:30:00Z");
+  const base = { token: "t", from: fingerprint("env") };
+  assert.equal(refreshDue(null, "env", now), true);
+  assert.equal(refreshDue({ ...base, refreshed_at: "2026-10-06T09:30:00Z" }, "env", now), false);
+  assert.equal(refreshDue({ ...base, refreshed_at: "2026-10-02T09:30:00Z" }, "env", now), true);
+  assert.equal(refreshDue({ ...base, refreshed_at: "2026-10-09T09:30:00Z" }, "other", now), true);
+});
+
+test("the brief speaks up only when the token needs a person", () => {
+  const now = Date.parse("2026-10-10T09:30:00Z");
+  assert.equal(tokenProblem(null, now), null);
+  assert.equal(tokenProblem({ expires_at: "2026-11-30T00:00:00Z" }, now), null);
+  assert.match(tokenProblem({ expires_at: "2026-10-15T00:00:00Z" }, now), /expires in 4 days/);
+  assert.equal(tokenProblem({ error: "too young", failing_since: "2026-10-09T09:30:00Z" }, now), null, "one failed morning is not news");
+  assert.match(tokenProblem({ error: "bad", failing_since: "2026-10-05T09:30:00Z" }, now), /cannot be renewed \(bad\)/);
 });

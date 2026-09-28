@@ -29,7 +29,12 @@ written to us. That part stays by hand, whatever is configured here.
 4. Permissions: `instagram_business_basic`,
    `instagram_business_manage_messages`.
 5. In the app's Instagram settings, generate an access token for the account
-   (long-lived, 60 days; refresh it before it expires).
+   and put it in `IG_ACCESS_TOKEN`. It lives 60 days; the weekday
+   `/api/cron/instagram-drafts` exchanges it for a fresh one every week and
+   keeps that in `prospector_settings` (key `instagram_token`), so it never
+   has to be pasted again. The morning brief says so if renewals fail for
+   three days or fewer than ten days remain; pasting a new token into Vercel
+   then takes over at once.
 6. Webhooks → Instagram → callback URL
    `https://<ops domain>/api/instagram/webhook`, verify token = the value of
    `META_VERIFY_TOKEN` below, and subscribe to the **messages** field.

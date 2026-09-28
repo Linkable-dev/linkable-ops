@@ -14,6 +14,7 @@ import { sendNudgeEmail } from "./nudge-mailer.js";
 import { supabase } from "./supabase.js";
 import { refreshConversions } from "./dm-conversions.js";
 import { isFollowupDue } from "./instagram-dm-queue.js";
+import { instagramConfigured, readStoredToken, tokenProblem } from "./instagram-graph.js";
 
 const plural = (n, w) => `${n} ${w}${Number(n) === 1 ? "" : "s"}`;
 
@@ -95,6 +96,7 @@ export async function instagramBrief() {
       .select("dm_state,dm_sent_at,dm_replied_at,dm_followup_sent_at,converted_at,dm_text,tier,status,is_agency,pushed_at,decision"),
     supabase.from("prospector_feed_status").select("*").eq("id", 1).maybeSingle(),
   ]);
+  const token = instagramConfigured() ? tokenProblem(await readStoredToken()) : null;
   const list = rows || [];
   const recent = (v) => v && v >= since;
   const lastRead = feed?.last_scraped_at ? new Date(feed.last_scraped_at) : null;
@@ -106,6 +108,7 @@ export async function instagramBrief() {
     ready: list.filter((r) => ["none", "drafted"].includes(r.dm_state || "none") && r.dm_text
       && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true && r.tier).length,
     loginProblem: feed?.last_error || null,
+    tokenProblem: token,
     // The worker reads once a weekday; two days without a read is a problem
     // even when nothing has said so.
     readStale: lastRead ? Date.now() - lastRead.getTime() > 3 * 24 * 3600 * 1000 : false,
@@ -170,6 +173,10 @@ export function renderBrief(b, { date = new Date() } = {}) {
     if (ig.loginProblem || ig.readStale) {
       lines.push(`Instagram search is not running: ${ig.loginProblem || "no read for 3 days"}.`);
       lines.push("  Fix: run `uv run prospector feed-login` in linkable-prospector on the Mac.");
+    }
+    if (ig.tokenProblem) {
+      lines.push(`Instagram replies will stop: ${ig.tokenProblem}.`);
+      lines.push("  Fix: Meta app → Instagram API setup → Generate token, then set IG_ACCESS_TOKEN on Vercel.");
     }
     const bits = [];
     if (ig.sent) bits.push(`${plural(ig.sent, "DM")} sent`);
