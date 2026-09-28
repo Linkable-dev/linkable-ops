@@ -85,7 +85,7 @@ export function instagramWebhookRoutes() {
 
   // Meta's subscription handshake.
   router.get("/webhook", (req, res) => {
-    const expected = process.env.META_VERIFY_TOKEN;
+    const expected = (process.env.META_VERIFY_TOKEN || "").trim();
     if (expected && req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === expected) {
       return res.status(200).send(String(req.query["hub.challenge"] || ""));
     }
@@ -93,7 +93,7 @@ export function instagramWebhookRoutes() {
   });
 
   router.post("/webhook", async (req, res) => {
-    if (!validSignature(req.rawBody, req.headers["x-hub-signature-256"], process.env.META_APP_SECRET)) {
+    if (!validSignature(req.rawBody, req.headers["x-hub-signature-256"], (process.env.META_APP_SECRET || "").trim())) {
       return res.status(401).json({ error: "bad signature" });
     }
     const results = [];

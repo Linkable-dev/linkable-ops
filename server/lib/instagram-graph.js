@@ -8,7 +8,7 @@
 // the page hides the buttons that need it. Setup: docs/instagram-replies.md.
 
 const version = () => process.env.IG_GRAPH_VERSION || "v21.0";
-const token = () => process.env.IG_ACCESS_TOKEN || "";
+const token = () => (process.env.IG_ACCESS_TOKEN || "").trim();
 
 export const instagramConfigured = () => Boolean(token());
 
