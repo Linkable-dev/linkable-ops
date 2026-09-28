@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  brandNameFor, factSheet, finishDraft, languageFor, signature, CREATOR_CLAIM, MAX_DM_CHARS,
+  brandNameFor, factSheet, finishDraft, languageFor, signature, withGreetingGap, CREATOR_CLAIM, MAX_DM_CHARS,
 } from "../lib/instagram-dm-writer.js";
 import { isDmOpen } from "../lib/instagram-dm-queue.js";
 
@@ -125,4 +125,15 @@ test("the DM queue drops a brand whose creator call is over two weeks old", () =
   assert.equal(isDmOpen({ ...open, intent_posted_at: daysAgo(20) }, opts), false);
   // Found another way, with no dated call: still in the queue.
   assert.equal(isDmOpen({ ...open, intent_posted_at: null }, opts), true);
+});
+
+test("the greeting gets a blank line under it, once", () => {
+  const body = "Hey Boutique England!\nJust came across your post looking for new content creators.\nWe have 10,000+ creators.";
+  assert.equal(withGreetingGap(body),
+    "Hey Boutique England!\n\nJust came across your post looking for new content creators.\nWe have 10,000+ creators.");
+  // Already spaced, or spaced too much: exactly one blank line.
+  assert.equal(withGreetingGap("Hey X!\n\nBody."), "Hey X!\n\nBody.");
+  assert.equal(withGreetingGap("Hey X!\n\n\nBody."), "Hey X!\n\nBody.");
+  // Nothing after the greeting: left alone.
+  assert.equal(withGreetingGap("Hey X!"), "Hey X!");
 });

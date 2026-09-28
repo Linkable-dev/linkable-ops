@@ -81,6 +81,7 @@ His template, which is the house style:
 
 ---
 Hey DDG!
+
 Just came across your post looking for new brand ambassadors.
 We have ${CREATOR_CLAIM} creators on Linkable who can apply to collaborate with DDG, create content around your products and introduce the brand to their audiences.
 
@@ -91,8 +92,9 @@ Would you be open to giving it a try?
 
 The shape, every time:
 1. "Hey {brand}!" with the brand's name as the brand itself writes it (keep
-   their casing, drop taglines after | or -). When there is no post to
-   mention, add "Quick question." after the greeting.
+   their casing, drop taglines after | or -), alone on the first line, then a
+   blank line. When there is no post to mention, add "Quick question." after
+   the greeting.
 2. When the facts include a post where they asked for creators, ambassadors or
    UGC: "Just came across your post looking for ..." naming what the post
    actually asked for, in a few words (new brand ambassadors, UGC creators,
@@ -225,6 +227,18 @@ export function finishDraft(raw, lead) {
   return { message, problems, styleIssues: findStyleIssues(message) };
 }
 
+// The greeting stands on its own line with a blank line under it, as in
+// Federico's template. Enforced here rather than trusted to the model, which
+// ran the greeting straight into the next line (Boutique England, 28 Sep
+// 2026). Follow-ups are three short lines and keep their shape.
+export function withGreetingGap(message) {
+  const text = String(message || "").trim();
+  const i = text.indexOf("\n");
+  if (i < 0) return text;
+  const rest = text.slice(i + 1).replace(/^\s*\n/, "").replace(/^\n+/, "");
+  return rest ? `${text.slice(0, i).trimEnd()}\n\n${rest}` : text.slice(0, i).trimEnd();
+}
+
 // Every first message is Federico's template (variant "A"). Variant B, the
 // same claims in three lines, was switched off on 28 Sep 2026 at his request;
 // sent rows still carry "B" so the Results tab can compare the two.
@@ -281,7 +295,7 @@ export async function draftInstagramDm(lead, { language, followUp = false } = {}
   }
   return {
     // A follow-up is a reply in the same conversation: no second signature.
-    message: followUp ? last.message : `${last.message}\n\n${signature()}`,
+    message: followUp ? last.message : `${withGreetingGap(last.message)}\n\n${signature()}`,
     variant: followUp ? null : DM_VARIANT,
     language: lang,
     model: DM_MODEL,
