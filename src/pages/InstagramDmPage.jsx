@@ -32,10 +32,10 @@ const VIEWS = [
 ];
 
 // Keyword search surfaces calls from years ago. Past this they are shown as
-// old: the brand almost certainly filled it (the prospector drops their
-// priority at the same age, OLD_CALL_DAYS in ops_sync.py).
+// old: the brand has usually filled it (the queue drops them at the same age,
+// FRESH_CALL_DAYS in instagram-dm-writer.js and OLD_CALL_DAYS in ops_sync.py).
 const oldCall = (lead) => Boolean(lead.intent_posted_at)
-  && (Date.now() - new Date(lead.intent_posted_at).getTime()) / 86_400_000 > 90;
+  && (Date.now() - new Date(lead.intent_posted_at).getTime()) / 86_400_000 > 14;
 
 // Instagram throttles an account that opens too many new conversations in a
 // day; well before that, a burst of identical-looking DMs reads as spam.

@@ -950,7 +950,7 @@ export function prospectingRoutes() {
       DM_VIEWS[view](filterVerticals(supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), verticals), opts)
         .range(offset, offset + limit - 1),
       supabase.from(TABLE).select("tier,status,country,vertical,vertical_ai,vertical_effective,is_agency,decision,"
-        + "pushed_at,dm_state,dm_text,dm_sent_at,dm_followup_sent_at,converted_at"),
+        + "pushed_at,dm_state,dm_text,dm_sent_at,dm_followup_sent_at,converted_at,intent_posted_at"),
       supabase.from("prospector_feed_status").select("*").eq("id", 1).maybeSingle(),
     ]);
     if (list.error) return dmError(res, list.error, "listing the Instagram queue");

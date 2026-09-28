@@ -8,8 +8,9 @@
 // a lead marked sent is read back by the pipeline and never emailed.
 
 import { supabase } from "./supabase.js";
-import { draftInstagramDm, languageFor, pickVariant } from "./instagram-dm-writer.js";
-import { creatorPool } from "./creator-pool.js";
+import {
+  draftInstagramDm, languageFor, pickVariant, staleCall, FRESH_CALL_DAYS,
+} from "./instagram-dm-writer.js";
 
 export const TABLE = "prospector_leads";
 
@@ -96,8 +97,12 @@ export async function queueOptions() {
 // no tier; they are in the queue only when an admin has said so.
 export const dmOpen = (qy, { nonShopify, countries = [] }) => {
   // An agency or a platform posting other brands' calls is not a brand to pitch.
+  // A brand whose creator call is weeks old has filled it; one with no dated
+  // call (found another way) stays.
+  const fresh = new Date(Date.now() - FRESH_CALL_DAYS * 86_400_000).toISOString();
   let open = qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null).neq("decision", "hide")
-    .not("is_agency", "is", true);
+    .not("is_agency", "is", true)
+    .or(`intent_posted_at.is.null,intent_posted_at.gte."${fresh}"`);
   open = nonShopify ? open.or("tier.not.is.null,status.eq.not_shopify") : open.not("tier", "is", null);
   if (!countries.length) return open;
   // Codes are validated on the way in (settingProblem), so they are safe to
@@ -122,7 +127,7 @@ export function filterVerticals(qy, verticals) {
 export const countryOf = (r) => (r.country ? String(r.country).toUpperCase() : UNKNOWN_COUNTRY);
 
 export const isDmOpen = (r, { nonShopify, countries = [] }) => ["none", "drafted"].includes(r.dm_state || "none")
-  && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true
+  && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true && !staleCall(r)
   && Boolean(r.tier || (nonShopify && r.status === "not_shopify"))
   && (!countries.length || countries.includes(countryOf(r)));
 
@@ -175,8 +180,6 @@ export async function draftBatch({ handles = [], language, limit = DRAFT_BATCH, 
   if (error) throw error;
   if (!leads?.length) return { drafted: [], failed: [], costUsd: 0 };
 
-  // Counted once per batch: the number every DM in it quotes.
-  const pool = await creatorPool();
   const drafted = [];
   const failed = [];
   let costUsd = 0;
@@ -189,7 +192,7 @@ export async function draftBatch({ handles = [], language, limit = DRAFT_BATCH, 
         // A redraft keeps its variant, so a rewrite cannot move a brand between
         // the two sides of the comparison.
         const variant = lead.dm_variant || pickVariant();
-        const out = await draftInstagramDm(lead, { language, pool, variant, followUp });
+        const out = await draftInstagramDm(lead, { language, variant, followUp });
         costUsd += out.costUsd;
         const update = followUp
           ? { dm_followup_text: out.message }

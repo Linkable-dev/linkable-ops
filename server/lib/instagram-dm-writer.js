@@ -8,9 +8,10 @@
 // side writing first, so a cold DM is sent by a person or not at all.
 //
 // The draft is built ONLY from the lead row - what the pipeline observed - and
-// the live creator count (creator-pool.js). The shape is Federico's own DMs;
-// the only claims about Linkable are the ones in that shape. Nothing the
-// browser sends reaches the prompt except the choice of language.
+// the one creator number Federico chose to quote (CREATOR_CLAIM). The shape is
+// Federico's own DMs; the only claims about Linkable are the ones in that
+// shape. Nothing the browser sends reaches the prompt except the choice of
+// language.
 
 import { claudeMessage, cachedSystem } from "./anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
@@ -65,37 +66,23 @@ const DRAFT_TOOL = {
   },
 };
 
-// The house style is Federico's own DMs, the ones he sent by hand. Their
-// numbers are replaced with [N] here: the examples teach the shape, and the
-// number comes from the live creator count in the facts, never from a sample.
+// The creator number every DM quotes, whatever the brand's category. Federico's
+// call (28 Sep 2026): one figure for all niches, set here and never by the model.
+export const CREATOR_CLAIM = "10,000+";
+
+// The house style is Federico's own template. It says "introduce the brand to
+// their audiences", not "promote them on a commission basis": the pitch is not
+// only affiliate.
 const SYSTEM = `You write the first Instagram DM from Linkable to an ecommerce brand
 that has never heard of us. It is sent by Federico, Linkable's founder, from his
 own account, and it must read like the ones he writes by hand.
 
-His DMs, which are the house style (numbers replaced with [N]):
+His template, which is the house style:
 
 ---
-Hey Izzy Rose Skin! Quick question.
-
-We already have [N]+ skincare, beauty and wellness creators interested in creating content around clean skincare brands like Izzy Rose Skin and promoting their products on a commission basis.
-
-Brands typically start receiving creator applications within 24 hours.
-
-Would you be open to giving it a try?
----
-Hey ddg!
-
+Hey DDG!
 Just came across your post looking for new brand ambassadors.
-
-We have [N]+ beauty and skincare creators on Linkable who can apply to collaborate with ddg, create content around your products and promote them to their audiences. Brands typically start receiving creator applications within 24 hours.
-
-Would you be open to giving it a try?
----
-Hey Still Skin!
-
-Quick question.
-
-We already have [N]+ beauty, skincare and lifestyle creators interested in creating content around Still Skin and promoting your products on a commission basis.
+We have ${CREATOR_CLAIM} creators on Linkable who can apply to collaborate with DDG, create content around your products and introduce the brand to their audiences.
 
 Brands typically start receiving creator applications within 24 hours.
 
@@ -104,35 +91,45 @@ Would you be open to giving it a try?
 
 The shape, every time:
 1. "Hey {brand}!" with the brand's name as the brand itself writes it (keep
-   their casing, drop taglines after | or -). Then "Quick question." when
-   there is no post to mention.
+   their casing, drop taglines after | or -). When there is no post to
+   mention, add "Quick question." after the greeting.
 2. When the facts include a post where they asked for creators, ambassadors or
    UGC: "Just came across your post looking for ..." naming what the post
-   actually asked for, in a few words. Never claim a post the facts do not give.
-3. The creator line: we have [N]+ {niche} creators on Linkable who can apply to
-   collaborate with {brand}, create content around their products and promote
-   them on a commission basis. [N] and the niche words come ONLY from the
-   "Creators on Linkable" facts, copied exactly. Pick the niche line that fits
-   this brand; if none fits, use the all-niches number and just say
-   "creators". If the facts give no number, write the sentence without one.
-4. "Brands typically start receiving creator applications within 24 hours."
-5. "Would you be open to giving it a try?"
+   actually asked for, in a few words (new brand ambassadors, UGC creators,
+   influencers...). Never claim a post the facts do not give.
+3. The creator line, word for word apart from the brand name: "We have
+   ${CREATOR_CLAIM} creators on Linkable who can apply to collaborate with
+   {brand}, create content around your products and introduce the brand to
+   their audiences." Always ${CREATOR_CLAIM}, never another number, and no
+   niche words: the same line for every category. Never say "commission" or
+   "affiliate".
+4. A blank line, then "Brands typically start receiving creator applications
+   within 24 hours."
+5. A blank line, then "Would you be open to giving it a try?"
 
 Rules:
 - Body under ${TARGET_DM_CHARS} characters. Do NOT sign it: the signature is
   added after you.
 - No other claims about Linkable: no prices, no free trial, no "free to get
-  started", no features, no numbers except the one from the facts.
+  started", no features, no numbers except ${CREATOR_CLAIM}.
 - You cannot see their posts, photos or videos. Never compliment their content.
 - Never write a URL, an email address or a phone number, and never mention a
   handle.
 - No markdown, no hashtags, no em dashes. The only exclamation mark is the one
   after the greeting.
 - Write in the language you are told to use. In Italian keep the same shape in
-  natural Italian ("Ciao {brand}!", "voi" for the brand), not a word-for-word
-  translation.
+  natural Italian ("Ciao {brand}!", "voi" for the brand, "10.000+"), not a
+  word-for-word translation.
 
 Call draft_dm with the finished body.`;
+
+// A creator call older than this has usually been filled: the DM queue drops
+// the brand and the DM does not mention the post. Mirrors OLD_CALL_DAYS in
+// linkable-prospector's ops_sync.py.
+export const FRESH_CALL_DAYS = 14;
+
+export const staleCall = (lead) => Boolean(lead?.intent_posted_at)
+  && (Date.now() - new Date(lead.intent_posted_at).getTime()) / 86_400_000 > FRESH_CALL_DAYS;
 
 const clean = (value) => {
   const text = String(value ?? "").trim();
@@ -154,14 +151,12 @@ function creatorHandles(lead) {
 }
 
 // Every line is something the operator could have read off the lead.
-export function factSheet(lead, { language, pool } = {}) {
+export function factSheet(lead, { language } = {}) {
   const lines = [];
   lines.push(`Brand: ${brandNameFor(lead)} (@${lead.handle} on Instagram)`);
   // How the brand names itself on Instagram, which is what the greeting uses.
   if (clean(lead.ig_full_name)) lines.push(`Their Instagram display name: ${clean(lead.ig_full_name)}`);
-  if (VERTICALS[lead.vertical]) {
-    lines.push(`Their vertical: ${VERTICALS[lead.vertical]} (pick the creator niche line that matches it)`);
-  }
+  if (VERTICALS[lead.vertical]) lines.push(`Their vertical: ${VERTICALS[lead.vertical]}`);
   if (clean(lead.country)) lines.push(`Country of the store: ${lead.country}`);
   if (clean(lead.ig_category)) lines.push(`Instagram category: ${lead.ig_category}`);
   if (clean(lead.ig_biography)) lines.push(`Their Instagram bio: "${clean(lead.ig_biography).slice(0, 400)}"`);
@@ -172,11 +167,9 @@ export function factSheet(lead, { language, pool } = {}) {
     lines.push(`Their store${clean(lead.domain) ? ` (${lead.domain})` : ""} is NOT on Shopify. Do not mention Shopify, and do not claim Linkable connects to their store, syncs their catalogue or tracks their sales.`);
   }
 
-  // A call from months ago is not "your post" any more - keyword search finds
+  // A call from weeks ago is not "your post" any more - keyword search finds
   // them years old - so an old one is left out and the DM opens without it.
-  const callAgeDays = lead.intent_posted_at
-    ? (Date.now() - new Date(lead.intent_posted_at).getTime()) / 86_400_000 : 0;
-  if (lead.intent_signal === "open_call" && callAgeDays > 90) {
+  if (lead.intent_signal === "open_call" && staleCall(lead)) {
     // Nothing: as if we had not seen it.
   } else if (lead.intent_signal === "open_call" && clean(lead.intent_caption)) {
     lines.push("");
@@ -185,17 +178,6 @@ export function factSheet(lead, { language, pool } = {}) {
   } else if (lead.intent_signal === "open_call") {
     lines.push("");
     lines.push("They recently posted asking for creators (the caption was not captured).");
-  }
-
-  lines.push("");
-  if (pool?.total) {
-    lines.push("Creators on Linkable (the ONLY numbers you may use, exactly as written):");
-    lines.push(`- all niches: ${pool.total.toLocaleString("en-GB")}+`);
-    for (const niche of pool.niches || []) {
-      lines.push(`- ${niche.label}: ${niche.count.toLocaleString("en-GB")}+`);
-    }
-  } else {
-    lines.push("Creators on Linkable: no count available. Do not state any number of creators.");
   }
 
   lines.push("");
@@ -224,6 +206,14 @@ export function finishDraft(raw, lead) {
   const links = message.match(URL_RE);
   if (links) problems.push(`wrote a link: ${links.join(", ")}`);
   if (message.length > MAX_DM_CHARS) problems.push(`too long (${message.length} characters)`);
+  // The pitch is not only affiliate, and the one creator number is ours.
+  const affiliate = message.match(/\b(commission\w*|affiliat\w*|provvigion\w*|commission[ei])\b/gi);
+  if (affiliate) problems.push(`pitched it as affiliate: ${affiliate.join(", ")}`);
+  // A number in their own name or post ("Studio 54", "5 UGC creators") is theirs.
+  const theirs = `${brandNameFor(lead)} ${lead.ig_full_name || ""} ${lead.handle} ${lead.intent_caption || ""}`;
+  const numbers = (message.match(/\d[\d.,]*\+?/g) || [])
+    .filter((n) => !/^10[.,]000\+?$/.test(n) && n !== "24" && !theirs.includes(n.replace(/[.,+]+$/, "")));
+  if (numbers.length) problems.push(`quoted a number other than ${CREATOR_CLAIM}: ${numbers.join(", ")}`);
 
   const allowed = new Set([String(lead.handle).toLowerCase(), ...creatorHandles(lead)]);
   const mentioned = [...message.matchAll(/@([A-Za-z0-9._]+)/g)].map((m) => m[1].replace(/\.$/, "").toLowerCase());
@@ -259,9 +249,9 @@ const FOLLOWUP_INSTRUCTION = [
 ].join(" ");
 
 // → { message, language, model, costUsd, styleIssues, variant }
-export async function draftInstagramDm(lead, { language, pool, variant = "A", followUp = false } = {}) {
+export async function draftInstagramDm(lead, { language, variant = "A", followUp = false } = {}) {
   const lang = LANGUAGES[language] ? language : languageFor(lead);
-  const facts = factSheet(lead, { language: lang, pool });
+  const facts = factSheet(lead, { language: lang });
   const extra = followUp
     ? `${FOLLOWUP_INSTRUCTION}\n\nThe first message:\n"""${String(lead.dm_text || "").trim()}"""`
     : VARIANTS[variant] || "";
