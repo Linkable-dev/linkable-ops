@@ -26,6 +26,16 @@ export function validSignature(rawBody, header, secret) {
     && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
 }
 
+// An app set up for Instagram Login has two secrets on the Meta dashboard -
+// the app's own (App settings -> Basic) and the Instagram app secret - and
+// Meta's docs do not say plainly which one signs these webhooks. Either set
+// is trusted.
+export function webhookSecrets(env = process.env) {
+  return [env.META_APP_SECRET, env.IG_APP_SECRET]
+    .map((s) => (s || "").trim())
+    .filter(Boolean);
+}
+
 // The events in a webhook body, flattened: { igsid, direction, mid, text, at }.
 export function messagesIn(body) {
   const out = [];
@@ -93,7 +103,12 @@ export function instagramWebhookRoutes() {
   });
 
   router.post("/webhook", async (req, res) => {
-    if (!validSignature(req.rawBody, req.headers["x-hub-signature-256"], (process.env.META_APP_SECRET || "").trim())) {
+    const header = req.headers["x-hub-signature-256"];
+    const secrets = webhookSecrets();
+    if (!secrets.some((secret) => validSignature(req.rawBody, header, secret))) {
+      console.warn("[instagram-webhook] signature refused", {
+        secrets: secrets.length, signed: Boolean(header), body: req.rawBody?.length || 0,
+      });
       return res.status(401).json({ error: "bad signature" });
     }
     const results = [];

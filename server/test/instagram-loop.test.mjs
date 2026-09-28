@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { validSignature, messagesIn } from "../routes/instagram-webhook.js";
+import { validSignature, messagesIn, webhookSecrets } from "../routes/instagram-webhook.js";
 import { matchSignup, bareDomain } from "../lib/dm-conversions.js";
 import { VARIANTS, pickVariant } from "../lib/instagram-dm-writer.js";
 
@@ -56,4 +56,10 @@ test("first messages are split between two variants; A is Federico's format unch
   assert.match(VARIANTS.B, /three short lines/);
   const seen = new Set(Array.from({ length: 200 }, pickVariant));
   assert.deepEqual([...seen].sort(), ["A", "B"]);
+});
+
+test("both Meta secrets are trusted, blanks are not", () => {
+  assert.deepEqual(webhookSecrets({ META_APP_SECRET: " a \n", IG_APP_SECRET: "b" }), ["a", "b"]);
+  assert.deepEqual(webhookSecrets({ IG_APP_SECRET: "b" }), ["b"]);
+  assert.deepEqual(webhookSecrets({ META_APP_SECRET: "  " }), []);
 });

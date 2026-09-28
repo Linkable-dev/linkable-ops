@@ -38,7 +38,8 @@ written to us. That part stays by hand, whatever is configured here.
 
 | Variable | What |
 |---|---|
-| `META_APP_SECRET` | App settings → Basic → App secret. Every webhook POST is checked against it; without it, every POST is refused. |
+| `META_APP_SECRET` | App settings → Basic → App secret. |
+| `IG_APP_SECRET` | The *Instagram app secret* on the Instagram API setup page. Every webhook POST must be signed with one of these two secrets (Meta does not say plainly which it uses); with neither set, every POST is refused and the refusal is logged as `[instagram-webhook] signature refused`. |
 | `META_VERIFY_TOKEN` | Any long random string; the same one typed into the webhook setup. |
 | `IG_ACCESS_TOKEN` | The account's access token from step 5. Used to look up who wrote and to send answers. |
 | `IG_GRAPH_VERSION` | Optional, default `v21.0`. |
