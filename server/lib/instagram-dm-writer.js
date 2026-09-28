@@ -14,6 +14,7 @@
 
 import { claudeMessage, cachedSystem } from "./anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
+import { VERTICALS } from "./verticals.js";
 
 export const DM_MODEL = "claude-sonnet-5";
 // Sonnet list price, $/million tokens. Mirrors PRICE in nudge-writer.js.
@@ -158,6 +159,9 @@ export function factSheet(lead, { language, pool } = {}) {
   lines.push(`Brand: ${brandNameFor(lead)} (@${lead.handle} on Instagram)`);
   // How the brand names itself on Instagram, which is what the greeting uses.
   if (clean(lead.ig_full_name)) lines.push(`Their Instagram display name: ${clean(lead.ig_full_name)}`);
+  if (VERTICALS[lead.vertical]) {
+    lines.push(`Their vertical: ${VERTICALS[lead.vertical]} (pick the creator niche line that matches it)`);
+  }
   if (clean(lead.country)) lines.push(`Country of the store: ${lead.country}`);
   if (clean(lead.ig_category)) lines.push(`Instagram category: ${lead.ig_category}`);
   if (clean(lead.ig_biography)) lines.push(`Their Instagram bio: "${clean(lead.ig_biography).slice(0, 400)}"`);

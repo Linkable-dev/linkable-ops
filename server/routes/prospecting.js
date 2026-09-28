@@ -20,6 +20,7 @@ import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-
 import { LANGUAGES, MAX_DM_CHARS } from "../lib/instagram-dm-writer.js";
 import {
   DM_COLUMNS, SETTINGS, readSettings, settingProblem, optionsFrom, countryOf, dmOpen, isDmOpen, todoOrder,
+  VERTICALS, NO_VERTICAL, verticalOf, filterVerticals,
   shapeDm, draftBatch, DRAFT_BATCH,
 } from "../lib/instagram-dm-queue.js";
 
@@ -930,11 +931,15 @@ export function prospectingRoutes() {
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const settings = await readSettings();
     const opts = optionsFrom(settings);
+    // Codes are checked against the known list before they reach a filter.
+    const verticals = String(req.query.verticals || "").split(",")
+      .map((v) => v.trim().toUpperCase())
+      .filter((v) => v in VERTICALS || v === NO_VERTICAL);
 
     const [list, all] = await Promise.all([
-      DM_VIEWS[view](supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), opts)
+      DM_VIEWS[view](filterVerticals(supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), verticals), opts)
         .range(offset, offset + limit - 1),
-      supabase.from(TABLE).select("tier,status,country,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
+      supabase.from(TABLE).select("tier,status,country,vertical,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
     ]);
     if (list.error) return dmError(res, list.error, "listing the Instagram queue");
     if (all.error) return dmError(res, all.error, "counting the Instagram queue");
@@ -962,6 +967,12 @@ export function prospectingRoutes() {
       countries: rows
         .filter((r) => isDmOpen(r, { nonShopify: opts.nonShopify }))
         .reduce((acc, r) => { acc[countryOf(r)] = (acc[countryOf(r)] || 0) + 1; return acc; }, {}),
+      // Per vertical, over the whole queue as the team settings define it, so
+      // the filter can say how many each choice leaves.
+      verticals: rows
+        .filter((r) => isDmOpen(r, opts))
+        .reduce((acc, r) => { acc[verticalOf(r)] = (acc[verticalOf(r)] || 0) + 1; return acc; }, {}),
+      verticalLabels: VERTICALS,
       maxChars: MAX_DM_CHARS,
     });
   });

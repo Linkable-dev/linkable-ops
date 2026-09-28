@@ -114,3 +114,9 @@ test("with no country, the language comes from what the brand wrote", () => {
   // A country, when there is one, wins over the words.
   assert.equal(languageFor({ country: "GB", intent_caption: "Cerchiamo creator per la nostra nuova collezione" }), "en");
 });
+
+test("the brand's vertical reaches the prompt, so the right niche count is quoted", () => {
+  const facts = factSheet({ ...lead, vertical: "BEAUTY_SKINCARE" }, { language: "en" });
+  assert.match(facts, /Their vertical: Beauty & skincare/);
+  assert.doesNotMatch(factSheet({ ...lead, vertical: "NOT_REAL" }, { language: "en" }), /Their vertical/);
+});

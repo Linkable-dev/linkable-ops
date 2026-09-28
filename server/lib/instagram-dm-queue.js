@@ -20,8 +20,12 @@ export const DM_COLUMNS = [
   "ig_full_name", "ig_biography", "ig_category", "ig_followers",
   "instagram_url", "pushed_at", "first_seen_at", "creator_activity_score",
   "dm_state", "dm_text", "dm_language", "dm_drafted_at", "dm_sent_at",
-  "dm_sent_by", "dm_replied_at",
+  "dm_sent_by", "dm_replied_at", "vertical",
 ].join(",");
+
+import { VERTICALS, NO_VERTICAL } from "./verticals.js";
+
+export { VERTICALS, NO_VERTICAL };
 
 // --- settings an admin chooses for the whole team ---------------------------
 
@@ -31,6 +35,9 @@ export const SETTING_DEFAULTS = {
   // ISO country codes the queue keeps; empty means every country. "UNKNOWN"
   // stands for a brand with no country, which is most brands not on Shopify.
   dm_countries: [],
+  // Which verticals the worker searches Instagram for each morning; empty
+  // means its generic searches. Read by linkable-prospector's worker.
+  search_verticals: [],
 };
 
 export const UNKNOWN_COUNTRY = "UNKNOWN";
@@ -42,6 +49,11 @@ export function settingProblem(key, value) {
     if (!Array.isArray(value)) return "dm_countries must be a list of country codes";
     const bad = value.filter((c) => typeof c !== "string" || !(/^[A-Z]{2}$/.test(c) || c === UNKNOWN_COUNTRY));
     return bad.length ? `not a country code: ${bad.join(", ")}` : null;
+  }
+  if (key === "search_verticals") {
+    if (!Array.isArray(value)) return "search_verticals must be a list of verticals";
+    const bad = value.filter((v) => !(v in VERTICALS));
+    return bad.length ? `not a vertical: ${bad.join(", ")}` : null;
   }
   if (typeof value !== typeof SETTING_DEFAULTS[key]) {
     return `${key} must be a ${typeof SETTING_DEFAULTS[key]}`;
@@ -85,6 +97,16 @@ export const dmOpen = (qy, { nonShopify, countries = [] }) => {
   if (!countries.includes(UNKNOWN_COUNTRY)) return open.in("country", codes.length ? codes : ["--"]);
   return codes.length ? open.or(`country.in.(${codes.join(",")}),country.is.null`) : open.is("country", null);
 };
+
+export const verticalOf = (r) => r.vertical || NO_VERTICAL;
+
+// One person's working filter, not a team setting: "today I am doing beauty".
+export function filterVerticals(qy, verticals) {
+  const codes = (verticals || []).filter((v) => v in VERTICALS);
+  if (!verticals?.length) return qy;
+  if (!verticals.includes(NO_VERTICAL)) return qy.in("vertical", codes.length ? codes : ["--"]);
+  return codes.length ? qy.or(`vertical.in.(${codes.join(",")}),vertical.is.null`) : qy.is("vertical", null);
+}
 
 export const countryOf = (r) => (r.country ? String(r.country).toUpperCase() : UNKNOWN_COUNTRY);
 

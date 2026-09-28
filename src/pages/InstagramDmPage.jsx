@@ -57,6 +57,14 @@ export default function InstagramDmPage() {
   const [selected, setSelected] = useState(null);
   const [drafting, setDrafting] = useState(null); // { done, failed } while writing
   const [savingSetting, setSavingSetting] = useState(false);
+  // One person's working filter ("today I'm doing beauty"), remembered in this
+  // browser. The team settings below decide what is in the queue at all.
+  const [verticals, setVerticals] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("ig-dm-verticals") || "[]"); } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("ig-dm-verticals", JSON.stringify(verticals)); } catch { /* private window */ }
+  }, [verticals]);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
 
@@ -69,17 +77,18 @@ export default function InstagramDmPage() {
     const request = ++requestRef.current;
     if (!quiet) setLoading(true);
     try {
-      const out = await api.getInstagramDms({ view, limit: 100 });
+      const out = await api.getInstagramDms({ view, limit: 100, verticals: verticals.join(",") });
       if (request !== requestRef.current) return;
       setData(out);
-      setMeta({ counts: out.counts, settings: out.settings, countries: out.countries || {} });
+      setMeta({ counts: out.counts, settings: out.settings, countries: out.countries || {},
+                verticals: out.verticals || {}, verticalLabels: out.verticalLabels || {} });
       setProblem(null);
     } catch (err) {
       if (request === requestRef.current) setProblem(err?.message || "could not load the queue");
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
-  }, [view]);
+  }, [view, verticals]);
 
   useEffect(() => { setSelected(null); setData(null); load(); }, [load]);
 
@@ -181,6 +190,8 @@ export default function InstagramDmPage() {
 
   const includeNonShopify = meta?.settings?.dm_include_non_shopify === true;
   const chosenCountries = meta?.settings?.dm_countries || [];
+  const verticalLabels = meta?.verticalLabels || {};
+  const verticalName = (code) => (code === "NONE" ? "Not classified" : verticalLabels[code] || code);
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -221,11 +232,35 @@ export default function InstagramDmPage() {
             Writing messages… {drafting.done} done{drafting.failed ? `, ${drafting.failed} failed` : ""}
           </span>
         )}
-        {meta && (
-          <CountryPicker theme={theme} available={meta.countries} chosen={chosenCountries}
-                         disabled={savingSetting} onChange={(codes) => saveSetting("dm_countries", codes)} />
+        {verticals.length > 0 && data && view === "todo" && (
+          <span style={{ fontSize: 12, color: theme.textMuted }}>{data.total} shown</span>
         )}
         {meta && (
+          <MultiPicker theme={theme} allLabel="All verticals" noun="verticals"
+                       title="Only show these verticals (just for you)"
+                       options={countedOptions(meta.verticals, verticals, verticalName)}
+                       chosen={verticals} onChange={setVerticals}
+                       short={(o) => o.label.split(" & ")[0]} />
+        )}
+      </div>
+
+      {meta && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                      paddingTop: 10, borderTop: `1px solid ${theme.border}` }}>
+          <span style={{ fontSize: 12, color: theme.textMuted }}>For the whole team:</span>
+          <MultiPicker theme={theme} allLabel="All countries" noun="countries"
+                       title="Which countries' brands are in the queue, for everyone"
+                       options={countedOptions(meta.countries, chosenCountries, countryName)}
+                       chosen={chosenCountries} disabled={savingSetting}
+                       onChange={(codes) => saveSetting("dm_countries", codes)}
+                       short={(o) => (o.code === "UNKNOWN" ? "Unknown" : o.code)} />
+          <MultiPicker theme={theme} allLabel="Generic Instagram searches" noun="verticals searched"
+                       title="Which verticals the morning Instagram searches look for"
+                       emptyMeansAll={false}
+                       options={Object.entries(verticalLabels).map(([code, label]) => ({ code, label }))}
+                       chosen={meta.settings?.search_verticals || []} disabled={savingSetting}
+                       onChange={(codes) => saveSetting("search_verticals", codes)}
+                       short={(o) => `Search ${o.label.split(" & ")[0].toLowerCase()}`} />
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
                           color: theme.textMid, cursor: savingSetting ? "wait" : "pointer" }}
                  title="Brands whose store is not on Shopify are never emailed. This decides whether they are offered here, for everyone.">
@@ -233,8 +268,8 @@ export default function InstagramDmPage() {
                    onChange={(e) => saveSetting("dm_include_non_shopify", e.target.checked)} style={{ margin: 0 }} />
             Include brands not on Shopify{counts.nonShopify ? ` (${counts.nonShopify})` : ""}
           </label>
-        )}
-      </div>
+        </div>
+      )}
 
       {notice && (
         <div style={{ fontSize: 13, color: notice.tone === "danger" ? theme.danger : theme.textMid }}>
@@ -314,16 +349,26 @@ function LoadingShape({ view, wide, theme }) {
   );
 }
 
+// Short vertical names for the list, where the code is all a row carries.
+const VERTICAL_SHORT = {
+  BEAUTY_SKINCARE: "Beauty", FASHION_ACCESSORIES: "Fashion", HEALTH_WELLNESS: "Wellness",
+  FITNESS_SPORTS: "Fitness", FOOD_BEVERAGE: "Food & drink", HOME_LIVING: "Home",
+  BABY_PARENTING: "Baby", PETS: "Pets", TRAVEL: "Travel", TECHNOLOGY: "Tech",
+};
+const verticalShort = (code) => VERTICAL_SHORT[code] || code;
+
 const COUNTRY_NAMES = (() => {
   try { return new Intl.DisplayNames(["en"], { type: "region" }); } catch { return null; }
 })();
 const countryName = (code) => (code === "UNKNOWN" ? "Unknown country"
   : (COUNTRY_NAMES?.of(code) || code));
 
-// Which countries' brands are in the queue, for everyone. Nothing chosen means
-// every country; the counts include the countries left out, so it is clear
-// what a change will add or remove before making it.
-function CountryPicker({ theme, available, chosen, disabled, onChange }) {
+// A dropdown of checkboxes. `emptyMeansAll`: nothing chosen means every option
+// (a filter), rather than none of them (a list of things to do). Counts, when
+// given, include the options left out, so it is clear what a change adds or
+// removes before making it.
+function MultiPicker({ theme, options, chosen, disabled, onChange, allLabel, noun, title,
+                       emptyMeansAll = true, short = (o) => o.code }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -333,58 +378,64 @@ function CountryPicker({ theme, available, chosen, disabled, onChange }) {
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  const codes = Object.keys(available || {})
-    .sort((a, b) => (available[b] - available[a]) || a.localeCompare(b));
-  // A chosen country with nobody waiting still shows, so it can be unticked.
-  for (const c of chosen) if (!codes.includes(c)) codes.push(c);
-  const all = !chosen.length;
+  const codes = options.map((o) => o.code);
+  const all = emptyMeansAll && !chosen.length;
   const isOn = (c) => all || chosen.includes(c);
 
   function toggle(code) {
     const current = all ? codes : chosen;
     const next = current.includes(code) ? current.filter((c) => c !== code) : [...current, code];
-    // Every country ticked is the same as no filter, and is stored as one.
-    onChange(codes.every((c) => next.includes(c)) ? [] : next);
+    // Every option ticked is the same as no filter, and is stored as one.
+    onChange(emptyMeansAll && codes.every((c) => next.includes(c)) ? [] : next);
   }
 
-  const label = all ? "All countries"
-    : chosen.length <= 3 ? chosen.map((c) => (c === "UNKNOWN" ? "Unknown" : c)).join(", ")
-    : `${chosen.length} countries`;
+  const picked = options.filter((o) => chosen.includes(o.code));
+  const label = !chosen.length ? allLabel
+    : picked.length <= 2 ? picked.map(short).join(", ")
+    : `${chosen.length} ${noun}`;
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <Btn size="sm" variant="secondary" onClick={() => setOpen((v) => !v)} disabled={disabled}
-           aria-expanded={open} title="Which countries' brands are in the queue, for everyone">
+           aria-expanded={open} title={title}>
         {label} ▾
       </Btn>
       {open && (
         <div style={{
-          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, width: 260,
+          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, width: 270,
           background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12,
-          boxShadow: theme.shadowMd, padding: 8, maxHeight: 360, overflowY: "auto",
+          boxShadow: theme.shadowMd, padding: 8, maxHeight: 380, overflowY: "auto",
         }}>
-          <button type="button" onClick={() => onChange([])} disabled={disabled || all}
+          <button type="button" onClick={() => onChange([])} disabled={disabled || !chosen.length}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px",
                            border: "none", background: "transparent", fontFamily: "inherit",
-                           fontSize: 12, color: all ? theme.textMuted : theme.text,
-                           cursor: all ? "default" : "pointer" }}>
-            All countries
+                           fontSize: 12, color: !chosen.length ? theme.textMuted : theme.text,
+                           cursor: !chosen.length ? "default" : "pointer" }}>
+            {allLabel}
           </button>
-          {codes.map((code) => (
-            <label key={code} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
-                                       fontSize: 12.5, color: theme.text, cursor: "pointer" }}>
-              <input type="checkbox" checked={isOn(code)} disabled={disabled}
-                     onChange={() => toggle(code)} style={{ margin: 0 }} />
-              <span style={{ flex: 1 }}>{countryName(code)}</span>
-              <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>
-                {available?.[code] ?? 0}
-              </span>
+          {options.map((o) => (
+            <label key={o.code} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
+                                         fontSize: 12.5, color: theme.text, cursor: "pointer" }}>
+              <input type="checkbox" checked={isOn(o.code)} disabled={disabled}
+                     onChange={() => toggle(o.code)} style={{ margin: 0 }} />
+              <span style={{ flex: 1 }}>{o.label}</span>
+              {o.count != null && (
+                <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>{o.count}</span>
+              )}
             </label>
           ))}
         </div>
       )}
     </div>
   );
+}
+
+// Options with counts, largest first; a chosen option with nothing waiting
+// still shows, so it can be unticked.
+function countedOptions(counts, chosen, labelOf) {
+  const codes = Object.keys(counts || {}).sort((a, b) => (counts[b] - counts[a]) || a.localeCompare(b));
+  for (const c of chosen) if (!codes.includes(c)) codes.push(c);
+  return codes.map((code) => ({ code, label: labelOf(code), count: counts?.[code] ?? 0 }));
 }
 
 function Stat({ theme, label, value }) {
@@ -456,6 +507,7 @@ function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
                   @{lead.handle}
                   {lead.country ? ` · ${lead.country}` : ""}
                   {lead.ig_followers ? ` · ${compact(lead.ig_followers)}` : ""}
+                  {lead.vertical ? ` · ${verticalShort(lead.vertical)}` : ""}
                 </span>
               </span>
               <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -537,6 +589,7 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {lead.vertical && <Tag>{verticalShort(lead.vertical)}</Tag>}
           {lead.intent_signal === "open_call" && <Tag tone="success">Asked for creators</Tag>}
           {lead.status === "not_shopify" && <Tag tone="warning">Not on Shopify</Tag>}
           {lead.tier && <Tag>Tier {lead.tier}</Tag>}
@@ -559,13 +612,15 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky }) {
             display: "block", width: "100%", textAlign: "left", marginTop: 12, padding: "6px 10px",
             border: "none", borderLeft: `3px solid ${theme.border}`, background: "transparent",
             fontFamily: "inherit", color: theme.textMid, fontSize: 12.5, lineHeight: 1.45, cursor: "pointer",
-            whiteSpace: "pre-wrap",
-            ...(showPost ? {} : {
-              display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
-            }),
           }}
         >
-          {caption}
+          {/* Clamped on an inner block with no padding: clamping the padded
+              button let half of the fourth line show through the padding. */}
+          <span style={showPost ? { display: "block", whiteSpace: "pre-wrap" } : {
+            display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+          }}>
+            {showPost ? caption : caption.replace(/\s*\n+\s*/g, " · ")}
+          </span>
         </button>
       )}
 
