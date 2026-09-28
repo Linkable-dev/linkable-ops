@@ -9,7 +9,7 @@
 
 import { supabase } from "./supabase.js";
 import {
-  draftInstagramDm, languageFor, pickVariant, staleCall, FRESH_CALL_DAYS,
+  draftInstagramDm, languageFor, staleCall, FRESH_CALL_DAYS,
 } from "./instagram-dm-writer.js";
 
 export const TABLE = "prospector_leads";
@@ -189,17 +189,14 @@ export async function draftBatch({ handles = [], language, limit = DRAFT_BATCH, 
     while (queue.length) {
       const lead = queue.shift();
       try {
-        // A redraft keeps its variant, so a rewrite cannot move a brand between
-        // the two sides of the comparison.
-        const variant = lead.dm_variant || pickVariant();
-        const out = await draftInstagramDm(lead, { language, variant, followUp });
+        const out = await draftInstagramDm(lead, { language, followUp });
         costUsd += out.costUsd;
         const update = followUp
           ? { dm_followup_text: out.message }
           : {
             dm_text: out.message,
             dm_language: out.language,
-            dm_variant: variant,
+            dm_variant: out.variant,
             dm_state: "drafted",
             dm_drafted_at: new Date().toISOString(),
           };

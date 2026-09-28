@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { validSignature, messagesIn, webhookSecrets } from "../routes/instagram-webhook.js";
 import { matchSignup, bareDomain } from "../lib/dm-conversions.js";
 import { fingerprint, pickToken, refreshDue, tokenProblem } from "../lib/instagram-graph.js";
-import { VARIANTS, pickVariant } from "../lib/instagram-dm-writer.js";
+import { DM_VARIANT } from "../lib/instagram-dm-writer.js";
 
 test("a webhook body is accepted only with the app secret's signature", () => {
   const body = Buffer.from(JSON.stringify({ object: "instagram" }));
@@ -52,11 +52,8 @@ test("a signup is matched by the store address first, then the domain, then the 
   assert.equal(bareDomain("HTTPS://www.Shop.com/products"), "shop.com");
 });
 
-test("first messages are split between two variants; A is Federico's format unchanged", () => {
-  assert.equal(VARIANTS.A, "");
-  assert.match(VARIANTS.B, /three short lines/);
-  const seen = new Set(Array.from({ length: 200 }, pickVariant));
-  assert.deepEqual([...seen].sort(), ["A", "B"]);
+test("every first message is Federico's format, variant A", () => {
+  assert.equal(DM_VARIANT, "A");
 });
 
 test("both Meta secrets are trusted, blanks are not", () => {

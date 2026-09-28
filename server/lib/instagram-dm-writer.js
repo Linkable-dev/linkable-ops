@@ -225,19 +225,10 @@ export function finishDraft(raw, lead) {
   return { message, problems, styleIssues: findStyleIssues(message) };
 }
 
-// Two ways of writing the first message, so reply rates can be compared. A is
-// Federico's own shape, unchanged. B is the same claims in three lines, the
-// question first: the bet is that a shorter message reads less like outreach.
-export const VARIANTS = {
-  A: "",
-  B: [
-    "Variant B for this one: the same greeting, then at most three short lines",
-    "in total. Line 1: the post they made, or what they sell. Line 2: the creator",
-    "line and the 24 hours in one sentence. Line 3: \"Worth a try?\" (or the",
-    "natural equivalent in the language you are told to use). No \"Quick question\".",
-  ].join(" "),
-};
-export const pickVariant = () => (Math.random() < 0.5 ? "A" : "B");
+// Every first message is Federico's template (variant "A"). Variant B, the
+// same claims in three lines, was switched off on 28 Sep 2026 at his request;
+// sent rows still carry "B" so the Results tab can compare the two.
+export const DM_VARIANT = "A";
 
 // The one follow-up, for a brand that did not answer the first DM.
 const FOLLOWUP_INSTRUCTION = [
@@ -251,12 +242,12 @@ const FOLLOWUP_INSTRUCTION = [
 ].join(" ");
 
 // → { message, language, model, costUsd, styleIssues, variant }
-export async function draftInstagramDm(lead, { language, variant = "A", followUp = false } = {}) {
+export async function draftInstagramDm(lead, { language, followUp = false } = {}) {
   const lang = LANGUAGES[language] ? language : languageFor(lead);
   const facts = factSheet(lead, { language: lang });
   const extra = followUp
     ? `${FOLLOWUP_INSTRUCTION}\n\nThe first message:\n"""${String(lead.dm_text || "").trim()}"""`
-    : VARIANTS[variant] || "";
+    : "";
 
   // Two attempts: the second only when the first broke a rule we check in
   // code, which is rare and cheaper than a person catching it.
@@ -291,7 +282,7 @@ export async function draftInstagramDm(lead, { language, variant = "A", followUp
   return {
     // A follow-up is a reply in the same conversation: no second signature.
     message: followUp ? last.message : `${last.message}\n\n${signature()}`,
-    variant: followUp ? null : variant,
+    variant: followUp ? null : DM_VARIANT,
     language: lang,
     model: DM_MODEL,
     costUsd: Math.round(cost * 10000) / 10000,
