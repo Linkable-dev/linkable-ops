@@ -21,6 +21,10 @@
 export const BRAND_TABS = [
   { to: "/gtm/brands", label: "Find",
     match: (p) => p === "/gtm/brands" || p.startsWith("/gtm/brands/lead") },
+  // Brands written to by hand on Instagram, from drafted messages. Its own tab
+  // because it is a daily task with its own queue, not a view of the table.
+  { to: "/gtm/brands/instagram", label: "Instagram",
+    match: (p) => p.startsWith("/gtm/brands/instagram") },
   { to: "/gtm/brands/replies", label: "Replies",
     match: (p) => p.startsWith("/gtm/brands/replies") },
 ];

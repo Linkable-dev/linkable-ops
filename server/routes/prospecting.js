@@ -17,6 +17,7 @@ import { supabase } from "../lib/supabase.js";
 import { claudeMessage, cachedSystem } from "../lib/anthropic.js";
 import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js";
 import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-club.js";
+import { draftInstagramDm, languageFor, LANGUAGES, MAX_DM_CHARS } from "../lib/instagram-dm-writer.js";
 
 const TABLE = "prospector_leads";
 const CAMPAIGNS = "prospector_campaigns";
@@ -855,6 +856,221 @@ export function prospectingRoutes() {
         hint: missingKey ? "ANTHROPIC_API_KEY is not set on the ops server." : err?.message,
       });
     }
+  });
+
+  // --- Instagram DMs --------------------------------------------------------
+  //
+  // The queue on /gtm/brands/instagram. A cold DM cannot be sent by a program -
+  // Instagram's API only opens a conversation the other side started - so the
+  // page does everything around the send and a person does the send: the
+  // message is drafted here, copied, pasted into the conversation, and marked
+  // sent by hand.
+  //
+  // One brand, one channel. A lead already handed to Lemlist is not offered
+  // here, and a lead marked sent here is read back by the pipeline and never
+  // started on the email sequence.
+
+  const DM_COLUMNS = [
+    "handle", "tier", "decision", "status", "brand_name", "domain", "country",
+    "contact_email", "affiliate_app", "product_count", "distinct_creators_90d",
+    "top_creators", "intent_signal", "intent_post_url", "intent_caption",
+    "ig_full_name", "ig_biography", "ig_category", "ig_followers",
+    "instagram_url", "pushed_at", "first_seen_at", "creator_activity_score",
+    "dm_state", "dm_text", "dm_language", "dm_drafted_at", "dm_sent_at",
+    "dm_sent_by", "dm_replied_at",
+  ].join(",");
+
+  // Waiting to be written to on Instagram. The same predicate the counts use
+  // below, so a tile and the list it opens cannot disagree.
+  const dmOpen = (qy) => qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null)
+                           .neq("decision", "hide").not("tier", "is", null);
+  const isDmOpen = (r) => ["none", "drafted"].includes(r.dm_state || "none") && !r.pushed_at
+                          && r.decision !== "hide" && r.tier;
+
+  const DM_VIEWS = {
+    todo: (qy) => dmOpen(qy)
+      // Brands that asked for creators in public first: they have already said
+      // the thing the message answers. Then the pipeline's own ranking.
+      .order("intent_signal", { ascending: true, nullsFirst: false })
+      .order("tier", { ascending: true, nullsFirst: false })
+      .order("creator_activity_score", { ascending: false, nullsFirst: false }),
+    sent: (qy) => qy.in("dm_state", ["sent", "replied"])
+      .order("dm_sent_at", { ascending: false, nullsFirst: false }),
+    skipped: (qy) => qy.eq("dm_state", "skipped")
+      .order("first_seen_at", { ascending: false, nullsFirst: false }),
+  };
+
+  // Queued for email but not yet handed over: it will go on the next tick
+  // unless it is DMed first. Said on the card, because DMing it takes it out of
+  // the email sequence and that should be a choice, not a surprise.
+  const emailQueued = (r) => r.decision === "send" && r.status === "routed" && !r.pushed_at
+                              && Boolean(r.contact_email);
+
+  function dmError(res, error, what) {
+    if (/dm_state|dm_text|ig_biography|intent_caption/.test(error?.message || "")) {
+      return res.status(503).json({
+        error: "the Instagram columns are missing",
+        hint: "apply supabase/migrations/025_prospector_instagram_dm.sql to the ops Supabase project",
+      });
+    }
+    return handleError(res, error, what);
+  }
+
+  const shapeDm = (r) => ({
+    ...r,
+    dm_state: r.dm_state || "none",
+    email_queued: emailQueued(r),
+    default_language: languageFor(r),
+  });
+
+  router.get("/instagram", async (req, res) => {
+    const view = DM_VIEWS[req.query.view] ? req.query.view : "todo";
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+    const [list, all] = await Promise.all([
+      DM_VIEWS[view](supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }))
+        .range(offset, offset + limit - 1),
+      supabase.from(TABLE).select("tier,decision,pushed_at,dm_state,dm_text,dm_sent_at"),
+    ]);
+    if (list.error) return dmError(res, list.error, "listing the Instagram queue");
+    if (all.error) return dmError(res, all.error, "counting the Instagram queue");
+
+    const rows = all.data || [];
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    res.json({
+      leads: (list.data || []).map(shapeDm),
+      total: list.count ?? (list.data || []).length,
+      counts: {
+        todo: rows.filter(isDmOpen).length,
+        drafted: rows.filter((r) => isDmOpen(r) && r.dm_text).length,
+        sentToday: rows.filter((r) => r.dm_sent_at && new Date(r.dm_sent_at) >= startOfDay).length,
+        sent: rows.filter((r) => ["sent", "replied"].includes(r.dm_state)).length,
+        replied: rows.filter((r) => r.dm_state === "replied").length,
+        skipped: rows.filter((r) => r.dm_state === "skipped").length,
+      },
+      maxChars: MAX_DM_CHARS,
+    });
+  });
+
+  // Draft the next few, or redraft the ones named. Ten at most per call: each
+  // is one model call, and the serverless function has sixty seconds.
+  const DRAFT_BATCH = 10;
+  const DRAFT_CONCURRENCY = 4;
+
+  router.post("/instagram/draft", async (req, res) => {
+    const named = Array.isArray(req.body?.handles)
+      ? req.body.handles.map((h) => String(h).toLowerCase()).filter(Boolean).slice(0, DRAFT_BATCH)
+      : [];
+    const language = LANGUAGES[req.body?.language] ? req.body.language : undefined;
+
+    const base = supabase.from(TABLE).select(DM_COLUMNS);
+    const query = named.length
+      ? dmOpen(base).in("handle", named)
+      : DM_VIEWS.todo(base.is("dm_text", null))
+          .limit(Math.min(Number(req.body?.limit) || DRAFT_BATCH, DRAFT_BATCH));
+    const { data: leads, error } = await query;
+    if (error) return dmError(res, error, "choosing leads to draft");
+    if (!leads?.length) return res.json({ drafted: [], failed: [], costUsd: 0 });
+
+    const senderName = process.env.PROSPECTOR_DM_SENDER_NAME || "";
+    const drafted = [];
+    const failed = [];
+    let costUsd = 0;
+    const queue = [...leads];
+
+    async function worker() {
+      while (queue.length) {
+        const lead = queue.shift();
+        try {
+          const out = await draftInstagramDm(lead, { language, senderName });
+          costUsd += out.costUsd;
+          const { data: saved, error: saveError } = await supabase
+            .from(TABLE)
+            .update({
+              dm_text: out.message,
+              dm_language: out.language,
+              dm_state: "drafted",
+              dm_drafted_at: new Date().toISOString(),
+            })
+            .eq("handle", lead.handle)
+            // Not over a message somebody sent while this one was being written.
+            .in("dm_state", ["none", "drafted"])
+            .select(DM_COLUMNS)
+            .maybeSingle();
+          if (saveError) throw saveError;
+          if (saved) drafted.push({ ...shapeDm(saved), style_issues: out.styleIssues });
+        } catch (err) {
+          const missingKey = /ANTHROPIC_API_KEY/.test(err?.message || "");
+          failed.push({
+            handle: lead.handle,
+            error: missingKey ? "ANTHROPIC_API_KEY is not set on the ops server" : (err?.message || "failed"),
+          });
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(DRAFT_CONCURRENCY, leads.length) }, worker));
+
+    res.json({ drafted, failed, costUsd: Math.round(costUsd * 10000) / 10000 });
+  });
+
+  // One lead's DM: edit the text, or record what happened to it.
+  router.post("/instagram/:handle", async (req, res) => {
+    const handle = String(req.params.handle).toLowerCase();
+    const action = String(req.body?.action || "");
+    const { data: lead, error } = await supabase
+      .from(TABLE).select(DM_COLUMNS).eq("handle", handle).maybeSingle();
+    if (error) return dmError(res, error, "loading the lead");
+    if (!lead) return res.status(404).json({ error: "no such lead" });
+
+    const state = lead.dm_state || "none";
+    const now = new Date().toISOString();
+    const who = req.admin?.name || req.admin?.email || null;
+    let update;
+
+    if (action === "edit") {
+      const text = String(req.body?.text ?? "").trim();
+      if (text.length > 1000) return res.status(400).json({ error: "Instagram stops at 1,000 characters" });
+      if (!["none", "drafted"].includes(state)) {
+        return res.status(409).json({ error: "this one has already gone" });
+      }
+      update = { dm_text: text || null, dm_state: text ? "drafted" : "none" };
+    } else if (action === "sent") {
+      if (!["none", "drafted"].includes(state)) {
+        return res.status(409).json({ error: "already marked" });
+      }
+      // Already in the email sequence: a DM now would pitch the same brand twice.
+      if (lead.pushed_at) {
+        return res.status(409).json({ error: "this brand was already handed to the email sequence" });
+      }
+      update = { dm_state: "sent", dm_sent_at: now, dm_sent_by: who };
+    } else if (action === "replied") {
+      if (!["sent", "replied"].includes(state)) {
+        return res.status(409).json({ error: "mark it sent first" });
+      }
+      update = { dm_state: "replied", dm_replied_at: lead.dm_replied_at || now };
+    } else if (action === "skip") {
+      if (!["none", "drafted"].includes(state)) {
+        return res.status(409).json({ error: "this one has already gone" });
+      }
+      update = { dm_state: "skipped" };
+    } else if (action === "reopen") {
+      // Undoing a mis-click. The pipeline may already have read the send and
+      // taken the brand out of the email sequence; it is left out, which is
+      // the safe direction to be wrong in.
+      update = {
+        dm_state: lead.dm_text ? "drafted" : "none",
+        dm_sent_at: null, dm_sent_by: null, dm_replied_at: null,
+      };
+    } else {
+      return res.status(400).json({ error: "action must be one of edit, sent, replied, skip, reopen" });
+    }
+
+    const { data, error: saveError } = await supabase
+      .from(TABLE).update(update).eq("handle", handle).select(DM_COLUMNS).maybeSingle();
+    if (saveError) return dmError(res, saveError, "saving the DM");
+    res.json(shapeDm(data));
   });
 
   // --- campaigns ----------------------------------------------------------

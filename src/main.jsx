@@ -25,6 +25,7 @@ const ProspectingPage = lazy(() => import("./pages/ProspectingPage.jsx"));
 const CreatorsGtmPage = lazy(() => import("./pages/CreatorsGtmPage.jsx"));
 const CreatorsOutreachPage = lazy(() => import("./pages/CreatorsOutreachPage.jsx"));
 const ProspectingRepliesPage = lazy(() => import("./pages/ProspectingRepliesPage.jsx"));
+const InstagramDmPage = lazy(() => import("./pages/InstagramDmPage.jsx"));
 const GtmSection = lazy(() => import("./components/gtm/GtmSection.jsx").then(m => ({ default: m.GtmSection })));
 import { BRAND_TABS, CREATOR_TABS } from "./components/gtm/gtmTabs.js";
 const GtmAgentsPage = lazy(() => import("./pages/GtmAgentsPage"));
@@ -66,6 +67,7 @@ createRoot(document.getElementById("root")).render(
                     <Route element={<GtmSection tabs={BRAND_TABS} />}>
                       <Route path="/gtm/brands" element={<ProspectingPage />} />
                       <Route path="/ai/agents" element={<GtmAgentsPage />} />
+                      <Route path="/gtm/brands/instagram" element={<InstagramDmPage />} />
                       <Route path="/gtm/brands/replies"
                              element={<ProspectingRepliesPage kind="brand" />} />
                       <Route path="/ai/inbox" element={<AiInboxPage />} />
