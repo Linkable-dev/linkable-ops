@@ -131,10 +131,13 @@ export const isDmOpen = (r, { nonShopify, countries = [] }) => ["none", "drafted
   && Boolean(r.tier || (nonShopify && r.status === "not_shopify"))
   && (!countries.length || countries.includes(countryOf(r)));
 
-// The pipeline's priority first (a fresh creator call from a Shopify brand of
-// a reachable size scores highest - see dm_priority in ops_sync.py), then, for
-// rows synced before it existed, brands that asked for creators in public.
+// The most recent creator call first (Luca, 28 Sep 2026: a brand that asked
+// for creators today is the one to write to today). Brands with no dated call
+// come after, by the pipeline's priority (a Shopify brand of a reachable size
+// scores highest - see dm_priority in ops_sync.py), then, for rows synced
+// before that existed, brands that asked for creators in public.
 export const todoOrder = (qy) => qy
+  .order("intent_posted_at", { ascending: false, nullsFirst: false })
   .order("dm_priority", { ascending: false, nullsFirst: false })
   .order("intent_signal", { ascending: true, nullsFirst: false })
   .order("tier", { ascending: true, nullsFirst: false })
