@@ -55,6 +55,7 @@ const PATHS = [
   { value: "linkable", label: "Linkable creators post about them" },
   { value: "gifted", label: "Gifted posts" },
   { value: "programme", label: "Creator programme page" },
+  { value: "stores", label: "Shopify store list" },
   { value: "calls", label: "Asked for creators" },
   { value: "tags", label: "Tagged by creators" },
   { value: "OTHER", label: "Found another way" },

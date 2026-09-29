@@ -211,6 +211,7 @@ test("each discovery source belongs to one path, and an unknown one to OTHER", a
   assert.equal(pathOf({ source: "linkable_creators" }), "linkable");
   assert.equal(pathOf({ source: "gifted_posts" }), "gifted");
   assert.equal(pathOf({ source: "program_pages" }), "programme");
+  assert.equal(pathOf({ source: "store_list" }), "stores");
   assert.equal(pathOf({ source: "feed" }), "calls");
   assert.equal(pathOf({ source: "something_new" }), OTHER_PATH);
   assert.equal(pathOf({ source: null }), OTHER_PATH);

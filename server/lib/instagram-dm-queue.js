@@ -148,6 +148,7 @@ export const PATHS = {
   linkable: { label: "Linkable creators post about them", sources: ["linkable_creators"] },
   gifted: { label: "Gifted posts", sources: ["gifted_posts"] },
   programme: { label: "Creator programme page", sources: ["program_pages"] },
+  stores: { label: "Shopify store list", sources: ["store_list"] },
   calls: { label: "Asked for creators", sources: ["feed", "creator_calls", "hashtag"] },
   tags: { label: "Tagged by creators", sources: ["creator_posts", "creator_following", "own_audience"] },
 };
