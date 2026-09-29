@@ -24,7 +24,7 @@ export const DM_COLUMNS = [
   "dm_sent_by", "dm_replied_at", "vertical", "vertical_ai", "vertical_effective",
   "is_agency", "intent_posted_at", "dm_priority", "dm_variant", "dm_followup_text",
   "dm_followup_sent_at", "converted_at", "converted_match", "dm_reply_text", "ig_user_id",
-  "myshopify_domain", "dm_reasons",
+  "myshopify_domain", "dm_reasons", "linkable_creator_count", "linkable_creators",
 ].join(",");
 
 // A DM unanswered for this long gets one follow-up.

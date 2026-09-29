@@ -99,6 +99,12 @@ The shape, every time:
    UGC: "Just came across your post looking for ..." naming what the post
    actually asked for, in a few words (new brand ambassadors, UGC creators,
    influencers...). Never claim a post the facts do not give.
+2b. When the facts say creators already on Linkable have posted about them:
+   one line of its own, straight after the post line (or after the greeting
+   when there is no post): "{N} creators on Linkable already post about
+   {brand}, including @a and @b." with N and the handles exactly as the facts
+   give them ("1 creator ... posts", and no "including" when no handle is
+   given). This is the strongest line in the message; never inflate it.
 3. The creator line, word for word apart from the brand name: "We have
    ${CREATOR_CLAIM} creators on Linkable who can apply to collaborate with
    {brand}, create content around your products and introduce the brand to
@@ -145,11 +151,19 @@ export function brandNameFor(lead) {
 }
 
 function creatorHandles(lead) {
-  return String(lead.top_creators || "")
+  return [...String(lead.top_creators || "").split(","), ...linkableCreatorHandles(lead)]
+    .map((h) => h.trim().replace(/^@/, "").toLowerCase())
+    .filter(Boolean);
+}
+
+// Creators already on Linkable who tagged this brand (linkable-prospector's
+// linkable_creators source). The first two can be named in the DM.
+function linkableCreatorHandles(lead) {
+  return String(lead.linkable_creators || "")
     .split(",")
     .map((h) => h.trim().replace(/^@/, "").toLowerCase())
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, 2);
 }
 
 // Every line is something the operator could have read off the lead.
@@ -180,6 +194,14 @@ export function factSheet(lead, { language } = {}) {
   } else if (lead.intent_signal === "open_call") {
     lines.push("");
     lines.push("They recently posted asking for creators (the caption was not captured).");
+  }
+
+  const proof = Number(lead.linkable_creator_count) || 0;
+  if (proof > 0) {
+    const named = linkableCreatorHandles(lead).map((h) => `@${h}`);
+    lines.push("");
+    lines.push(`Creators already on Linkable who have posted about them: ${proof}`
+      + (named.length ? ` (you may name: ${named.join(" and ")})` : ""));
   }
 
   lines.push("");
@@ -213,7 +235,9 @@ export function finishDraft(raw, lead) {
   if (affiliate) problems.push(`pitched it as affiliate: ${affiliate.join(", ")}`);
   // A number in their own name, bio or post ("Studio 54", "9ct gold", "5 UGC
   // creators") is theirs.
-  const theirs = [brandNameFor(lead), lead.ig_full_name, lead.handle, lead.ig_biography, lead.intent_caption]
+  const theirs = [brandNameFor(lead), lead.ig_full_name, lead.handle, lead.ig_biography, lead.intent_caption,
+    // The Linkable-creator count is ours to state, exactly as the facts give it.
+    lead.linkable_creator_count ? String(lead.linkable_creator_count) : null]
     .filter(Boolean).join(" ");
   const numbers = (message.match(/\d[\d.,]*\+?/g) || [])
     .filter((n) => !/^10[.,]000\+?$/.test(n) && n !== "24" && !theirs.includes(n.replace(/[.,+]+$/, "")));

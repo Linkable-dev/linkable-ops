@@ -153,3 +153,19 @@ test("a creator call the brand has closed is not in the queue", () => {
     null,
   ]) assert.equal(isDmOpen({ ...open, intent_caption: caption }, opts), true, String(caption));
 });
+
+
+test("creators already on Linkable reach the facts, and only their real count and names pass", () => {
+  const withProof = { ...lead, linkable_creator_count: 3, linkable_creators: "@ada.makes, @bea_home, @cy" };
+  const facts = factSheet(withProof, { language: "en" });
+  assert.match(facts, /Creators already on Linkable who have posted about them: 3 \(you may name: @ada\.makes and @bea_home\)/);
+  assert.doesNotMatch(facts, /@cy/, "two handles at most");
+
+  const ok = finishDraft(`Hey Wildmoor!\n\n3 creators on Linkable already post about Wildmoor, including @ada.makes and @bea_home.`, withProof);
+  assert.deepEqual(ok.problems, []);
+  const inflated = finishDraft("Hey Wildmoor!\n\n7 creators on Linkable already post about Wildmoor.", withProof);
+  assert.ok(inflated.problems.some((p) => p.includes("number")), "a count the facts do not give is refused");
+  const invented = finishDraft("Hey Wildmoor!\n\n3 creators, including @someone_else, post about you.", withProof);
+  assert.ok(invented.problems.some((p) => p.includes("handles")), "a creator the facts do not name is refused");
+  assert.doesNotMatch(factSheet(lead, { language: "en" }), /Creators already on Linkable/);
+});
