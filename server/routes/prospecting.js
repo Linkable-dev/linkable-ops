@@ -143,13 +143,21 @@ export function prospectingRoutes() {
   //           of these is an instruction the pipeline will never carry out.
   //           Invisible until now, which is why six leads marked send had not
   //           moved and the page offered no reason.
+  // Only brands the pipeline can actually email are offered: Tier A or B (the
+  // worker has a Lemlist campaign for those two and nothing else) and not
+  // already DMed on Instagram (one brand, one channel). On 29 Sep 2026 all
+  // nine "Queued" brands were Tier C, seven of them DMed, so none would ever
+  // have gone - and "Needs review" was half rejected leads. Sent is left whole:
+  // it is what went, whatever the brand has been re-tiered to since.
+  const EMAIL_TIERS = ["A", "B"];
+  const emailable = (qy) => qy.in("tier", EMAIL_TIERS).is("dm_sent_at", null).is("pushed_at", null);
   const VIEWS = {
-    review: (qy) => qy.in("decision", ["pending", "hold"]).is("pushed_at", null)
-                      .eq("status", "routed"),
-    queued: (qy) => qy.eq("decision", "send").is("pushed_at", null).eq("status", "routed"),
+    review: (qy) => emailable(qy).in("decision", ["pending", "hold"]).eq("status", "routed"),
+    queued: (qy) => emailable(qy).eq("decision", "send").eq("status", "routed"),
     sent: (qy) => qy.not("pushed_at", "is", null),
-    blocked: (qy) => qy.neq("status", "routed").is("pushed_at", null),
+    blocked: (qy) => emailable(qy).neq("status", "routed"),
   };
+  const isEmailable = (r) => EMAIL_TIERS.includes(r.tier) && !r.dm_sent_at && !r.pushed_at;
 
   // Brands whose store is not on Shopify are published only for the Instagram
   // queue. They are never routed or emailed, so the email funnel below does not
@@ -190,10 +198,11 @@ export function prospectingRoutes() {
   router.get("/stats", async (_req, res) => {
     const { data, error } = await supabase
       .from(TABLE)
-      .select("tier,decision,status,contact_email,affiliate_app,pushed_at,source");
+      .select("tier,decision,status,contact_email,affiliate_app,pushed_at,source,dm_sent_at");
     if (error) return handleError(res, error, "loading stats");
 
-    const rows = (data || []).filter(isEmailLead);
+    // What the Email tab can show: sent, or still possible to send.
+    const rows = (data || []).filter((r) => isEmailLead(r) && (r.pushed_at || isEmailable(r)));
     const tally = (key) =>
       rows.reduce((acc, row) => {
         const k = row[key] || "unknown";
@@ -219,13 +228,13 @@ export function prospectingRoutes() {
       // each and a shared predicate would have to run in SQL and in JS anyway.
       byView: {
         review: rows.filter(
-          (r) => ["pending", "hold"].includes(r.decision) && !r.pushed_at && r.status === "routed"
+          (r) => isEmailable(r) && ["pending", "hold"].includes(r.decision) && r.status === "routed"
         ).length,
         queued: rows.filter(
-          (r) => r.decision === "send" && !r.pushed_at && r.status === "routed"
+          (r) => isEmailable(r) && r.decision === "send" && r.status === "routed"
         ).length,
         sent: rows.filter((r) => r.pushed_at).length,
-        blocked: rows.filter((r) => r.status !== "routed" && !r.pushed_at).length,
+        blocked: rows.filter((r) => isEmailable(r) && r.status !== "routed").length,
       },
       untracked: rows.filter((r) => (r.affiliate_app || "none") === "none").length,
     });

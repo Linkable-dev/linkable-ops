@@ -67,7 +67,7 @@ const EMAIL_HELP = [
   ["Several at once", "Tick brands in the list, or the box at the top for the whole page, then Send or Never email them together."],
   ["Never email", "Takes the brand out for good: the pipeline adds it to the suppression list."],
   ["The tabs", "To review is waiting for a decision. Queued goes to Lemlist on the next pipeline run, every two hours; Unqueue stops it until then. Sent shows what went and what came back. Needs review cannot be emailed yet, and says why. Results is the replies, with Draft a reply on the ones worth answering."],
-  ["Tiers", "A has no affiliate app, B has one and gets a different sequence, C is never emailed. A DMed tag means the brand was written to on Instagram, so it is not emailed."],
+  ["Which brands", "Only brands that can be emailed: Tier A (no affiliate app) and Tier B (has one, gets a different sequence). Tier C and brands already DMed on Instagram are left to the Instagram tab."],
   ["Find new brands", "Starts a pipeline run now instead of waiting for the schedule. New brands land here and on Instagram. Once every half hour."],
 ];
 
@@ -309,7 +309,7 @@ export default function EmailPage() {
             />
             <MultiPicker theme={theme} allLabel="All tiers" noun="tiers" title="Only show these tiers (just for you)"
                          options={countedOptions(stats?.byTier, tiers, (c) => `Tier ${c}`)
-                           .filter((o) => ["A", "B", "C"].includes(o.code))}
+                           .filter((o) => ["A", "B"].includes(o.code))}
                          chosen={tiers} onChange={setTiers} short={(o) => o.label} />
             <MultiPicker theme={theme} allLabel="Found any way" noun="paths"
                          title="Only show brands found this way (just for you)"
