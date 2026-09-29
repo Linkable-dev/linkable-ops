@@ -189,3 +189,12 @@ test("a brand the pipeline rejected after it was published is not offered", () =
   assert.equal(isDmOpen({ ...open, status: "rejected", tier: "reject" }, opts), false);
   assert.equal(isDmOpen({ ...open, status: "rejected" }, opts), false);
 });
+
+
+test("digits in a creator's handle are not a quoted number", () => {
+  const withProof = { ...lead, linkable_creator_count: 1, linkable_creators: "@alicia13eche" };
+  const ok = finishDraft("Hey Wildmoor!\n\n1 creator on Linkable already posts about Wildmoor, including @alicia13eche.", withProof);
+  assert.deepEqual(ok.problems, []);
+  const bad = finishDraft("Hey Wildmoor!\n\n13 creators on Linkable already post about Wildmoor.", withProof);
+  assert.ok(bad.problems.some((p) => p.includes("number")), "a real 13 is still refused");
+});

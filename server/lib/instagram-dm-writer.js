@@ -252,7 +252,10 @@ export function finishDraft(raw, lead) {
     // The Linkable-creator count is ours to state, exactly as the facts give it.
     lead.linkable_creator_count ? String(lead.linkable_creator_count) : null]
     .filter(Boolean).join(" ");
-  const numbers = (message.match(/\d[\d.,]*\+?/g) || [])
+  // Digits inside an @handle are part of a name, not a claim: "@alicia13eche"
+  // read as "13" and refused every draft that named her (29 Sep 2026). Which
+  // handles may appear at all is checked below.
+  const numbers = (message.replace(/@[A-Za-z0-9._]+/g, "").match(/\d[\d.,]*\+?/g) || [])
     .filter((n) => !/^10[.,]000\+?$/.test(n) && n !== "24" && !theirs.includes(n.replace(/[.,+]+$/, "")));
   if (numbers.length) problems.push(`quoted a number other than ${CREATOR_CLAIM}: ${numbers.join(", ")}`);
 
