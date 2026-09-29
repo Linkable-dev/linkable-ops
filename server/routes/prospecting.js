@@ -970,8 +970,10 @@ export function prospectingRoutes() {
         todo: rows.filter((r) => isDmOpen(r, opts)).length,
         drafted: rows.filter((r) => isDmOpen(r, opts) && r.dm_text).length,
         // Waiting behind the setting, so switching it on is not a leap in the dark.
+        // Counted with the team's countries, so the number is what ticking
+        // the box would actually add (most have no known country).
         nonShopify: rows.filter((r) => r.status === "not_shopify"
-          && isDmOpen(r, { nonShopify: true })).length,
+          && isDmOpen(r, { nonShopify: true, countries: opts.countries })).length,
         sentToday: rows.filter((r) => r.dm_sent_at && new Date(r.dm_sent_at) >= startOfDay).length,
         sent: rows.filter((r) => ["sent", "replied"].includes(r.dm_state)).length,
         replied: rows.filter((r) => r.dm_state === "replied").length,
