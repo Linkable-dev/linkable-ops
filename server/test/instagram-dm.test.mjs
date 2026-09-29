@@ -169,3 +169,14 @@ test("creators already on Linkable reach the facts, and only their real count an
   assert.ok(invented.problems.some((p) => p.includes("handles")), "a creator the facts do not name is refused");
   assert.doesNotMatch(factSheet(lead, { language: "en" }), /Creators already on Linkable/);
 });
+
+
+test("a gifting brand and a programme-page brand each get their own opening fact", () => {
+  const gifting = { ...lead, intent_signal: "gifting", intent_caption: "haul from @x",
+                    intent_posted_at: new Date(Date.now() - 2 * 86_400_000).toISOString() };
+  assert.match(factSheet(gifting, { language: "en" }), /recently gifted products to creators/);
+  assert.doesNotMatch(factSheet(gifting, { language: "en" }), /haul from @x/, "the creator's post is not quoted");
+  const program = { ...lead, intent_signal: "program_page", intent_caption: "Ambassador Programme - Wildmoor" };
+  assert.match(factSheet(program, { language: "en" }), /creator \/ ambassador programme on their own site/);
+  assert.match(factSheet(program, { language: "en" }), /Ambassador Programme - Wildmoor/);
+});

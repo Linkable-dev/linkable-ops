@@ -99,6 +99,12 @@ The shape, every time:
    UGC: "Just came across your post looking for ..." naming what the post
    actually asked for, in a few words (new brand ambassadors, UGC creators,
    influencers...). Never claim a post the facts do not give.
+2a. No "your post" line when the facts give no post. Instead: when they have
+   recently gifted products to creators, "Saw you've been gifting to creators
+   lately."; when they run a creator or ambassador programme on their site,
+   "Just came across your ambassador programme." naming it as their page does
+   (ambassador programme, creator programme, affiliate programme). Never name
+   the creator who posted about them.
 2b. When the facts say creators already on Linkable have posted about them:
    one line of its own, straight after the post line (or after the greeting
    when there is no post): "{N} creators on Linkable already post about
@@ -194,6 +200,13 @@ export function factSheet(lead, { language } = {}) {
   } else if (lead.intent_signal === "open_call") {
     lines.push("");
     lines.push("They recently posted asking for creators (the caption was not captured).");
+  } else if (lead.intent_signal === "gifting" && !staleCall(lead)) {
+    lines.push("");
+    lines.push("They have recently gifted products to creators (a creator tagged them in a gifted post).");
+  } else if (lead.intent_signal === "program_page") {
+    lines.push("");
+    lines.push("They run a creator / ambassador programme on their own site. Its page:");
+    lines.push(`"${clean(lead.intent_caption || "").slice(0, 400)}"`);
   }
 
   const proof = Number(lead.linkable_creator_count) || 0;
