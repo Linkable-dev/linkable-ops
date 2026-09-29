@@ -24,7 +24,7 @@ export const DM_COLUMNS = [
   "dm_sent_by", "dm_replied_at", "vertical", "vertical_ai", "vertical_effective",
   "is_agency", "intent_posted_at", "dm_priority", "dm_variant", "dm_followup_text",
   "dm_followup_sent_at", "converted_at", "converted_match", "dm_reply_text", "ig_user_id",
-  "myshopify_domain",
+  "myshopify_domain", "dm_reasons",
 ].join(",");
 
 // A DM unanswered for this long gets one follow-up.
@@ -143,14 +143,14 @@ export const isDmOpen = (r, { nonShopify, countries = [] }) => ["none", "drafted
   && Boolean(r.tier || (nonShopify && r.status === "not_shopify"))
   && (!countries.length || countries.includes(countryOf(r)));
 
-// The most recent creator call first (Luca, 28 Sep 2026: a brand that asked
-// for creators today is the one to write to today). Brands with no dated call
-// come after, by the pipeline's priority (a Shopify brand of a reachable size
-// scores highest - see dm_priority in ops_sync.py), then, for rows synced
-// before that existed, brands that asked for creators in public.
+// Conversion potential first (dm_priority, computed by linkable-prospector from
+// who actually launched and paid on Linkable: market, vertical, offer fit,
+// store, size, and how fresh the creator call is - see dm_reasons on the card).
+// Then the most recent call, and for rows synced before either existed,
+// brands that asked for creators in public.
 export const todoOrder = (qy) => qy
-  .order("intent_posted_at", { ascending: false, nullsFirst: false })
   .order("dm_priority", { ascending: false, nullsFirst: false })
+  .order("intent_posted_at", { ascending: false, nullsFirst: false })
   .order("intent_signal", { ascending: true, nullsFirst: false })
   .order("tier", { ascending: true, nullsFirst: false })
   .order("creator_activity_score", { ascending: false, nullsFirst: false });

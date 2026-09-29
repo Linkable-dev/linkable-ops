@@ -649,6 +649,7 @@ function ResultsView({ theme }) {
       </Card>
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))" }}>
         {table("By message variant", data.byVariant)}
+        {data.byScore && table("By conversion score", data.byScore)}
         {table("By vertical", data.byVertical)}
         {table("By country", data.byCountry)}
         {table("By week sent", data.byWeek)}
@@ -820,6 +821,13 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky, follow
             {lead.ig_followers ? ` · ${lead.ig_followers.toLocaleString()} followers` : ""}
             {lead.domain ? ` · ${lead.domain}` : ""}
           </div>
+          {lead.dm_priority != null && (
+            <div style={{ fontSize: 12, color: theme.textMid, marginTop: 4 }}
+                 title="Conversion potential, 0-100: market, vertical, what they asked for, store, size, and how fresh the call is">
+              <strong style={{ color: theme.text }}>Score {Math.round(lead.dm_priority)}</strong>
+              {lead.dm_reasons ? ` · ${lead.dm_reasons}` : ""}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {lead.vertical_effective && <Tag>{verticalShort(lead.vertical_effective)}</Tag>}
