@@ -4,8 +4,6 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
-import { Select } from "../components/ui/Select";
-import { Pagination } from "../components/ui/Pagination";
 
 /**
  * Instagram DMs to brands: the page drafts, a person sends.
@@ -103,8 +101,8 @@ export default function InstagramDmPage() {
   // Paged by the server: the page asks for one page at a time, filtered and
   // sorted in the query, so every brand is reachable however long the queue.
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
-  useEffect(() => { setPage(0); }, [view, verticals, paths, sort, pageSize]);
+  const pageSize = PAGE_SIZE;
+  useEffect(() => { setPage(0); }, [view, verticals, paths, sort]);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
 
@@ -288,6 +286,10 @@ export default function InstagramDmPage() {
   const verticalLabels = meta?.verticalLabels || {};
   const verticalName = (code) => (code === "NONE" ? "Not classified" : verticalLabels[code] || code);
   const pathName = (code) => meta?.pathLabels?.[code] || code;
+  // The pager is the list's own footer, under the brands it pages - not a
+  // full-width bar under the message panel.
+  const pager = data && <ListPager theme={theme} page={page} pageSize={pageSize} total={data.total}
+                                   onPage={setPage} />;
   const filtered = verticals.length > 0 || paths.length > 0;
 
   return (
@@ -345,13 +347,11 @@ export default function InstagramDmPage() {
                          options={countedOptions(meta.verticals, verticals, verticalName)}
                          chosen={verticals} onChange={setVerticals}
                          short={(o) => o.label.split(" & ")[0]} />
-            <div style={{ width: 190 }}>
-              <Select size="sm" value={sort} onChange={setSort} ariaLabel="Sort"
-                      options={[{ value: "", label: view === "todo" ? "Best chance first" : "Default order" },
-                                ...Object.entries(meta.sorts || {})
-                                  .filter(([k]) => !(view === "todo" && k === "score"))
-                                  .map(([value, label]) => ({ value, label }))]} />
-            </div>
+            <SortPicker theme={theme} value={sort} onChange={setSort}
+                        options={[{ value: "", label: view === "todo" ? "Best chance first" : "Default order" },
+                                  ...Object.entries(meta.sorts || {})
+                                    .filter(([k]) => !(view === "todo" && k === "score"))
+                                    .map(([value, label]) => ({ value, label }))]} />
           </>
         )}
       </div>
@@ -412,7 +412,8 @@ export default function InstagramDmPage() {
           gridTemplateColumns: wide ? "minmax(300px, 380px) minmax(0, 1fr)" : "minmax(0, 1fr)",
         }}>
           <QueueList leads={leads} current={current} onSelect={setSelected} theme={theme}
-                     drafting={Boolean(drafting)} maxHeight={wide ? "calc(100vh - 210px)" : 320} />
+                     drafting={Boolean(drafting)} maxHeight={wide ? "calc(100vh - 250px)" : 320}
+                     footer={pager} />
           {current && (
             <DmPanel key={`${view}:${current.handle}`} lead={current} maxChars={data?.maxChars || 520}
                      followUp={view === "followup"} actionsRef={panelActions}
@@ -430,12 +431,8 @@ export default function InstagramDmPage() {
                      canReply={meta?.instagramReplies === true}
                      onSettled={settle} onNotice={setNotice} />
           ))}
+          {pager}
         </Card>
-      )}
-
-      {data && view !== "results" && data.total > 0 && (
-        <Pagination page={page + 1} pageSize={pageSize} total={data.total}
-                    onPageChange={(n) => setPage(Math.max(0, n - 1))} onPageSizeChange={setPageSize} />
       )}
     </div>
   );
@@ -550,6 +547,45 @@ function MultiPicker({ theme, options, chosen, disabled, onChange, allLabel, nou
                 <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>{o.count}</span>
               )}
             </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One choice from a short list, drawn like the filters beside it rather than
+// as a form select.
+function SortPicker({ theme, value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const current = options.find((o) => o.value === value) || options[0];
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <Btn size="sm" variant="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open} title="Order">
+        {current.label} ▾
+      </Btn>
+      {open && (
+        <div style={{
+          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, width: 220,
+          background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12,
+          boxShadow: theme.shadowMd, padding: 6,
+        }}>
+          {options.map((o) => (
+            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 8px",
+                             border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5,
+                             cursor: "pointer", color: theme.text,
+                             background: o.value === current.value ? theme.accentLight : "transparent",
+                             fontWeight: o.value === current.value ? 600 : 400 }}>
+              {o.label}
+            </button>
           ))}
         </div>
       )}
@@ -726,7 +762,35 @@ function Tag({ children, tone, title }) {
   );
 }
 
-function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
+const PAGE_SIZE = 50;
+
+// "1-50 of 120" with previous and next; the arrows only when there is more
+// than one page.
+function ListPager({ theme, page, pageSize, total, onPage }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total ? page * pageSize + 1 : 0;
+  const to = Math.min(total, (page + 1) * pageSize);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px",
+                  borderTop: `1px solid ${theme.border}`, fontSize: 12, color: theme.textMuted }}>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+        {pages > 1 ? `${from}-${to} of ${total}` : `${total} brand${total === 1 ? "" : "s"}`}
+      </span>
+      <div style={{ flex: 1 }} />
+      {pages > 1 && (
+        <>
+          <Btn size="sm" variant="secondary" onClick={() => onPage(page - 1)} disabled={page <= 0}
+               aria-label="Previous page">‹</Btn>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{page + 1} / {pages}</span>
+          <Btn size="sm" variant="secondary" onClick={() => onPage(page + 1)} disabled={page >= pages - 1}
+               aria-label="Next page">›</Btn>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QueueList({ leads, current, onSelect, theme, drafting, maxHeight, footer }) {
   const activeRef = useRef(null);
   useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest" }); }, [current?.handle]);
 
@@ -784,6 +848,7 @@ function QueueList({ leads, current, onSelect, theme, drafting, maxHeight }) {
           );
         })}
       </div>
+      {footer}
     </Card>
   );
 }
