@@ -111,11 +111,15 @@ export const dmOpen = (qy, { nonShopify, countries = [] }) => {
   // A brand whose creator call is weeks old has filled it; one with no dated
   // call (found another way) stays.
   const fresh = new Date(Date.now() - FRESH_CALL_DAYS * 86_400_000).toISOString();
+  // A brand the pipeline has since rejected (too big, dead store) is never
+  // offered, whatever tier it had when it was first published.
   let open = qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null).neq("decision", "hide")
+    .neq("status", "rejected")
     .not("is_agency", "is", true)
     .or(`intent_posted_at.is.null,intent_posted_at.gte."${fresh}"`)
     .or(`intent_caption.is.null,intent_caption.not.imatch."${CLOSED_CALL_RE}"`);
   open = nonShopify ? open.or("tier.not.is.null,status.eq.not_shopify") : open.not("tier", "is", null);
+  open = open.or("tier.is.null,tier.neq.reject");
   if (!countries.length) return open;
   // Codes are validated on the way in (settingProblem), so they are safe to
   // put in the filter string.
@@ -139,7 +143,8 @@ export function filterVerticals(qy, verticals) {
 export const countryOf = (r) => (r.country ? String(r.country).toUpperCase() : UNKNOWN_COUNTRY);
 
 export const isDmOpen = (r, { nonShopify, countries = [] }) => ["none", "drafted"].includes(r.dm_state || "none")
-  && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true && !staleCall(r) && !closedCall(r)
+  && !r.pushed_at && r.decision !== "hide" && r.status !== "rejected" && r.tier !== "reject"
+  && r.is_agency !== true && !staleCall(r) && !closedCall(r)
   && Boolean(r.tier || (nonShopify && r.status === "not_shopify"))
   && (!countries.length || countries.includes(countryOf(r)));
 

@@ -180,3 +180,12 @@ test("a gifting brand and a programme-page brand each get their own opening fact
   assert.match(factSheet(program, { language: "en" }), /creator \/ ambassador programme on their own site/);
   assert.match(factSheet(program, { language: "en" }), /Ambassador Programme - Wildmoor/);
 });
+
+
+test("a brand the pipeline rejected after it was published is not offered", () => {
+  const opts = { nonShopify: false, countries: [] };
+  const open = { dm_state: "none", tier: "C", status: "routed" };
+  assert.equal(isDmOpen(open, opts), true);
+  assert.equal(isDmOpen({ ...open, status: "rejected", tier: "reject" }, opts), false);
+  assert.equal(isDmOpen({ ...open, status: "rejected" }, opts), false);
+});
