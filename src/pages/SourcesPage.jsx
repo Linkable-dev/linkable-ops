@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
+import { HelpList, HelpTip } from "../components/gtm/QueueParts";
 
 /**
  * Where brand leads come from: the prospector's campaigns.
@@ -11,12 +12,26 @@ import { Btn } from "../components/ui/Button";
  * campaign sitting on top of the email queue read as if it only fed email,
  * when the Instagram queue is filled from the same leads.
  */
+// What the "?" beside the title says.
+const SOURCES_HELP = [
+  ["What this is", "The searches the pipeline runs to find brands: a Shopify store list, gifted posts, creator programme pages, Linkable creators' posts, calls for creators. Each one is a campaign."],
+  ["Where the brands go", "Every brand a campaign finds goes to both queues, Email and Instagram, and is contacted on one of them."],
+  ["Goal and budget", "Each campaign stops itself when it has found the leads it was asked for or has spent its budget. A daily one runs every day on a monthly budget and never stops on its own."],
+  ["Start and Hold", "A campaign is created switched off, because every pass spends money. Start runs it on the next pipeline run; Hold stops it."],
+  ["Right now", "Find new brands on Email or Instagram runs the pipeline immediately instead of waiting for the schedule."],
+];
+
 export default function SourcesPage() {
   const { theme } = useTheme();
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Sources</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Sources</h1>
+          <HelpTip title="Where brand leads come from">
+            <HelpList items={SOURCES_HELP} />
+          </HelpTip>
+        </div>
         <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 680 }}>
           The searches that find brands. Every lead they find goes to both queues,
           Email and Instagram, and each brand is contacted on one of them.

@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
-import { ListPager, MultiPicker, SortPicker, Tag } from "../components/gtm/QueueParts";
+import { FindBrands, HelpList, HelpTip, ListPager, MultiPicker, SortPicker, Tag } from "../components/gtm/QueueParts";
 import { countedOptions, useRowsThatFit, useWide } from "../components/gtm/queueHooks";
 import ProspectingRepliesPage from "./ProspectingRepliesPage";
 
@@ -58,6 +58,17 @@ const SORTS = [
   { value: "distinct_creators_90d:desc", label: "Most creators" },
   { value: "first_seen_at:desc", label: "Newest" },
   { value: "brand_name:asc", label: "Brand A-Z" },
+];
+
+// What the "?" beside the title says.
+const EMAIL_HELP = [
+  ["What this is", "Brands the pipeline found, to be emailed through Lemlist. Nothing is sent unless somebody marks it Send."],
+  ["How to review", "Open a brand on the left. The panel shows why it is a lead, who posted about it, and the email it would get, follow-ups included. Send, next queues it and opens the next brand. Keys: s send, j/k move."],
+  ["Several at once", "Tick brands in the list, or the box at the top for the whole page, then Send or Never email them together."],
+  ["Never email", "Takes the brand out for good: the pipeline adds it to the suppression list."],
+  ["The tabs", "To review is waiting for a decision. Queued goes to Lemlist on the next pipeline run, every two hours; Unqueue stops it until then. Sent shows what went and what came back. Needs review cannot be emailed yet, and says why. Results is the replies, with Draft a reply on the ones worth answering."],
+  ["Tiers", "A has no affiliate app, B has one and gets a different sequence, C is never emailed. A DMed tag means the brand was written to on Instagram, so it is not emailed."],
+  ["Find new brands", "Starts a pipeline run now instead of waiting for the schedule. New brands land here and on Instagram. Once every half hour."],
 ];
 
 const ROW_PX = 52;
@@ -220,6 +231,35 @@ export default function EmailPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [leads, current]);
 
+  // "Find new brands": the same pipeline run the Instagram tab starts. While
+  // it runs, look every 30 seconds so its brands arrive without a reload.
+  const [search, setSearch] = useState(null);
+  const [finding, setFinding] = useState(false);
+  const [findProblem, setFindProblem] = useState(null);
+  const loadSearch = useCallback(() => {
+    api.getBrandSearch().then((out) => setSearch(out.search)).catch(() => {});
+  }, []);
+  useEffect(() => { loadSearch(); }, [loadSearch]);
+  const searching = Boolean(search?.running);
+  useEffect(() => {
+    if (!searching) return undefined;
+    const timer = setInterval(() => { loadSearch(); load(true); }, 30_000);
+    return () => clearInterval(timer);
+  }, [searching, loadSearch, load]);
+  async function findBrands() {
+    setFinding(true);
+    setFindProblem(null);
+    try {
+      const out = await api.findBrands();
+      setSearch(out.search);
+    } catch (err) {
+      setFindProblem(err?.message || "could not start the search");
+      loadSearch();
+    } finally {
+      setFinding(false);
+    }
+  }
+
   const byView = stats?.byView || {};
   const tickable = view !== "sent";
   const pager = data && <ListPager theme={theme} page={page} pageSize={pageSize} total={data.total}
@@ -229,10 +269,14 @@ export default function EmailPage() {
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Email</h1>
+        <HelpTip title="Emailing brands">
+          <HelpList items={EMAIL_HELP} />
+        </HelpTip>
         <span style={{ color: theme.textMuted, fontSize: 13 }}>
-          Read the email, mark it Send, and the next tick hands it to Lemlist. Nothing is
+          Read the email, mark it Send, and the next run hands it to Lemlist. Nothing is
           emailed unless it is marked Send.
         </span>
+        <FindBrands theme={theme} search={search} busy={finding} problem={findProblem} onFind={findBrands} />
       </div>
 
       {problem && (

@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
-import { ListPager, MultiPicker, SortPicker, Stat, Tag } from "../components/gtm/QueueParts";
+import { FindBrands, HelpList, HelpTip, ListPager, MultiPicker, SortPicker, Stat, Tag } from "../components/gtm/QueueParts";
 import { countedOptions, useRowsThatFit, useWide } from "../components/gtm/queueHooks";
 
 /**
@@ -42,6 +42,17 @@ const oldCall = (lead) => Boolean(lead.intent_posted_at)
 // Instagram throttles an account that opens too many new conversations in a
 // day; well before that, a burst of identical-looking DMs reads as spam.
 const DAILY_SOFT_CAP = 40;
+
+// What the "?" beside the title says.
+const INSTAGRAM_HELP = [
+  ["What this is", "Brands to DM on Instagram. Instagram does not let software start a conversation, so a person sends each one; the message is already written."],
+  ["How to send", "Open a brand on the left, read their post, then Copy and open DM. Paste it in the conversation that opens, send, and press Mark sent, next. Keys: c copy and open, s mark sent, j/k move."],
+  ["Changing the message", "Edit the text directly, Rewrite for a new draft, or switch language with the In Italiano / In English button."],
+  ["The tabs", "To send is the queue. Follow up lists DMs unanswered for three days, with a follow-up written. Sent, Skipped and Not brands (agencies, platforms, creators) hold the rest; Results shows replies and signups."],
+  ["Filters", "Found any way, verticals and the order are only for you. The row marked For the whole team changes the queue for everybody."],
+  ["Find new brands", "Searches Instagram for brands asking for creators now, instead of at the next scheduled run. Once every half hour; it is the same search as on Email."],
+  ["Limits", `Keep to about ${DAILY_SOFT_CAP} new DMs a day from one account. A brand DMed here is never emailed.`],
+];
 
 const ago = (iso) => {
   if (!iso) return "";
@@ -297,6 +308,9 @@ export default function InstagramDmPage() {
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Instagram DMs</h1>
+        <HelpTip title="Writing to brands on Instagram">
+          <HelpList items={INSTAGRAM_HELP} />
+        </HelpTip>
         <span style={{ color: theme.textMuted, fontSize: 13 }}>
           Copy the message, send it in the conversation that opens, mark it sent.
           Brands marked sent stay out of the email sequence.
@@ -490,33 +504,6 @@ const countryName = (code) => (code === "UNKNOWN" ? "Unknown country"
 
 // The logged-in Instagram read feeds the queue. When it stops - an expired
 // session, most often - the queue quietly stops growing, so it is said here.
-// "Find new brands": starts a search now rather than at the next four-hourly
-// run. The server refuses while one is running and for half an hour after.
-function FindBrands({ theme, search, busy, problem, onFind }) {
-  const hhmm = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const running = Boolean(search?.running);
-  const coolingUntil = !running && search?.availableAt ? search.availableAt : null;
-  let note = null;
-  if (running) note = `Searching Instagram since ${hhmm(search.requestedAt)}. New brands appear here in a few minutes.`;
-  else if (search?.requestedAt) {
-    const n = search.newBrands || 0;
-    note = `Last search ${hhmm(search.requestedAt)} · ${n} new ${n === 1 ? "brand" : "brands"}`
-      + (coolingUntil ? ` · next from ${hhmm(coolingUntil)}` : "");
-  }
-  return (
-    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-      {(problem || note) && (
-        <span style={{ fontSize: 12, color: problem ? theme.warning : theme.textMuted }}>{problem || note}</span>
-      )}
-      <Btn size="sm" onClick={onFind} loading={busy || running} disabled={busy || running || Boolean(coolingUntil)}
-           title={coolingUntil ? `One search every half hour: next from ${hhmm(coolingUntil)}`
-             : "Search Instagram for brands asking for creators, now"}>
-        {running ? "Searching…" : "Find new brands"}
-      </Btn>
-    </div>
-  );
-}
-
 function FeedBanner({ status, theme }) {
   if (!status) return null;
   const last = status.last_scraped_at ? new Date(status.last_scraped_at) : null;

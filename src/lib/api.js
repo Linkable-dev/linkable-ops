@@ -74,6 +74,9 @@ export const api = {
     }),
   classifyInstagramLeads: () => request("/prospecting/instagram/classify", { method: "POST" }),
   findInstagramBrands: () => request("/prospecting/instagram/find", { method: "POST" }),
+  // The same run, from the Email tab: its state, and starting it.
+  getBrandSearch: () => request("/prospecting/search"),
+  findBrands: () => request("/prospecting/search", { method: "POST" }),
   getInstagramResults: () => request("/prospecting/instagram/results"),
   sendInstagramReply: (handle, text) =>
     request(`/prospecting/instagram/${encodeURIComponent(handle)}/reply`, {

@@ -158,3 +158,90 @@ export function ListPager({ theme, page, pageSize, total, onPage }) {
     </div>
   );
 }
+
+// "Find new brands": starts a prospector run now rather than at the next
+// scheduled one. One run fills both queues, Email and Instagram, so the two
+// tabs share it; the server refuses while one is running and for half an hour
+// after.
+export function FindBrands({ theme, search, busy, problem, onFind }) {
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const running = Boolean(search?.running);
+  const coolingUntil = !running && search?.availableAt ? search.availableAt : null;
+  let note = null;
+  if (running) note = `Searching Instagram since ${hhmm(search.requestedAt)}. New brands appear here in a few minutes.`;
+  else if (search?.requestedAt) {
+    const n = search.newBrands || 0;
+    note = `Last search ${hhmm(search.requestedAt)} · ${n} new ${n === 1 ? "brand" : "brands"}`
+      + (coolingUntil ? ` · next from ${hhmm(coolingUntil)}` : "");
+  }
+  return (
+    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      {(problem || note) && (
+        <span style={{ fontSize: 12, color: problem ? theme.warning : theme.textMuted }}>{problem || note}</span>
+      )}
+      <Btn size="sm" onClick={onFind} loading={busy || running} disabled={busy || running || Boolean(coolingUntil)}
+           title={coolingUntil ? `One search every half hour: next from ${hhmm(coolingUntil)}`
+             : "Search Instagram for brands asking for creators, now"}>
+        {running ? "Searching…" : "Find new brands"}
+      </Btn>
+    </div>
+  );
+}
+
+// A "?" beside a page title: what the page is for and how to work it, on
+// hover or click, so the page itself can stay short. Esc or a click outside
+// closes it.
+export function HelpTip({ title, children, label = "How this page works" }) {
+  const { theme } = useTheme();
+  const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  const shown = open || hover;
+  return (
+    <span ref={ref} style={{ position: "relative", display: "inline-flex", alignSelf: "center" }}
+          onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <button type="button" aria-label={label} aria-expanded={shown} onClick={() => setOpen((v) => !v)}
+              style={{
+                width: 20, height: 20, borderRadius: 999, padding: 0, cursor: "pointer",
+                border: `1px solid ${shown ? theme.text : theme.border}`, background: theme.surface,
+                color: shown ? theme.text : theme.textMuted, fontFamily: "inherit", fontSize: 11.5,
+                fontWeight: 600, lineHeight: "18px",
+              }}>
+        ?
+      </button>
+      {shown && (
+        <div role="tooltip" style={{
+          position: "absolute", left: 0, top: "calc(100% + 8px)", zIndex: 30, width: 400, maxWidth: "80vw",
+          background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12,
+          boxShadow: theme.shadowMd, padding: "14px 16px", fontSize: 12.5, lineHeight: 1.55,
+          color: theme.textMid, fontWeight: 400, cursor: "default",
+        }}>
+          {title && <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 6 }}>{title}</div>}
+          {children}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// The body of a HelpTip: a few short points, each a heading and a sentence.
+export function HelpList({ items }) {
+  const { theme } = useTheme();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {items.map(([head, text]) => (
+        <div key={head}>
+          <span style={{ color: theme.text, fontWeight: 600 }}>{head}.</span> {text}
+        </div>
+      ))}
+    </div>
+  );
+}

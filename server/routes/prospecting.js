@@ -747,15 +747,14 @@ export function prospectingRoutes() {
       if (error.code === "42703" || /email_(campaign|variables)/.test(error.message || "")) return null;
       throw error;
     }
-    if (!data?.email_campaign) {
+    if (data?.tier === "C") {
       return { pushed: false, preview: false, steps: [], email,
-               note: data?.tier === "C"
-                 ? "Tier C has no email sequence, so marking it Send emails nobody."
-                 : "No email campaign is set for this tier." };
+               note: "Tier C has no email sequence, so marking it Send emails nobody." };
     }
-    if (!data.email_variables) {
+    // Both empty until the prospector's next sync publishes this lead.
+    if (!data?.email_campaign || !data.email_variables) {
       return { pushed: false, preview: false, steps: [], email,
-               note: "The pipeline has not published this lead's email yet." };
+               note: "No preview yet: the pipeline publishes this brand's email on its next run (every two hours)." };
     }
     const sequence = await campaignSequence(data.email_campaign);
     return {
@@ -1149,7 +1148,25 @@ export function prospectingRoutes() {
   // "Find new brands": start a prospector run now. Refused while one is
   // running and for half an hour after the last one - every search is a
   // session on the scraping Instagram account.
-  router.post("/instagram/find", async (_req, res) => {
+  // The same button on the Email tab. One run finds brands for both queues,
+  // so the two share the run and its half-hour cooldown; the email side
+  // counts what the last run added to the email leads.
+  router.get("/search", async (_req, res) => {
+    const [requested, feed] = await Promise.all([
+      supabase.from(SETTINGS).select("value").eq("key", SEARCH_REQUESTED_KEY).maybeSingle(),
+      supabase.from("prospector_feed_status").select("updated_at").eq("id", 1).maybeSingle(),
+    ]);
+    const state = searchState({ requestedAt: requested?.data?.value, feedUpdatedAt: feed?.data?.updated_at });
+    let newBrands = 0;
+    if (state.requestedAt) {
+      const { count } = await EMAIL_LEADS(supabase.from(TABLE).select("handle", { count: "exact", head: true }))
+        .gte("first_seen_at", state.requestedAt);
+      newBrands = count || 0;
+    }
+    res.json({ search: { ...state, newBrands } });
+  });
+
+  router.post(["/instagram/find", "/search"], async (_req, res) => {
     const [requested, feed] = await Promise.all([
       supabase.from(SETTINGS).select("value").eq("key", SEARCH_REQUESTED_KEY).maybeSingle(),
       supabase.from("prospector_feed_status").select("updated_at").eq("id", 1).maybeSingle(),
