@@ -24,7 +24,7 @@ export const DM_COLUMNS = [
   "dm_sent_by", "dm_replied_at", "vertical", "vertical_ai", "vertical_effective",
   "is_agency", "intent_posted_at", "dm_priority", "dm_variant", "dm_followup_text",
   "dm_followup_sent_at", "converted_at", "converted_match", "dm_reply_text", "ig_user_id",
-  "myshopify_domain", "dm_reasons", "linkable_creator_count", "linkable_creators",
+  "myshopify_domain", "dm_reasons", "linkable_creator_count", "linkable_creators", "source",
 ].join(",");
 
 // A DM unanswered for this long gets one follow-up.
@@ -139,6 +139,43 @@ export function filterVerticals(qy, verticals) {
     ? qy.or(`vertical_effective.in.(${codes.join(",")}),vertical_effective.is.null`)
     : qy.is("vertical_effective", null);
 }
+
+// How a brand was found, grouped from linkable-prospector's source names (the
+// `name` of each discovery source). An admin filters the queue by path to judge
+// each one on its own leads. A source not listed here reads as OTHER_PATH, so a
+// new one shows up under "Found another way" instead of vanishing.
+export const PATHS = {
+  linkable: { label: "Linkable creators post about them", sources: ["linkable_creators"] },
+  gifted: { label: "Gifted posts", sources: ["gifted_posts"] },
+  programme: { label: "Creator programme page", sources: ["program_pages"] },
+  calls: { label: "Asked for creators", sources: ["feed", "creator_calls", "hashtag"] },
+  tags: { label: "Tagged by creators", sources: ["creator_posts", "creator_following", "own_audience"] },
+};
+export const OTHER_PATH = "OTHER";
+const KNOWN_SOURCES = Object.values(PATHS).flatMap((p) => p.sources);
+
+export const pathOf = (r) => Object.keys(PATHS).find((k) => PATHS[k].sources.includes(r.source)) || OTHER_PATH;
+
+export function filterPaths(qy, paths) {
+  if (!paths?.length) return qy;
+  const sources = paths.filter((p) => p in PATHS).flatMap((p) => PATHS[p].sources);
+  if (!paths.includes(OTHER_PATH)) return qy.in("source", sources.length ? sources : ["--"]);
+  const other = `source.is.null,source.not.in.(${KNOWN_SOURCES.join(",")})`;
+  return qy.or(sources.length ? `source.in.(${sources.join(",")}),${other}` : other);
+}
+
+// The orders a person can pick. Each ends on handle, so paging through rows
+// that tie on everything else neither repeats nor skips a brand.
+const desc = { ascending: false, nullsFirst: false };
+export const DM_SORTS = {
+  score: { label: "Best chance first", apply: (qy) => todoOrder(qy) },
+  newest: { label: "Newest found", apply: (qy) => qy.order("first_seen_at", desc) },
+  posted: { label: "Most recent post", apply: (qy) => qy.order("intent_posted_at", desc) },
+  proof: { label: "Most Linkable creators", apply: (qy) => todoOrder(qy.order("linkable_creator_count", desc)) },
+  followers: { label: "Most followers", apply: (qy) => qy.order("ig_followers", desc) },
+  small: { label: "Fewest followers", apply: (qy) => qy.order("ig_followers", { ascending: true, nullsFirst: false }) },
+};
+export const sortDm = (qy, sort) => DM_SORTS[sort].apply(qy).order("handle", { ascending: true });
 
 export const countryOf = (r) => (r.country ? String(r.country).toUpperCase() : UNKNOWN_COUNTRY);
 

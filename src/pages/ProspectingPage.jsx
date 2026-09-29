@@ -49,6 +49,17 @@ import {
  * a button that quietly bills is worse than no button.
  */
 
+// How a lead was found; the keys are PATHS in server/lib/instagram-dm-queue.js.
+const PATHS = [
+  { value: "", label: "Found any way" },
+  { value: "linkable", label: "Linkable creators post about them" },
+  { value: "gifted", label: "Gifted posts" },
+  { value: "programme", label: "Creator programme page" },
+  { value: "calls", label: "Asked for creators" },
+  { value: "tags", label: "Tagged by creators" },
+  { value: "OTHER", label: "Found another way" },
+];
+
 const TIERS = [
   { value: "", label: "All tiers" },
   { value: "A", label: "Tier A" },
@@ -125,6 +136,7 @@ export default function ProspectingPage() {
   const [problem, setProblem] = useState(null);
   const [page, setPage] = useState(0);
   const [tier, setTier] = useState("");
+  const [path, setPath] = useState("");
   const [view, setView] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(null);
@@ -156,7 +168,7 @@ export default function ProspectingPage() {
     try {
       const [rows, s] = await Promise.all([
         api.getProspectingLeads({
-          tier, view, q,
+          tier, view, q, paths: path,
           sortBy: sort.sortBy, sortDir: sort.sortDir,
           limit: PAGE_SIZE, offset: page * PAGE_SIZE,
         }),
@@ -174,7 +186,7 @@ export default function ProspectingPage() {
     } finally {
       setLoading(false);
     }
-  }, [tier, view, q, page, sort.sortBy, sort.sortDir]);
+  }, [tier, path, view, q, page, sort.sortBy, sort.sortDir]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -250,6 +262,10 @@ export default function ProspectingPage() {
           <div style={{ width: 150 }}>
             <Select value={tier} onChange={(v) => { setTier(v); setPage(0); }}
                     options={withCounts(TIERS, stats?.byTier)} ariaLabel="Tier" size="sm" />
+          </div>
+          <div style={{ width: 250 }}>
+            <Select value={path} onChange={(v) => { setPath(v); setPage(0); }}
+                    options={withCounts(PATHS, stats?.byPath)} ariaLabel="Found by" size="sm" />
           </div>
           <input
             value={q}

@@ -26,7 +26,7 @@ import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-grap
 import {
   DM_COLUMNS, SETTINGS, readSettings, settingProblem, optionsFrom, countryOf, dmOpen, isDmOpen, todoOrder,
   VERTICALS, NO_VERTICAL, verticalOf, filterVerticals, followupDue, isFollowupDue, FOLLOWUP_DAYS,
-  shapeDm, draftBatch, DRAFT_BATCH,
+  shapeDm, draftBatch, DRAFT_BATCH, PATHS, OTHER_PATH, pathOf, filterPaths, DM_SORTS, sortDm,
 } from "../lib/instagram-dm-queue.js";
 
 const TABLE = "prospector_leads";
@@ -159,6 +159,9 @@ export function prospectingRoutes() {
     if (decision) query = query.in("decision", String(decision).split(","));
     if (status) query = query.in("status", String(status).split(","));
     if (VIEWS[view]) query = VIEWS[view](query);
+    // How the brand was found (the Found by filter), grouped as on the DM page.
+    const paths = String(req.query.paths || "").split(",").filter((p) => p in PATHS || p === OTHER_PATH);
+    query = filterPaths(query, paths);
     if (q) {
       const term = `%${q}%`;
       query = query.or(
@@ -181,7 +184,7 @@ export function prospectingRoutes() {
   router.get("/stats", async (_req, res) => {
     const { data, error } = await supabase
       .from(TABLE)
-      .select("tier,decision,status,contact_email,affiliate_app,pushed_at");
+      .select("tier,decision,status,contact_email,affiliate_app,pushed_at,source");
     if (error) return handleError(res, error, "loading stats");
 
     const rows = (data || []).filter(isEmailLead);
@@ -195,6 +198,7 @@ export function prospectingRoutes() {
     res.json({
       total: rows.length,
       byTier: tally("tier"),
+      byPath: rows.reduce((acc, r) => { acc[pathOf(r)] = (acc[pathOf(r)] || 0) + 1; return acc; }, {}),
       byDecision: tally("decision"),
       byStatus: tally("status"),
       // The two numbers that say whether this is working: how many are ready to
@@ -886,18 +890,20 @@ export function prospectingRoutes() {
   // here, and a lead marked sent here is read back by the pipeline and never
   // started on the email sequence.
 
+  // Each view is a filter and the order it opens in; a sort the person picks
+  // replaces the order, never the filter.
   const DM_VIEWS = {
-    todo: (qy, opts) => todoOrder(dmOpen(qy, opts)),
-    sent: (qy) => qy.in("dm_state", ["sent", "replied"])
-      .order("dm_sent_at", { ascending: false, nullsFirst: false }),
-    skipped: (qy) => qy.eq("dm_state", "skipped")
-      .order("first_seen_at", { ascending: false, nullsFirst: false }),
+    todo: { filter: (qy, opts) => dmOpen(qy, opts), order: todoOrder },
+    sent: { filter: (qy) => qy.in("dm_state", ["sent", "replied"]),
+            order: (qy) => qy.order("dm_sent_at", { ascending: false, nullsFirst: false }) },
+    skipped: { filter: (qy) => qy.eq("dm_state", "skipped"),
+               order: (qy) => qy.order("first_seen_at", { ascending: false, nullsFirst: false }) },
     // Sent, unanswered for FOLLOWUP_DAYS, not followed up: the second message.
-    followup: (qy) => followupDue(qy).order("dm_sent_at", { ascending: true }),
+    followup: { filter: (qy) => followupDue(qy), order: (qy) => qy.order("dm_sent_at", { ascending: true }) },
     // Taken out of the queue as not a brand (Claude, or a person), so the
     // verdict can be checked and undone.
-    agencies: (qy) => qy.eq("is_agency", true).in("dm_state", ["none", "drafted"])
-      .order("classified_at", { ascending: false, nullsFirst: false }),
+    agencies: { filter: (qy) => qy.eq("is_agency", true).in("dm_state", ["none", "drafted"]),
+                order: (qy) => qy.order("classified_at", { ascending: false, nullsFirst: false }) },
   };
 
   // --- settings an admin chooses for the whole team ----------------------
@@ -946,25 +952,34 @@ export function prospectingRoutes() {
     const verticals = String(req.query.verticals || "").split(",")
       .map((v) => v.trim().toUpperCase())
       .filter((v) => v in VERTICALS || v === NO_VERTICAL);
+    const paths = String(req.query.paths || "").split(",")
+      .map((p) => p.trim())
+      .filter((p) => p in PATHS || p === OTHER_PATH);
+    const sort = DM_SORTS[req.query.sort] ? req.query.sort : null;
 
-    const [list, all, feed, requested] = await Promise.all([
-      DM_VIEWS[view](filterVerticals(supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), verticals), opts)
-        .range(offset, offset + limit - 1),
+    let list = DM_VIEWS[view].filter(
+      filterPaths(filterVerticals(supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), verticals), paths),
+      opts,
+    );
+    list = sort ? sortDm(list, sort) : DM_VIEWS[view].order(list).order("handle", { ascending: true });
+
+    const [listed, all, feed, requested] = await Promise.all([
+      list.range(offset, offset + limit - 1),
       supabase.from(TABLE).select("tier,status,country,vertical,vertical_ai,vertical_effective,is_agency,decision,"
         + "pushed_at,dm_state,dm_text,dm_sent_at,dm_followup_sent_at,converted_at,intent_posted_at,"
-        + "intent_caption,first_seen_at"),
+        + "intent_caption,first_seen_at,source"),
       supabase.from("prospector_feed_status").select("*").eq("id", 1).maybeSingle(),
       supabase.from(SETTINGS).select("value").eq("key", SEARCH_REQUESTED_KEY).maybeSingle(),
     ]);
-    if (list.error) return dmError(res, list.error, "listing the Instagram queue");
+    if (listed.error) return dmError(res, listed.error, "listing the Instagram queue");
     if (all.error) return dmError(res, all.error, "counting the Instagram queue");
 
     const rows = all.data || [];
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     res.json({
-      leads: (list.data || []).map(shapeDm),
-      total: list.count ?? (list.data || []).length,
+      leads: (listed.data || []).map(shapeDm),
+      total: listed.count ?? (listed.data || []).length,
       settings,
       counts: {
         todo: rows.filter((r) => isDmOpen(r, opts)).length,
@@ -1013,6 +1028,14 @@ export function prospectingRoutes() {
         .filter((r) => isDmOpen(r, opts))
         .reduce((acc, r) => { acc[verticalOf(r)] = (acc[verticalOf(r)] || 0) + 1; return acc; }, {}),
       verticalLabels: VERTICALS,
+      // Per path, over the queue the vertical filter leaves, so each choice in
+      // the "Found by" filter says how many brands it would show.
+      paths: rows
+        .filter((r) => isDmOpen(r, opts) && (!verticals.length || verticals.includes(verticalOf(r))))
+        .reduce((acc, r) => { acc[pathOf(r)] = (acc[pathOf(r)] || 0) + 1; return acc; }, {}),
+      pathLabels: { ...Object.fromEntries(Object.entries(PATHS).map(([k, p]) => [k, p.label])),
+                    [OTHER_PATH]: "Found another way" },
+      sorts: Object.fromEntries(Object.entries(DM_SORTS).map(([k, s]) => [k, s.label])),
       maxChars: MAX_DM_CHARS,
     });
   });

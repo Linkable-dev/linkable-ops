@@ -198,3 +198,45 @@ test("digits in a creator's handle are not a quoted number", () => {
   const bad = finishDraft("Hey Wildmoor!\n\n13 creators on Linkable already post about Wildmoor.", withProof);
   assert.ok(bad.problems.some((p) => p.includes("number")), "a real 13 is still refused");
 });
+
+// A query builder that records what it was asked, for the filter and sort tests.
+const recorder = () => {
+  const calls = [];
+  const qy = new Proxy({}, { get: (_t, op) => (...args) => { calls.push([op, ...args]); return qy; } });
+  return { qy, calls };
+};
+
+test("each discovery source belongs to one path, and an unknown one to OTHER", async () => {
+  const { pathOf, PATHS, OTHER_PATH } = await import("../lib/instagram-dm-queue.js");
+  assert.equal(pathOf({ source: "linkable_creators" }), "linkable");
+  assert.equal(pathOf({ source: "gifted_posts" }), "gifted");
+  assert.equal(pathOf({ source: "program_pages" }), "programme");
+  assert.equal(pathOf({ source: "feed" }), "calls");
+  assert.equal(pathOf({ source: "something_new" }), OTHER_PATH);
+  assert.equal(pathOf({ source: null }), OTHER_PATH);
+  const all = Object.values(PATHS).flatMap((p) => p.sources);
+  assert.equal(new Set(all).size, all.length, "a source is in one path only");
+});
+
+test("the path filter reaches the query", async () => {
+  const { filterPaths } = await import("../lib/instagram-dm-queue.js");
+  let r = recorder();
+  filterPaths(r.qy, []);
+  assert.deepEqual(r.calls, [], "no paths chosen, no filter");
+  r = recorder();
+  filterPaths(r.qy, ["linkable", "programme"]);
+  assert.deepEqual(r.calls, [["in", "source", ["linkable_creators", "program_pages"]]]);
+  r = recorder();
+  filterPaths(r.qy, ["gifted", "OTHER"]);
+  assert.equal(r.calls[0][0], "or");
+  assert.match(r.calls[0][1], /^source\.in\.\(gifted_posts\),source\.is\.null,source\.not\.in\.\(/);
+});
+
+test("every sort ends on handle, so pages neither repeat nor skip a brand", async () => {
+  const { DM_SORTS, sortDm } = await import("../lib/instagram-dm-queue.js");
+  for (const key of Object.keys(DM_SORTS)) {
+    const r = recorder();
+    sortDm(r.qy, key);
+    assert.deepEqual(r.calls.at(-1), ["order", "handle", { ascending: true }], key);
+  }
+});

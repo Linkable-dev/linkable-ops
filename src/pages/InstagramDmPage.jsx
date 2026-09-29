@@ -4,6 +4,8 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
+import { Select } from "../components/ui/Select";
+import { Pagination } from "../components/ui/Pagination";
 
 /**
  * Instagram DMs to brands: the page drafts, a person sends.
@@ -84,6 +86,25 @@ export default function InstagramDmPage() {
   useEffect(() => {
     try { localStorage.setItem("ig-dm-verticals", JSON.stringify(verticals)); } catch { /* private window */ }
   }, [verticals]);
+  // How the brands were found, and the order: the same kind of personal
+  // choice, so an admin can judge one search path at a time.
+  const [paths, setPaths] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("ig-dm-paths") || "[]"); } catch { return []; }
+  });
+  const [sort, setSort] = useState(() => {
+    try { return localStorage.getItem("ig-dm-sort") || ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("ig-dm-paths", JSON.stringify(paths));
+      localStorage.setItem("ig-dm-sort", sort);
+    } catch { /* private window */ }
+  }, [paths, sort]);
+  // Paged by the server: the page asks for one page at a time, filtered and
+  // sorted in the query, so every brand is reachable however long the queue.
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  useEffect(() => { setPage(0); }, [view, verticals, paths, sort, pageSize]);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
 
@@ -98,22 +119,24 @@ export default function InstagramDmPage() {
     try {
       // Results has its own endpoint; the queue call still refreshes the counts.
       const out = await api.getInstagramDms({
-        view: view === "results" ? "todo" : view, limit: view === "results" ? 1 : 100,
-        verticals: verticals.join(","),
+        view: view === "results" ? "todo" : view, limit: view === "results" ? 1 : pageSize,
+        offset: view === "results" ? 0 : page * pageSize,
+        verticals: verticals.join(","), paths: paths.join(","), sort,
       });
       if (request !== requestRef.current) return;
       setData(out);
       setMeta({ counts: out.counts, settings: out.settings, countries: out.countries || {},
                 feedStatus: out.feedStatus, instagramReplies: out.instagramReplies, search: out.search,
                 followupDays: out.followupDays,
-                verticals: out.verticals || {}, verticalLabels: out.verticalLabels || {} });
+                verticals: out.verticals || {}, verticalLabels: out.verticalLabels || {},
+                paths: out.paths || {}, pathLabels: out.pathLabels || {}, sorts: out.sorts || {} });
       setProblem(null);
     } catch (err) {
       if (request === requestRef.current) setProblem(err?.message || "could not load the queue");
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
-  }, [view, verticals]);
+  }, [view, verticals, paths, sort, page, pageSize]);
 
   useEffect(() => { setSelected(null); setData(null); load(); }, [load]);
 
@@ -171,7 +194,8 @@ export default function InstagramDmPage() {
 
   // Messages are written without anybody asking: a brand in the queue with no
   // message is a brand nobody can send to. Ten at a time (one serverless call),
-  // until the list on screen is covered.
+  // until the list on screen is covered - the brands on this page, named, so a
+  // filtered or later page gets its messages rather than the top of the queue.
   const draftMissing = useCallback(async (followUp = false) => {
     let done = 0;
     let failed = 0;
@@ -183,8 +207,14 @@ export default function InstagramDmPage() {
         const verdict = await api.classifyInstagramLeads().catch(() => null);
         if (verdict?.agencies) await load(true);
       }
+      const tried = new Set();
       for (let round = 0; round < 10 && viewRef.current === mode; round++) {
-        const out = await api.draftInstagramDms({ followUp });
+        const handles = leadsRef.current
+          .filter((l) => !(followUp ? l.dm_followup_text : l.dm_text) && !tried.has(l.handle))
+          .map((l) => l.handle).slice(0, 10);
+        if (!handles.length) break;
+        handles.forEach((h) => tried.add(h));
+        const out = await api.draftInstagramDms({ handles, followUp });
         done += out.drafted?.length || 0;
         failed += out.failed?.length || 0;
         for (const d of out.drafted || []) settle(d, true);
@@ -211,11 +241,13 @@ export default function InstagramDmPage() {
     // Once per shape of the queue, and only when something is missing, so a
     // brand whose message keeps failing does not loop.
     if (!data || !["todo", "followup"].includes(view) || !missing || drafting) return;
-    const key = `${view}:${counts.todo}:${counts.followup}:${counts.nonShopify}:${JSON.stringify(meta?.settings)}`;
+    const key = `${view}:${page}:${pageSize}:${paths}:${verticals}:${sort}:${counts.todo}:${counts.followup}`
+      + `:${counts.nonShopify}:${JSON.stringify(meta?.settings)}`;
     if (startedFor.current === key) return;
     startedFor.current = key;
     draftMissing(view === "followup");
-  }, [data, view, missing, drafting, counts.todo, counts.followup, counts.nonShopify, meta?.settings, draftMissing]);
+  }, [data, view, missing, drafting, page, pageSize, paths, verticals, sort,
+      counts.todo, counts.followup, counts.nonShopify, meta?.settings, draftMissing]);
 
   // Admin choices for the whole team: which brands are in the queue at all.
   async function saveSetting(key, value) {
@@ -255,6 +287,8 @@ export default function InstagramDmPage() {
   const chosenCountries = meta?.settings?.dm_countries || [];
   const verticalLabels = meta?.verticalLabels || {};
   const verticalName = (code) => (code === "NONE" ? "Not classified" : verticalLabels[code] || code);
+  const pathName = (code) => meta?.pathLabels?.[code] || code;
+  const filtered = verticals.length > 0 || paths.length > 0;
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -296,15 +330,29 @@ export default function InstagramDmPage() {
             Writing messages… {drafting.done} done{drafting.failed ? `, ${drafting.failed} failed` : ""}
           </span>
         )}
-        {verticals.length > 0 && data && view === "todo" && (
+        {filtered && data && view !== "results" && (
           <span style={{ fontSize: 12, color: theme.textMuted }}>{data.total} shown</span>
         )}
-        {meta && (
-          <MultiPicker theme={theme} allLabel="All verticals" noun="verticals"
-                       title="Only show these verticals (just for you)"
-                       options={countedOptions(meta.verticals, verticals, verticalName)}
-                       chosen={verticals} onChange={setVerticals}
-                       short={(o) => o.label.split(" & ")[0]} />
+        {meta && view !== "results" && (
+          <>
+            <MultiPicker theme={theme} allLabel="Found any way" noun="paths"
+                         title="Only show brands found this way (just for you)"
+                         options={countedOptions(meta.paths, paths, pathName)}
+                         chosen={paths} onChange={setPaths}
+                         short={(o) => o.label} />
+            <MultiPicker theme={theme} allLabel="All verticals" noun="verticals"
+                         title="Only show these verticals (just for you)"
+                         options={countedOptions(meta.verticals, verticals, verticalName)}
+                         chosen={verticals} onChange={setVerticals}
+                         short={(o) => o.label.split(" & ")[0]} />
+            <div style={{ width: 190 }}>
+              <Select size="sm" value={sort} onChange={setSort} ariaLabel="Sort"
+                      options={[{ value: "", label: view === "todo" ? "Best chance first" : "Default order" },
+                                ...Object.entries(meta.sorts || {})
+                                  .filter(([k]) => !(view === "todo" && k === "score"))
+                                  .map(([value, label]) => ({ value, label }))]} />
+            </div>
+          </>
         )}
       </div>
 
@@ -385,10 +433,9 @@ export default function InstagramDmPage() {
         </Card>
       )}
 
-      {data && view !== "results" && data.total > leads.length && (
-        <div style={{ fontSize: 12, color: theme.textMuted }}>
-          Showing the first {leads.length} of {data.total}. They move up as these are sent.
-        </div>
+      {data && view !== "results" && data.total > 0 && (
+        <Pagination page={page + 1} pageSize={pageSize} total={data.total}
+                    onPageChange={(n) => setPage(Math.max(0, n - 1))} onPageSizeChange={setPageSize} />
       )}
     </div>
   );
