@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
+import { Toggle } from "../components/ui/Toggle";
 import { HelpList, HelpTip } from "../components/gtm/QueueParts";
 
 /**
@@ -17,7 +18,7 @@ const SOURCES_HELP = [
   ["What this is", "The searches the pipeline runs to find brands: a Shopify store list, gifted posts, creator programme pages, Linkable creators' posts, calls for creators. Each one is a campaign."],
   ["Where the brands go", "Every brand a campaign finds goes to both queues, Email and Instagram, and is contacted on one of them."],
   ["Goal and budget", "Each campaign stops itself when it has found the leads it was asked for or has spent its budget. A daily one runs every day on a monthly budget and never stops on its own."],
-  ["Start and Hold", "A campaign is created switched off, because every pass spends money. Start runs it on the next pipeline run; Hold stops it."],
+  ["On and off", "A campaign is created switched off, because every pass spends money. Switch it on and it runs on the next pipeline run; switch it off to stop it."],
   ["Right now", "Find new brands on Email or Instagram runs the pipeline immediately instead of waiting for the schedule."],
 ];
 
@@ -41,7 +42,7 @@ export default function SourcesPage() {
       <p style={{ color: theme.textMuted, fontSize: 12, margin: 0 }}>
         Leads are produced by the linkable-prospector pipeline, which runs outside this app
         and syncs here. A campaign spends money on every pass, so it is created switched
-        off and only runs once somebody presses Start.
+        off and only runs once somebody switches it on.
       </p>
     </div>
   );
@@ -55,7 +56,7 @@ export default function SourcesPage() {
  * page wrote `state` directly, a pass finishing a second later would overwrite
  * the instruction it was meant to be following.
  *
- * Which is also why Start reads as "asked to start" until the runner agrees.
+ * Which is also why switching one on reads as "asked to start" until the runner agrees.
  * Anything else would be this page claiming something it cannot know.
  */
 function Campaigns({ theme }) {
@@ -75,11 +76,16 @@ function Campaigns({ theme }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // A switch that silently springs back is worse than one that says why.
+  const [failed, setFailed] = useState(null);
   async function setState(name, desired) {
     setBusy(name);
+    setFailed(null);
     try {
       await api.setProspectingCampaignState(name, desired);
       await load();
+    } catch (err) {
+      setFailed(`${name}: ${err?.message || "could not switch it"}`);
     } finally {
       setBusy(null);
     }
@@ -99,6 +105,7 @@ function Campaigns({ theme }) {
   return (
     <Card>
       <NewCampaign theme={theme} onCreated={load} />
+      {failed && <div style={{ padding: "8px 14px", color: theme.danger, fontSize: 12 }}>{failed}</div>}
       {!campaigns.length && (
         <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
           No campaigns yet. A campaign is a goal and a budget: it runs until it has the
@@ -150,14 +157,15 @@ function Campaigns({ theme }) {
             <span style={{ color: theme.textMuted, fontSize: 12 }}>
               {c.passes} pass{c.passes === 1 ? "" : "es"}
             </span>
-            <Btn
-              size="sm"
-              variant={asked ? "secondary" : "solid"}
+            {/* On means asked to run (desired_state), which is what a person
+                controls; the word beside the name says what the runner did. */}
+            <Toggle
+              checked={asked}
               disabled={busy === c.name}
-              onClick={() => setState(c.name, asked ? "off" : "running")}
-            >
-              {asked ? "Hold" : "Start"}
-            </Btn>
+              onChange={(next) => setState(c.name, next ? "running" : "off")}
+              label={`${c.name} on`}
+              title={asked ? "On: runs on the next pipeline run. Switch off to stop it." : "Off: switch on to run it."}
+            />
           </div>
         );
       })}
@@ -258,7 +266,7 @@ function NewCampaign({ theme, onCreated }) {
       <div style={{ width: "100%", color: theme.textMuted, fontSize: 11 }}>
         {error
           ? <span style={{ color: theme.danger }}>{error}</span>
-          : "Created switched off. Press Start when you want it running."}
+          : "Created switched off. Switch it on when you want it running."}
       </div>
     </div>
   );
