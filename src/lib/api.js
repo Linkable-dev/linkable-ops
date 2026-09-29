@@ -70,6 +70,7 @@ export const api = {
       method: "POST", body: JSON.stringify({ handles, language, limit, followUp }),
     }),
   classifyInstagramLeads: () => request("/prospecting/instagram/classify", { method: "POST" }),
+  findInstagramBrands: () => request("/prospecting/instagram/find", { method: "POST" }),
   getInstagramResults: () => request("/prospecting/instagram/results"),
   sendInstagramReply: (handle, text) =>
     request(`/prospecting/instagram/${encodeURIComponent(handle)}/reply`, {

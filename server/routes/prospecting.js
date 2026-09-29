@@ -19,6 +19,7 @@ import { sanitizeStyle, findStyleIssues } from "../automation/conversation-ai.js
 import { discover, buildFilters, discoveryKey, COSTS } from "../lib/influencers-club.js";
 import { LANGUAGES, MAX_DM_CHARS } from "../lib/instagram-dm-writer.js";
 import { classifyMissing } from "../lib/lead-classifier.js";
+import { SEARCH_REQUESTED_KEY, searchState, startProspectorRun } from "../lib/prospector-run.js";
 import { refreshConversions } from "../lib/dm-conversions.js";
 import { dmResults } from "../lib/dm-results.js";
 import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-graph.js";
@@ -946,12 +947,14 @@ export function prospectingRoutes() {
       .map((v) => v.trim().toUpperCase())
       .filter((v) => v in VERTICALS || v === NO_VERTICAL);
 
-    const [list, all, feed] = await Promise.all([
+    const [list, all, feed, requested] = await Promise.all([
       DM_VIEWS[view](filterVerticals(supabase.from(TABLE).select(DM_COLUMNS, { count: "exact" }), verticals), opts)
         .range(offset, offset + limit - 1),
       supabase.from(TABLE).select("tier,status,country,vertical,vertical_ai,vertical_effective,is_agency,decision,"
-        + "pushed_at,dm_state,dm_text,dm_sent_at,dm_followup_sent_at,converted_at,intent_posted_at"),
+        + "pushed_at,dm_state,dm_text,dm_sent_at,dm_followup_sent_at,converted_at,intent_posted_at,"
+        + "intent_caption,first_seen_at"),
       supabase.from("prospector_feed_status").select("*").eq("id", 1).maybeSingle(),
+      supabase.from(SETTINGS).select("value").eq("key", SEARCH_REQUESTED_KEY).maybeSingle(),
     ]);
     if (list.error) return dmError(res, list.error, "listing the Instagram queue");
     if (all.error) return dmError(res, all.error, "counting the Instagram queue");
@@ -986,6 +989,17 @@ export function prospectingRoutes() {
       } : null,
       instagramReplies: instagramConfigured(),
       followupDays: FOLLOWUP_DAYS,
+      // The "Find new brands" button: running, cooling down, and how many
+      // brands the last search added to the queue.
+      search: (() => {
+        const state = searchState({ requestedAt: requested?.data?.value, feedUpdatedAt: feed?.data?.updated_at });
+        return {
+          ...state,
+          newBrands: state.requestedAt
+            ? rows.filter((r) => isDmOpen(r, opts) && r.first_seen_at && r.first_seen_at >= state.requestedAt).length
+            : 0,
+        };
+      })(),
       // Every country waiting, whether or not it is chosen, so an admin can see
       // what the country setting leaves out before changing it.
       countries: rows
@@ -1021,6 +1035,39 @@ export function prospectingRoutes() {
   // keywords found none, and whether the account is an agency (which takes it
   // out of the queue). The page calls this before writing messages, so no
   // message is written for an agency.
+  // "Find new brands": start a prospector run now. Refused while one is
+  // running and for half an hour after the last one - every search is a
+  // session on the scraping Instagram account.
+  router.post("/instagram/find", async (_req, res) => {
+    const [requested, feed] = await Promise.all([
+      supabase.from(SETTINGS).select("value").eq("key", SEARCH_REQUESTED_KEY).maybeSingle(),
+      supabase.from("prospector_feed_status").select("updated_at").eq("id", 1).maybeSingle(),
+    ]);
+    const before = searchState({ requestedAt: requested?.data?.value, feedUpdatedAt: feed?.data?.updated_at });
+    if (before.running) {
+      return res.status(409).json({ error: "A search is already running.", search: before });
+    }
+    if (before.availableAt) {
+      const at = new Date(before.availableAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
+      return res.status(429).json({ error: `The last search was under half an hour ago. Next one from ${at}.`, search: before });
+    }
+    const now = new Date().toISOString();
+    const { error: saveError } = await supabase.from(SETTINGS)
+      .upsert({ key: SEARCH_REQUESTED_KEY, value: now }, { onConflict: "key" });
+    if (saveError) return res.status(500).json({ error: saveError.message });
+    try {
+      await startProspectorRun();
+    } catch (err) {
+      // Put the old time back, so a run that never started does not lock the
+      // button for half an hour.
+      await supabase.from(SETTINGS).upsert({ key: SEARCH_REQUESTED_KEY, value: requested?.data?.value ?? null },
+        { onConflict: "key" });
+      console.error("/instagram/find could not start the worker:", err?.message || err);
+      return res.status(502).json({ error: `Could not start the search: ${err?.message || "Cloud Run refused"}` });
+    }
+    res.json({ search: searchState({ requestedAt: now, feedUpdatedAt: feed?.data?.updated_at }) });
+  });
+
   router.post("/instagram/classify", async (_req, res) => {
     try {
       res.json(await classifyMissing({ limit: 40 }));

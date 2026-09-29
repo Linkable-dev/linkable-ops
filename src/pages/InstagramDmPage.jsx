@@ -104,7 +104,7 @@ export default function InstagramDmPage() {
       if (request !== requestRef.current) return;
       setData(out);
       setMeta({ counts: out.counts, settings: out.settings, countries: out.countries || {},
-                feedStatus: out.feedStatus, instagramReplies: out.instagramReplies,
+                feedStatus: out.feedStatus, instagramReplies: out.instagramReplies, search: out.search,
                 followupDays: out.followupDays,
                 verticals: out.verticals || {}, verticalLabels: out.verticalLabels || {} });
       setProblem(null);
@@ -116,6 +116,30 @@ export default function InstagramDmPage() {
   }, [view, verticals]);
 
   useEffect(() => { setSelected(null); setData(null); load(); }, [load]);
+
+  // While a search runs, look again every 30 seconds so its brands arrive
+  // without a reload, and the button comes back when it is done.
+  const searching = Boolean(meta?.search?.running);
+  useEffect(() => {
+    if (!searching) return undefined;
+    const timer = setInterval(() => load(true), 30_000);
+    return () => clearInterval(timer);
+  }, [searching, load]);
+
+  const [finding, setFinding] = useState(false);
+  const [findProblem, setFindProblem] = useState(null);
+  const findBrands = useCallback(async () => {
+    setFinding(true);
+    setFindProblem(null);
+    try {
+      await api.findInstagramBrands();
+    } catch (err) {
+      setFindProblem(err?.message || "could not start the search");
+    } finally {
+      setFinding(false);
+      load(true);
+    }
+  }, [load]);
 
   const leads = useMemo(() => data?.leads || [], [data]);
   const counts = meta?.counts || {};
@@ -308,6 +332,7 @@ export default function InstagramDmPage() {
                    onChange={(e) => saveSetting("dm_include_non_shopify", e.target.checked)} style={{ margin: 0 }} />
             Include brands not on Shopify{counts.nonShopify ? ` (${counts.nonShopify})` : ""}
           </label>
+          <FindBrands theme={theme} search={meta.search} busy={finding} problem={findProblem} onFind={findBrands} />
         </div>
       )}
 
@@ -503,6 +528,33 @@ function Stat({ theme, label, value, warn }) {
 
 // The logged-in Instagram read feeds the queue. When it stops - an expired
 // session, most often - the queue quietly stops growing, so it is said here.
+// "Find new brands": starts a search now rather than at the next four-hourly
+// run. The server refuses while one is running and for half an hour after.
+function FindBrands({ theme, search, busy, problem, onFind }) {
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const running = Boolean(search?.running);
+  const coolingUntil = !running && search?.availableAt ? search.availableAt : null;
+  let note = null;
+  if (running) note = `Searching Instagram since ${hhmm(search.requestedAt)}. New brands appear here in a few minutes.`;
+  else if (search?.requestedAt) {
+    const n = search.newBrands || 0;
+    note = `Last search ${hhmm(search.requestedAt)} · ${n} new ${n === 1 ? "brand" : "brands"}`
+      + (coolingUntil ? ` · next from ${hhmm(coolingUntil)}` : "");
+  }
+  return (
+    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      {(problem || note) && (
+        <span style={{ fontSize: 12, color: problem ? theme.warning : theme.textMuted }}>{problem || note}</span>
+      )}
+      <Btn size="sm" onClick={onFind} loading={busy || running} disabled={busy || running || Boolean(coolingUntil)}
+           title={coolingUntil ? `One search every half hour: next from ${hhmm(coolingUntil)}`
+             : "Search Instagram for brands asking for creators, now"}>
+        {running ? "Searching…" : "Find new brands"}
+      </Btn>
+    </div>
+  );
+}
+
 function FeedBanner({ status, theme }) {
   if (!status) return null;
   const last = status.last_scraped_at ? new Date(status.last_scraped_at) : null;
