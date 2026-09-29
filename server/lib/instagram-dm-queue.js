@@ -92,6 +92,17 @@ export async function queueOptions() {
   return optionsFrom(await readSettings());
 }
 
+// A creator call the brand has already closed ("CLOSED - ALL SPOTS HAVE BEEN
+// FILLED", Modern Piggy, 29 Sep 2026): recent, so it sorted to the top, and
+// nothing to offer. Phrases that close the call itself, not a bare "closed",
+// which brands also write about shops and holidays. POSIX, so the same
+// pattern runs in the query (imatch) and in isDmOpen.
+export const CLOSED_CALL_RE = "(spots (have been|are|now) (filled|full)|all spots filled|"
+  + "(applications|submissions|entries|call|casting|spots) (are |is |now |have |been )*closed|"
+  + "closed for (applications|submissions|entries)|no longer accepting)";
+const closedCallRe = new RegExp(CLOSED_CALL_RE, "i");
+export const closedCall = (r) => Boolean(r.intent_caption && closedCallRe.test(r.intent_caption));
+
 // Waiting to be written to on Instagram. The same predicate the counts use, so
 // a count and the list it describes cannot disagree. Brands not on Shopify have
 // no tier; they are in the queue only when an admin has said so.
@@ -102,7 +113,8 @@ export const dmOpen = (qy, { nonShopify, countries = [] }) => {
   const fresh = new Date(Date.now() - FRESH_CALL_DAYS * 86_400_000).toISOString();
   let open = qy.in("dm_state", ["none", "drafted"]).is("pushed_at", null).neq("decision", "hide")
     .not("is_agency", "is", true)
-    .or(`intent_posted_at.is.null,intent_posted_at.gte."${fresh}"`);
+    .or(`intent_posted_at.is.null,intent_posted_at.gte."${fresh}"`)
+    .or(`intent_caption.is.null,intent_caption.not.imatch."${CLOSED_CALL_RE}"`);
   open = nonShopify ? open.or("tier.not.is.null,status.eq.not_shopify") : open.not("tier", "is", null);
   if (!countries.length) return open;
   // Codes are validated on the way in (settingProblem), so they are safe to
@@ -127,7 +139,7 @@ export function filterVerticals(qy, verticals) {
 export const countryOf = (r) => (r.country ? String(r.country).toUpperCase() : UNKNOWN_COUNTRY);
 
 export const isDmOpen = (r, { nonShopify, countries = [] }) => ["none", "drafted"].includes(r.dm_state || "none")
-  && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true && !staleCall(r)
+  && !r.pushed_at && r.decision !== "hide" && r.is_agency !== true && !staleCall(r) && !closedCall(r)
   && Boolean(r.tier || (nonShopify && r.status === "not_shopify"))
   && (!countries.length || countries.includes(countryOf(r)));
 

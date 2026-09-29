@@ -137,3 +137,19 @@ test("the greeting gets a blank line under it, once", () => {
   // Nothing after the greeting: left alone.
   assert.equal(withGreetingGap("Hey X!"), "Hey X!");
 });
+
+test("a creator call the brand has closed is not in the queue", () => {
+  // Modern Piggy, 29 Sep 2026: recent, so it sorted first, and already full.
+  const opts = { nonShopify: false, countries: [] };
+  const open = { dm_state: "none", tier: "A", status: "routed", intent_posted_at: new Date().toISOString() };
+  for (const caption of [
+    "🔸CLOSED🔸 ALL SPOTS HAVE BEEN FILLED 🔸 CALLING FOR CONTENT CREATORS!",
+    "Applications are now closed, thank you to everyone who applied",
+    "We are no longer accepting new creators for this campaign",
+  ]) assert.equal(isDmOpen({ ...open, intent_caption: caption }, opts), false, caption);
+  for (const caption of [
+    "We're looking for UGC creators! Our shop is closed on Sundays, DM us",
+    "Calling all creators, comment CREATOR to apply",
+    null,
+  ]) assert.equal(isDmOpen({ ...open, intent_caption: caption }, opts), true, String(caption));
+});
