@@ -103,8 +103,9 @@ The shape, every time:
    recently gifted products to creators, "Saw you've been gifting to creators
    lately."; when they run a creator or ambassador programme on their site,
    "Just came across your ambassador programme." naming it as their page does
-   (ambassador programme, creator programme, affiliate programme). Never name
-   the creator who posted about them.
+   (ambassador programme, creator programme, affiliate programme); when their
+   own posts feature creators, "Saw you've been sharing creator content
+   lately." Never name the creator who posted about them.
 2b. When the facts say creators already on Linkable have posted about them:
    one line of its own, straight after the post line (or after the greeting
    when there is no post): "{N} creators on Linkable already post about
@@ -207,6 +208,9 @@ export function factSheet(lead, { language } = {}) {
     lines.push("");
     lines.push("They run a creator / ambassador programme on their own site. Its page:");
     lines.push(`"${clean(lead.intent_caption || "").slice(0, 400)}"`);
+  } else if (lead.intent_signal === "creator_content") {
+    lines.push("");
+    lines.push("Their own recent Instagram posts feature creators (a creator reposted, credited or gifted).");
   }
 
   const proof = Number(lead.linkable_creator_count) || 0;

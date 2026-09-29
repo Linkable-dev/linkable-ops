@@ -179,6 +179,9 @@ test("a gifting brand and a programme-page brand each get their own opening fact
   const program = { ...lead, intent_signal: "program_page", intent_caption: "Ambassador Programme - Wildmoor" };
   assert.match(factSheet(program, { language: "en" }), /creator \/ ambassador programme on their own site/);
   assert.match(factSheet(program, { language: "en" }), /Ambassador Programme - Wildmoor/);
+  const content = { ...lead, intent_signal: "creator_content", intent_caption: "@ella.styles spotted wearing" };
+  assert.match(factSheet(content, { language: "en" }), /own recent Instagram posts feature creators/);
+  assert.doesNotMatch(factSheet(content, { language: "en" }), /ella\.styles/, "the creator is not named");
 });
 
 
