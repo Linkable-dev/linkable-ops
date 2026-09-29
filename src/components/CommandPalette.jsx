@@ -21,7 +21,10 @@ const PAGES = [
   // conversation — while the live reply queue sat at /gtm/brands/replies under
   // the same word. Searching the palette for the obvious term took you to the
   // empty one.
-  ["Brand replies", "/gtm/brands/replies", "outbound answers inbox"],
+  ["Brand replies", "/gtm/brands?view=results", "outbound answers inbox email results"],
+  ["Brand email", "/gtm/brands", "lemlist send queue review"],
+  ["Brand DMs", "/gtm/brands/instagram", "instagram dm queue"],
+  ["Brand sources", "/gtm/brands/sources", "prospector campaigns find leads"],
   ["Creator replies", "/gtm/creators/replies", "outbound answers inbox"],
   ["Blog", "/blog"],
   ["Dashboard", "/dashboard"], ["Ask the data", "/ask"], ["Team", "/team"],

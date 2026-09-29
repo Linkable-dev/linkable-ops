@@ -55,6 +55,9 @@ export const api = {
   getProspectingReplies: (kind) => request(`/prospecting/replies?kind=${kind}`),
   getSentEmails: (handle, kind = "brand") =>
     request(`/prospecting/leads/${encodeURIComponent(handle)}/emails?kind=${kind}`),
+  // A brand not yet sent: the email it would get if marked Send now.
+  getEmailPreview: (handle) =>
+    request(`/prospecting/leads/${encodeURIComponent(handle)}/emails?kind=brand&preview=1`),
   planCreatorSearch: (prompt) =>
     request("/prospecting/creators/search/plan", { method: "POST", body: JSON.stringify({ prompt }) }),
   runCreatorSearch: (query, limit) =>

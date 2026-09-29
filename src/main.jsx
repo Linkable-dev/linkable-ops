@@ -21,7 +21,8 @@ const AutopilotPage = lazy(() => import("./pages/AutopilotPage"));
 const CostsPage = lazy(() => import("./pages/CostsPage"));
 const AiCreatorsPage = lazy(() => import("./pages/AiCreatorsPage"));
 const ContentPage = lazy(() => import("./pages/ContentPage"));
-const ProspectingPage = lazy(() => import("./pages/ProspectingPage.jsx"));
+const EmailPage = lazy(() => import("./pages/EmailPage.jsx"));
+const SourcesPage = lazy(() => import("./pages/SourcesPage.jsx"));
 const CreatorsGtmPage = lazy(() => import("./pages/CreatorsGtmPage.jsx"));
 const CreatorsOutreachPage = lazy(() => import("./pages/CreatorsOutreachPage.jsx"));
 const ProspectingRepliesPage = lazy(() => import("./pages/ProspectingRepliesPage.jsx"));
@@ -65,11 +66,12 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/ops/ai-creators" element={<AiCreatorsPage />} />
                     <Route path="/ops/content" element={<ContentPage />} />
                     <Route element={<GtmSection tabs={BRAND_TABS} />}>
-                      <Route path="/gtm/brands" element={<ProspectingPage />} />
+                      <Route path="/gtm/brands" element={<EmailPage />} />
                       <Route path="/ai/agents" element={<GtmAgentsPage />} />
                       <Route path="/gtm/brands/instagram" element={<InstagramDmPage />} />
+                      <Route path="/gtm/brands/sources" element={<SourcesPage />} />
                       <Route path="/gtm/brands/replies"
-                             element={<ProspectingRepliesPage kind="brand" />} />
+                             element={<Navigate to="/gtm/brands?view=results" replace />} />
                       <Route path="/ai/inbox" element={<AiInboxPage />} />
                     </Route>
                     <Route element={<GtmSection tabs={CREATOR_TABS} />}>

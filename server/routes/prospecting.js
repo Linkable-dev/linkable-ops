@@ -54,6 +54,9 @@ const LIST_COLUMNS = [
   "reply_state", "replied_at",
   // The list the first email offers to send.
   "creator_list",
+  // Written to on Instagram, so the pipeline will not email it: the Email tab
+  // says so rather than offering a Send that does nothing.
+  "dm_sent_at",
 ].join(",");
 
 export function prospectingRoutes() {
@@ -703,6 +706,74 @@ export function prospectingRoutes() {
     });
   }
 
+  // A campaign's sequence, by id or by the name the prospector is configured
+  // with. Cached for a few minutes: the review queue asks for one per brand as
+  // somebody moves through it, and the sequence is the same every time.
+  const sequenceCache = new Map();
+  async function campaignSequence(nameOrId) {
+    const hit = sequenceCache.get(nameOrId);
+    if (hit && hit.until > Date.now()) return hit.value;
+    let id = nameOrId;
+    let name = null;
+    if (!String(nameOrId).startsWith("cam_")) {
+      const all = await lemlist("/campaigns", { limit: 100 });
+      const list = Array.isArray(all) ? all : all?.campaigns || [];
+      const found = list.find((c) => String(c.name || "").trim().toLowerCase()
+        === String(nameOrId).trim().toLowerCase());
+      if (!found) throw new Error(`no Lemlist campaign called "${nameOrId}"`);
+      id = found._id || found.id;
+      name = found.name;
+    }
+    const sequences = await lemlist(`/campaigns/${id}/sequences`);
+    const value = { id, name, steps: (Object.values(sequences)[0] || { steps: [] }).steps || [] };
+    sequenceCache.set(nameOrId, { value, until: Date.now() + 5 * 60_000 });
+    return value;
+  }
+
+  // A lead's published email variables, or null on a database without them.
+  async function publishedVariables(handle) {
+    const { data, error } = await supabase.from(TABLE).select("email_variables").eq("handle", handle).maybeSingle();
+    return error ? null : data?.email_variables || null;
+  }
+
+  // The email a lead would get if it were marked Send now: the campaign the
+  // worker would hand it to, rendered with the variables it would be pushed
+  // with. Both published by the prospector (migration 032); a database
+  // without them answers as before, with nothing to show.
+  async function previewFor(handle, email) {
+    const { data, error } = await supabase
+      .from(TABLE).select("tier,email_campaign,email_variables").eq("handle", handle).maybeSingle();
+    if (error) {
+      if (error.code === "42703" || /email_(campaign|variables)/.test(error.message || "")) return null;
+      throw error;
+    }
+    if (!data?.email_campaign) {
+      return { pushed: false, preview: false, steps: [], email,
+               note: data?.tier === "C"
+                 ? "Tier C has no email sequence, so marking it Send emails nobody."
+                 : "No email campaign is set for this tier." };
+    }
+    if (!data.email_variables) {
+      return { pushed: false, preview: false, steps: [], email,
+               note: "The pipeline has not published this lead's email yet." };
+    }
+    const sequence = await campaignSequence(data.email_campaign);
+    return {
+      pushed: false,
+      preview: true,
+      email,
+      campaignName: sequence.name || data.email_campaign,
+      steps: sequence.steps.map((st) => ({
+        index: st.index,
+        delayDays: st.delay,
+        subject: render(st.subject, data.email_variables),
+        body: render(st.message, data.email_variables),
+        sentAt: null,
+        events: [],
+      })),
+    };
+  }
+
   router.get("/leads/:handle/emails", async (req, res) => {
     const kind = req.query.kind === "creator" ? "creator" : "brand";
     const table = kind === "creator" ? CREATORS : TABLE;
@@ -712,7 +783,17 @@ export function prospectingRoutes() {
     if (error) return handleError(res, error, "loading the lead");
     if (!lead) return res.status(404).json({ error: "no such lead" });
     if (!lead.pushed_at) {
-      return res.json({ pushed: false, steps: [], sent: [], email: lead.contact_email });
+      const none = { pushed: false, steps: [], sent: [], email: lead.contact_email };
+      if (kind !== "brand" || req.query.preview !== "1") return res.json(none);
+      try {
+        return res.json((await previewFor(lead.handle, lead.contact_email)) || none);
+      } catch (err) {
+        const missingKey = /LEMLIST_KEY/.test(err?.message || "");
+        return res.status(missingKey ? 503 : 502).json({
+          error: missingKey ? "Lemlist is not configured on this server" : "could not build the preview",
+          hint: missingKey ? "LEMLIST_KEY is not set, so the sequence cannot be read." : err?.message,
+        });
+      }
     }
 
     try {
@@ -730,7 +811,12 @@ export function prospectingRoutes() {
       }
 
       const campaignId = mine[0].campaignId;
-      const variables = mine.find((a) => a.type === "emailsSent") || mine[0];
+      // An activity carries most of the lead's variables but not all of them:
+      // `greeting` is missing, so every sent email read back "{{greeting}}".
+      // The variables the prospector publishes (migration 032) fill the gaps;
+      // what the activity says was sent still wins.
+      const published = kind === "brand" ? await publishedVariables(lead.handle) : null;
+      const variables = { ...(published || {}), ...(mine.find((a) => a.type === "emailsSent") || mine[0]) };
       const sequences = await lemlist(`/campaigns/${campaignId}/sequences`);
       const entry = Object.values(sequences)[0] || { steps: [] };
 

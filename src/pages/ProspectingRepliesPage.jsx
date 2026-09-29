@@ -20,7 +20,9 @@ import { Btn } from "../components/ui/Button";
  * The counts are over people, not events: someone who opened four times is one
  * open. A funnel counted in events flatters itself.
  */
-export default function ProspectingRepliesPage({ kind = "brand" }) {
+// `embedded`: shown inside another page (the Email tab's Results), which
+// brings its own heading and padding.
+export default function ProspectingRepliesPage({ kind = "brand", embedded = false }) {
   const { theme } = useTheme();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -74,15 +76,17 @@ export default function ProspectingRepliesPage({ kind = "brand" }) {
   const noun = kind === "creator" ? "creator" : "brand";
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Replies</h1>
-        <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 720 }}>
-          Read back from Lemlist. Bounces and opt-outs are added to the suppression
-          list as they arrive, so a {noun} that says stop is not written to again —
-          that happens whether or not anyone opens this page.
-        </p>
-      </div>
+    <div style={{ padding: embedded ? 0 : 24, display: "flex", flexDirection: "column", gap: embedded ? 12 : 16 }}>
+      {!embedded && (
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22, color: theme.text }}>Replies</h1>
+          <p style={{ margin: "6px 0 0", color: theme.textMuted, fontSize: 13, maxWidth: 720 }}>
+            Read back from Lemlist. Bounces and opt-outs are added to the suppression
+            list as they arrive, so a {noun} that says stop is not written to again —
+            that happens whether or not anyone opens this page.
+          </p>
+        </div>
+      )}
 
       {problem && (
         <Card>

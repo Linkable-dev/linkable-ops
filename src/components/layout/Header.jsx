@@ -26,9 +26,9 @@ function getPageInfo(pathname) {
   // GTM. The old outbound pages sit under Brands in the sidebar, so they are
   // titled Brands here too.
   if (pathname.startsWith("/gtm/brands/instagram")) return { title: "Brands", subtitle: "Instagram DMs" };
-  if (pathname.startsWith("/gtm/brands/replies")) return { title: "Brands", subtitle: "Replies" };
+  if (pathname.startsWith("/gtm/brands/sources")) return { title: "Brands", subtitle: "Where the leads come from" };
   if (pathname.startsWith("/gtm/brands") || pathname.startsWith("/ai/prospecting")) {
-    return { title: "Brands", subtitle: "Brands to pitch Linkable to" };
+    return { title: "Brands", subtitle: "Email" };
   }
   if (pathname.startsWith("/gtm/creators/outreach")) return { title: "Creators", subtitle: "Outreach" };
   if (pathname.startsWith("/gtm/creators/replies")) return { title: "Creators", subtitle: "Replies" };

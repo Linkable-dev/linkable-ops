@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
+import { ListPager, MultiPicker, SortPicker, Stat, Tag } from "../components/gtm/QueueParts";
+import { countedOptions, useRowsThatFit, useWide } from "../components/gtm/queueHooks";
 
 /**
  * Instagram DMs to brands: the page drafts, a person sends.
@@ -52,39 +54,8 @@ const dmLink = (handle) => `https://ig.me/m/${encodeURIComponent(handle)}`;
 const nameOf = (lead) => lead.brand_name || lead.ig_full_name || lead.handle;
 const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
-// Wide enough for the list beside the message; below this they stack.
-function useWide(min = 1100) {
-  const [wide, setWide] = useState(() => window.innerWidth >= min);
-  useEffect(() => {
-    const onResize = () => setWide(window.innerWidth >= min);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [min]);
-  return wide;
-}
-
-// How many rows fit between the top of the list and the bottom of the window,
-// with room for the pager under them: the page asks the server for exactly
-// that many, so the list never scrolls inside itself and the pager is always
-// on screen. Measured again when the window is resized or `key` changes.
+// Row heights of this page's two lists, for useRowsThatFit.
 const ROW_PX = { queue: 52, rows: 54 };
-const PAGER_PX = 100; // the gap above the list, the pager, the card border, the bottom padding, a margin
-
-function useRowsThatFit(anchorRef, rowPx, enabled, key) {
-  const fit = useCallback(() => {
-    const top = anchorRef.current ? anchorRef.current.getBoundingClientRect().top + window.scrollY : 330;
-    return Math.max(5, Math.floor((window.innerHeight - top - PAGER_PX) / rowPx));
-  }, [anchorRef, rowPx]);
-  const [rows, setRows] = useState(() => Math.max(5, Math.floor((window.innerHeight - 330 - PAGER_PX) / rowPx)));
-  useLayoutEffect(() => {
-    if (!enabled) return undefined;
-    const measure = () => setRows((cur) => { const next = fit(); return next === cur ? cur : next; });
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [enabled, fit, key]);
-  return rows;
-}
 
 export default function InstagramDmPage() {
   const { theme } = useTheme();
@@ -517,128 +488,6 @@ const COUNTRY_NAMES = (() => {
 const countryName = (code) => (code === "UNKNOWN" ? "Unknown country"
   : (COUNTRY_NAMES?.of(code) || code));
 
-// A dropdown of checkboxes. `emptyMeansAll`: nothing chosen means every option
-// (a filter), rather than none of them (a list of things to do). Counts, when
-// given, include the options left out, so it is clear what a change adds or
-// removes before making it.
-function MultiPicker({ theme, options, chosen, disabled, onChange, allLabel, noun, title,
-                       emptyMeansAll = true, short = (o) => o.code }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-
-  const codes = options.map((o) => o.code);
-  const all = emptyMeansAll && !chosen.length;
-  const isOn = (c) => all || chosen.includes(c);
-
-  function toggle(code) {
-    const current = all ? codes : chosen;
-    const next = current.includes(code) ? current.filter((c) => c !== code) : [...current, code];
-    // Every option ticked is the same as no filter, and is stored as one.
-    onChange(emptyMeansAll && codes.every((c) => next.includes(c)) ? [] : next);
-  }
-
-  const picked = options.filter((o) => chosen.includes(o.code));
-  const label = !chosen.length ? allLabel
-    : picked.length <= 2 ? picked.map(short).join(", ")
-    : `${chosen.length} ${noun}`;
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <Btn size="sm" variant="secondary" onClick={() => setOpen((v) => !v)} disabled={disabled}
-           aria-expanded={open} title={title}>
-        {label} ▾
-      </Btn>
-      {open && (
-        <div style={{
-          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, width: 270,
-          background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12,
-          boxShadow: theme.shadowMd, padding: 8, maxHeight: 380, overflowY: "auto",
-        }}>
-          <button type="button" onClick={() => onChange([])} disabled={disabled || !chosen.length}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px",
-                           border: "none", background: "transparent", fontFamily: "inherit",
-                           fontSize: 12, color: !chosen.length ? theme.textMuted : theme.text,
-                           cursor: !chosen.length ? "default" : "pointer" }}>
-            {allLabel}
-          </button>
-          {options.map((o) => (
-            <label key={o.code} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
-                                         fontSize: 12.5, color: theme.text, cursor: "pointer" }}>
-              <input type="checkbox" checked={isOn(o.code)} disabled={disabled}
-                     onChange={() => toggle(o.code)} style={{ margin: 0 }} />
-              <span style={{ flex: 1 }}>{o.label}</span>
-              {o.count != null && (
-                <span style={{ color: theme.textMuted, fontVariantNumeric: "tabular-nums" }}>{o.count}</span>
-              )}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// One choice from a short list, drawn like the filters beside it rather than
-// as a form select.
-function SortPicker({ theme, value, options, onChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-  const current = options.find((o) => o.value === value) || options[0];
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <Btn size="sm" variant="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open} title="Order">
-        {current.label} ▾
-      </Btn>
-      {open && (
-        <div style={{
-          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, width: 220,
-          background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12,
-          boxShadow: theme.shadowMd, padding: 6,
-        }}>
-          {options.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-                    style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 8px",
-                             border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5,
-                             cursor: "pointer", color: theme.text,
-                             background: o.value === current.value ? theme.accentLight : "transparent",
-                             fontWeight: o.value === current.value ? 600 : 400 }}>
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Options with counts, largest first; a chosen option with nothing waiting
-// still shows, so it can be unticked.
-function countedOptions(counts, chosen, labelOf) {
-  const codes = Object.keys(counts || {}).sort((a, b) => (counts[b] - counts[a]) || a.localeCompare(b));
-  for (const c of chosen) if (!codes.includes(c)) codes.push(c);
-  return codes.map((code) => ({ code, label: labelOf(code), count: counts?.[code] ?? 0 }));
-}
-
-function Stat({ theme, label, value, warn }) {
-  return (
-    <span style={{ fontSize: 12, color: warn ? theme.warning : theme.textMuted, marginLeft: 6 }}>
-      <strong style={{ color: warn ? theme.warning : theme.text, fontWeight: 600 }}>{value ?? 0}</strong> {label}
-    </span>
-  );
-}
-
 // The logged-in Instagram read feeds the queue. When it stops - an expired
 // session, most often - the queue quietly stops growing, so it is said here.
 // "Find new brands": starts a search now rather than at the next four-hourly
@@ -777,45 +626,6 @@ function emptyText(view) {
   if (view === "agencies") return "Nothing taken out. Agencies, platforms, events and creators land here.";
   if (view === "skipped") return "Nothing skipped.";
   return "No brands waiting. New ones arrive every morning from the Instagram searches.";
-}
-
-function Tag({ children, tone, title }) {
-  const { theme } = useTheme();
-  const color = tone ? theme[tone] : theme.textMid;
-  return (
-    <span title={title} style={{
-      fontSize: 10.5, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap", lineHeight: "16px",
-      border: `1px solid ${tone ? color : theme.border}`, color,
-    }}>
-      {children}
-    </span>
-  );
-}
-
-// "1-50 of 120" with previous and next; the arrows only when there is more
-// than one page.
-function ListPager({ theme, page, pageSize, total, onPage }) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const from = total ? page * pageSize + 1 : 0;
-  const to = Math.min(total, (page + 1) * pageSize);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px",
-                  borderTop: `1px solid ${theme.border}`, fontSize: 12, color: theme.textMuted }}>
-      <span style={{ fontVariantNumeric: "tabular-nums" }}>
-        {pages > 1 ? `${from}-${to} of ${total}` : `${total} brand${total === 1 ? "" : "s"}`}
-      </span>
-      <div style={{ flex: 1 }} />
-      {pages > 1 && (
-        <>
-          <Btn size="sm" variant="secondary" onClick={() => onPage(page - 1)} disabled={page <= 0}
-               aria-label="Previous page">‹</Btn>
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{page + 1} / {pages}</span>
-          <Btn size="sm" variant="secondary" onClick={() => onPage(page + 1)} disabled={page >= pages - 1}
-               aria-label="Next page">›</Btn>
-        </>
-      )}
-    </div>
-  );
 }
 
 function QueueList({ leads, current, onSelect, theme, drafting, footer }) {

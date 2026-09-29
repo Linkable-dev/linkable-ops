@@ -18,15 +18,20 @@
 // Nothing is deleted. GtmAgentsPage and AiInboxPage still exist, /ai/agents and
 // /ai/inbox still render them for anyone holding a link, and the data and API
 // are untouched — this is the tab strip declining to advertise them.
+//
+// Brands are one tab per channel, then where the leads come from. Email and
+// Instagram are the same kind of work - a queue of brands, one open at a time -
+// so they are laid out the same way. Email's replies are its Results view, as
+// Instagram's are; /gtm/brands/replies still lands there.
 export const BRAND_TABS = [
-  { to: "/gtm/brands", label: "Find",
+  { to: "/gtm/brands", label: "Email",
     match: (p) => p === "/gtm/brands" || p.startsWith("/gtm/brands/lead") },
-  // Brands written to by hand on Instagram, from drafted messages. Its own tab
-  // because it is a daily task with its own queue, not a view of the table.
+  // Brands written to by hand on Instagram, from drafted messages.
   { to: "/gtm/brands/instagram", label: "Instagram",
     match: (p) => p.startsWith("/gtm/brands/instagram") },
-  { to: "/gtm/brands/replies", label: "Replies",
-    match: (p) => p.startsWith("/gtm/brands/replies") },
+  // The campaigns that find brands, for both channels.
+  { to: "/gtm/brands/sources", label: "Sources",
+    match: (p) => p.startsWith("/gtm/brands/sources") },
 ];
 
 export const CREATOR_TABS = [
