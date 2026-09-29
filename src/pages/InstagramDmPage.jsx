@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
@@ -63,6 +63,29 @@ function useWide(min = 1100) {
   return wide;
 }
 
+// How many rows fit between the top of the list and the bottom of the window,
+// with room for the pager under them: the page asks the server for exactly
+// that many, so the list never scrolls inside itself and the pager is always
+// on screen. Measured again when the window is resized or `key` changes.
+const ROW_PX = { queue: 52, rows: 54 };
+const PAGER_PX = 100; // the gap above the list, the pager, the card border, the bottom padding, a margin
+
+function useRowsThatFit(anchorRef, rowPx, enabled, key) {
+  const fit = useCallback(() => {
+    const top = anchorRef.current ? anchorRef.current.getBoundingClientRect().top + window.scrollY : 330;
+    return Math.max(5, Math.floor((window.innerHeight - top - PAGER_PX) / rowPx));
+  }, [anchorRef, rowPx]);
+  const [rows, setRows] = useState(() => Math.max(5, Math.floor((window.innerHeight - 330 - PAGER_PX) / rowPx)));
+  useLayoutEffect(() => {
+    if (!enabled) return undefined;
+    const measure = () => setRows((cur) => { const next = fit(); return next === cur ? cur : next; });
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [enabled, fit, key]);
+  return rows;
+}
+
 export default function InstagramDmPage() {
   const { theme } = useTheme();
   const wide = useWide();
@@ -101,8 +124,15 @@ export default function InstagramDmPage() {
   // Paged by the server: the page asks for one page at a time, filtered and
   // sorted in the query, so every brand is reachable however long the queue.
   const [page, setPage] = useState(0);
-  const pageSize = PAGE_SIZE;
-  useEffect(() => { setPage(0); }, [view, verticals, paths, sort]);
+  const listTop = useRef(null);
+  const queueView = view === "todo" || view === "followup";
+  // Narrow screens stack the message panel under the list, so the list keeps
+  // a short fixed page there instead of filling the window.
+  // Measured once the filter bar is there: before it loads the list sits
+  // higher than it will, and the page came out a few rows too long.
+  const fitted = useRowsThatFit(listTop, queueView ? ROW_PX.queue : ROW_PX.rows, Boolean(meta), `${view}:${wide}`);
+  const pageSize = !wide && queueView ? 8 : fitted;
+  useEffect(() => { setPage(0); }, [view, verticals, paths, sort, pageSize]);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
 
@@ -398,6 +428,7 @@ export default function InstagramDmPage() {
         </div>
       )}
 
+      <div ref={listTop} />
       {view === "results" ? (
         <ResultsView theme={theme} />
       ) : loading && !data ? (
@@ -412,8 +443,7 @@ export default function InstagramDmPage() {
           gridTemplateColumns: wide ? "minmax(300px, 380px) minmax(0, 1fr)" : "minmax(0, 1fr)",
         }}>
           <QueueList leads={leads} current={current} onSelect={setSelected} theme={theme}
-                     drafting={Boolean(drafting)} maxHeight={wide ? "calc(100vh - 250px)" : 320}
-                     footer={pager} />
+                     drafting={Boolean(drafting)} footer={pager} />
           {current && (
             <DmPanel key={`${view}:${current.handle}`} lead={current} maxChars={data?.maxChars || 520}
                      followUp={view === "followup"} actionsRef={panelActions}
@@ -762,8 +792,6 @@ function Tag({ children, tone, title }) {
   );
 }
 
-const PAGE_SIZE = 50;
-
 // "1-50 of 120" with previous and next; the arrows only when there is more
 // than one page.
 function ListPager({ theme, page, pageSize, total, onPage }) {
@@ -790,13 +818,13 @@ function ListPager({ theme, page, pageSize, total, onPage }) {
   );
 }
 
-function QueueList({ leads, current, onSelect, theme, drafting, maxHeight, footer }) {
+function QueueList({ leads, current, onSelect, theme, drafting, footer }) {
   const activeRef = useRef(null);
   useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest" }); }, [current?.handle]);
 
   return (
     <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
-      <div style={{ maxHeight, overflowY: "auto" }}>
+      <div>
         {leads.map((lead, i) => {
           const active = lead.handle === current?.handle;
           const ready = Boolean(lead.dm_text);
