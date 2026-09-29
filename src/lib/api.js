@@ -95,6 +95,8 @@ export const api = {
     }),
 
   getProspectingCampaigns: () => request("/prospecting/campaigns"),
+  deleteProspectingCampaign: (name) =>
+    request(`/prospecting/campaigns/${encodeURIComponent(name)}`, { method: "DELETE" }),
   createProspectingCampaign: (data) =>
     request("/prospecting/campaigns", { method: "POST", body: JSON.stringify(data) }),
   getProspectingCampaignRuns: (name) =>

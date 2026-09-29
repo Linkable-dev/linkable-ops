@@ -35,6 +35,9 @@ const RUNS = "prospector_campaign_runs";
 const CREATORS = "prospector_creators";
 const EVENTS = "prospector_outreach_events";
 const DECISIONS = ["pending", "send", "hold", "hide"];
+// prospector_campaigns.desired_state for a campaign deleted in ops, until the
+// pipeline has removed it (linkable-prospector ops_sync.pull_campaign_intent).
+const DELETED = "deleted";
 
 // Columns the list needs. Kept explicit rather than select(*) so adding a
 // column to the pipeline cannot quietly widen every response.
@@ -1342,8 +1345,10 @@ export function prospectingRoutes() {
   // overwrite the instruction it was meant to be following.
 
   router.get("/campaigns", async (_req, res) => {
+    // A deleted campaign waits for the pipeline to remove it (see DELETE
+    // below); it is gone from the page the moment somebody deletes it.
     const { data, error } = await supabase
-      .from(CAMPAIGNS).select("*").order("id", { ascending: false });
+      .from(CAMPAIGNS).select("*").neq("desired_state", DELETED).order("id", { ascending: false });
     if (error) return handleError(res, error, "listing campaigns");
     res.json({ campaigns: data || [] });
   });
@@ -1356,6 +1361,21 @@ export function prospectingRoutes() {
       .limit(25);
     if (error) return handleError(res, error, "listing runs");
     res.json({ runs: data || [] });
+  });
+
+  // Deleting is a request, like switching on or off. The pipeline keeps its
+  // own copy of every campaign and publishes it back here on each run, so a
+  // row removed from this table would simply reappear. Marked deleted
+  // instead: the next run removes the campaign and its passes from its own
+  // database before anything runs, then removes both rows here. The brands it
+  // found stay - they are leads, not part of the campaign.
+  router.delete("/campaigns/:name", async (req, res) => {
+    const { data, error } = await supabase
+      .from(CAMPAIGNS).update({ desired_state: DELETED })
+      .eq("name", req.params.name).select("name").maybeSingle();
+    if (error) return handleError(res, error, "deleting campaign");
+    if (!data) return res.status(404).json({ error: "no such campaign" });
+    res.json({ deleted: data.name });
   });
 
   router.post("/campaigns", async (req, res) => {
@@ -1386,7 +1406,11 @@ export function prospectingRoutes() {
     const { data, error } = await supabase.from(CAMPAIGNS).insert(row).select("*").maybeSingle();
     if (error) {
       if (error.code === "23505") {
-        return res.status(409).json({ error: `there is already a campaign called ${row.name}` });
+        const { data: old } = await supabase.from(CAMPAIGNS).select("desired_state")
+          .eq("name", row.name).maybeSingle();
+        return res.status(409).json({ error: old?.desired_state === DELETED
+          ? `${row.name} was just deleted and is removed on the next pipeline run; use another name or try again after it`
+          : `there is already a campaign called ${row.name}` });
       }
       return handleError(res, error, "creating campaign");
     }
@@ -1400,7 +1424,7 @@ export function prospectingRoutes() {
     }
     const { data, error } = await supabase
       .from(CAMPAIGNS).update({ desired_state: wanted })
-      .eq("name", req.params.name).select("*").maybeSingle();
+      .eq("name", req.params.name).neq("desired_state", DELETED).select("*").maybeSingle();
     if (error) return handleError(res, error, "setting campaign state");
     if (!data) return res.status(404).json({ error: "no such campaign" });
     res.json(data);

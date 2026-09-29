@@ -4,6 +4,8 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Toggle } from "../components/ui/Toggle";
+import { useConfirm } from "../components/ui/ConfirmDialog";
+import { Trash2 } from "lucide-react";
 import { HelpList, HelpTip } from "../components/gtm/QueueParts";
 
 /**
@@ -19,6 +21,7 @@ const SOURCES_HELP = [
   ["Where the brands go", "Every brand a campaign finds goes to both queues, Email and Instagram, and is contacted on one of them."],
   ["Goal and budget", "Each campaign stops itself when it has found the leads it was asked for or has spent its budget. A daily one runs every day on a monthly budget and never stops on its own."],
   ["On and off", "A campaign is created switched off, because every pass spends money. Switch it on and it runs on the next pipeline run; switch it off to stop it."],
+  ["Delete", "The bin removes a campaign and its history for good. The brands it found stay in Email and Instagram."],
   ["Right now", "Find new brands on Email or Instagram runs the pipeline immediately instead of waiting for the schedule."],
 ];
 
@@ -78,6 +81,28 @@ function Campaigns({ theme }) {
 
   // A switch that silently springs back is worse than one that says why.
   const [failed, setFailed] = useState(null);
+  const { ask, dialog } = useConfirm();
+
+  async function remove(c) {
+    const yes = await ask({
+      title: `Delete ${c.name}?`,
+      body: `It stops and is removed for good, with its ${c.passes} pass${c.passes === 1 ? "" : "es"} of history. `
+        + `The ${c.leads_found} brand${c.leads_found === 1 ? "" : "s"} it found stay in Email and Instagram. This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!yes) return;
+    setBusy(c.name);
+    setFailed(null);
+    try {
+      await api.deleteProspectingCampaign(c.name);
+      await load();
+    } catch (err) {
+      setFailed(`${c.name}: ${err?.message || "could not delete it"}`);
+    } finally {
+      setBusy(null);
+    }
+  }
   async function setState(name, desired) {
     setBusy(name);
     setFailed(null);
@@ -104,6 +129,7 @@ function Campaigns({ theme }) {
 
   return (
     <Card>
+      {dialog}
       <NewCampaign theme={theme} onCreated={load} />
       {failed && <div style={{ padding: "8px 14px", color: theme.danger, fontSize: 12 }}>{failed}</div>}
       {!campaigns.length && (
@@ -166,6 +192,11 @@ function Campaigns({ theme }) {
               label={`${c.name} on`}
               title={asked ? "On: runs on the next pipeline run. Switch off to stop it." : "Off: switch on to run it."}
             />
+            <Btn size="sm" variant="secondary" disabled={busy === c.name} onClick={() => remove(c)}
+                 aria-label={`Delete ${c.name}`} title="Delete this campaign for good"
+                 style={{ padding: 7 }}>
+              <Trash2 size={14} />
+            </Btn>
           </div>
         );
       })}
