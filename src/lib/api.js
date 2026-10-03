@@ -3,15 +3,17 @@ const BASE = "/api";
 import { supabase } from "./supabase";
 import { getDbTarget } from "../contexts/DbTargetContext";
 
-async function request(path, options = {}) {
+// options.dbTarget sends one call to a database other than the one picked in
+// the header (GTM's "Add to Pitch" lets the admin choose dev or prod).
+async function request(path, { dbTarget, ...options } = {}) {
   const { data: { session } } = await supabase.auth.getSession();
   const headers = {
     "Content-Type": "application/json",
-    "x-db-target": getDbTarget(),
+    "x-db-target": dbTarget || getDbTarget(),
     ...options.headers,
   };
   if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
-  const res = await fetch(`${BASE}${path}`, { headers, ...options });
+  const res = await fetch(`${BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
@@ -179,6 +181,14 @@ export const api = {
   // Autopilot: the recruiting machine. Read-only about the AGENT — starting and
   // stopping one goes through the main app's console, which enforces the budget
   // and the send guards this route deliberately cannot reach.
+  // Pitch brands: external brands creators can pitch. Adding one writes a
+  // request that service-grpc reads within seconds.
+  getPitchBrands: ({ limit = 25, offset = 0, filters, sortBy, sortDir } = {}) =>
+    request(`/pitch-brands?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
+  getPitchBrandRequests: () => request("/pitch-brands/requests"),
+  getPitchBrandCategories: () => request("/pitch-brands/categories"),
+  addPitchBrand: (data, dbTarget) =>
+    request("/pitch-brands/requests", { method: "POST", body: JSON.stringify(data), dbTarget }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>

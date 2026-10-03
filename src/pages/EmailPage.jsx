@@ -8,6 +8,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { FindBrands, HelpList, HelpTip, ListPager, MultiPicker, SortPicker, Tag } from "../components/gtm/QueueParts";
 import { countedOptions, useRowsThatFit, useWide } from "../components/gtm/queueHooks";
 import ProspectingRepliesPage from "./ProspectingRepliesPage";
+import { AddToPitchButton } from "../components/gtm/AddToPitchButton";
 
 /**
  * Email to brands: the pipeline writes, Lemlist sends, a person decides.
@@ -539,6 +540,7 @@ function EmailPanel({ lead, view, theme, onDecide, actionsRef, sticky }) {
           {lead.domain && <Btn size="sm" variant="secondary" href={`https://${lead.domain}`} target="_blank">Store</Btn>}
           <Btn size="sm" variant="secondary" href={lead.instagram_url || `https://www.instagram.com/${lead.handle}/`}
                target="_blank">Instagram</Btn>
+          <AddToPitchButton lead={lead} />
           {lead.intent_post_url && (
             <Btn size="sm" variant="secondary" href={lead.intent_post_url} target="_blank">Their post</Btn>
           )}
