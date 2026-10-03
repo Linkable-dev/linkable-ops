@@ -187,6 +187,9 @@ export const api = {
     request(`/pitch-brands?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getPitchBrandRequests: () => request("/pitch-brands/requests"),
   getPitchBrandCategories: () => request("/pitch-brands/categories"),
+  updatePitchBrand: (id, data) => request(`/pitch-brands/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  removePitchBrand: (id) => request(`/pitch-brands/${id}`, { method: "DELETE" }),
+  refreshPitchBrand: (id) => request(`/pitch-brands/${id}/refresh`, { method: "POST" }),
   addPitchBrand: (data, dbTarget) =>
     request("/pitch-brands/requests", { method: "POST", body: JSON.stringify(data), dbTarget }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>

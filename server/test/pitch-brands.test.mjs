@@ -62,3 +62,55 @@ test("the brand list pages and filters on the server", async (t) => {
   assert.match(list.sql, /ORDER BY b\.instagram_followers DESC/);
   assert.deepEqual(list.params, ["%oli%", 20, 20]);
 });
+
+const ID = "11111111-2222-3333-4444-555555555555";
+
+test("edits are checked before any SQL, and a Linkable brand is read-only", async (t) => {
+  const request = await serve(t, async () => { assert.fail("invalid edit reached SQL"); });
+  for (const body of [{}, { name: "" }, { instagram: "not a handle!" }, { contact_email: "nope" },
+    { category: "SODA" }, { country: "United Kingdom" }, { description: "x".repeat(601) }]) {
+    const r = await request(`/${ID}`, "PATCH", body);
+    assert.equal(r.status, 400, JSON.stringify(body));
+  }
+  assert.equal((await request("/not-a-uuid", "PATCH", { name: "X" })).status, 404);
+
+  const linkable = await serve(t, async (sql) => {
+    if (/SELECT linkable_brand_user_id/.test(sql)) return { rows: [{ on_linkable: true }] };
+    assert.fail("a Linkable brand was written");
+  });
+  const e = await linkable(`/${ID}`, "PATCH", { name: "X" });
+  assert.equal(e.status, 409);
+  assert.equal((await linkable(`/${ID}`, "DELETE")).status, 409);
+});
+
+test("an edit writes only the fields sent; an admin's email is verified", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, params) => {
+    seen.push({ sql, params });
+    if (/SELECT linkable_brand_user_id/.test(sql)) return { rows: [{ on_linkable: false }] };
+    return { rows: [{ id: ID }] };
+  });
+  const r = await request(`/${ID}`, "PATCH", { instagram: "https://instagram.com/DrinkOlipop/", contact_email: "Partners@Olipop.com", country: "uk" });
+  assert.equal(r.status, 200);
+  const update = seen.find((q) => /UPDATE pitch_brands/.test(q.sql));
+  assert.deepEqual(update.params, [ID, "drinkolipop", "partners@olipop.com", "GB"]);
+  assert.match(update.sql, /contact_verified = true/);
+  assert.match(update.sql, /socials_checked_at = CASE WHEN instagram IS DISTINCT FROM \$2/);
+  assert.doesNotMatch(update.sql, /\bname =/);
+});
+
+test("removing a brand marks who removed it and closes its unsent drafts", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, params) => {
+    seen.push({ sql, params });
+    if (/SELECT linkable_brand_user_id/.test(sql)) return { rows: [{ on_linkable: false }] };
+    if (/UPDATE pitches/.test(sql)) return { rows: [], rowCount: 2 };
+    return { rows: [], rowCount: 1 };
+  });
+  const r = await request(`/${ID}`, "DELETE");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.drafts_closed, 2);
+  const soft = seen.find((q) => /UPDATE pitch_brands SET deleted/.test(q.sql));
+  assert.deepEqual(soft.params, [ID, "pitch-test@example.com"]);
+  assert.ok(seen.some((q) => /status = 'expired'/.test(q.sql) && /status = 'ready'/.test(q.sql)));
+});

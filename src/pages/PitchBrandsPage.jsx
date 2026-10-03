@@ -8,6 +8,7 @@ import { Label } from "../components/ui/Label";
 import { Select } from "../components/ui/Select";
 import { Tag } from "../components/ui/Tag";
 import { SkeletonTable } from "../components/ui/Skeleton";
+import { Modal } from "../components/ui/Modal";
 import {
   useColumnWidths,
   SortLabel,
@@ -44,6 +45,7 @@ const COLUMNS = [
     filter: { type: "text", field: "source", placeholder: "Source…" } },
   { key: "added", label: "Added", width: 110, sort: "desc", sortField: "created",
     filter: { type: "date", field: "created" } },
+  { key: "actions", label: "Actions", width: 220 },
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
 
@@ -73,8 +75,23 @@ function Logo({ src, name, size = 32, t }) {
   return <div style={box}><img src={src} alt="" onError={() => setBroken(true)} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }} /></div>;
 }
 
-function renderCell(key, b, { t, categories }) {
+function renderCell(key, b, { t, categories, link, busy, onEdit, onRefresh, onRemove }) {
   switch (key) {
+    case "actions":
+      // Header left, the row's actions grouped on the right.
+      return (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          {b.on_linkable ? (
+            <span style={{ fontSize: 12, color: t.textMuted }} title="Its details come from its Linkable account.">From its Linkable account</span>
+          ) : (
+            <>
+              <button style={{ ...link, borderRadius: "6px 0 0 6px" }} onClick={() => onEdit(b)}>Edit</button>
+              <button style={{ ...link, marginLeft: -1, borderRadius: 0 }} disabled={busy === b.id} onClick={() => onRefresh(b)}>{busy === b.id ? "Refreshing…" : "Refresh"}</button>
+              <button style={{ ...link, marginLeft: -1, borderRadius: "0 6px 6px 0", color: "#B91C1C" }} onClick={() => onRemove(b)}>Remove</button>
+            </>
+          )}
+        </div>
+      );
     case "brand":
       return (
         <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
@@ -151,6 +168,10 @@ export default function PitchBrandsPage() {
   const [sort, setSort] = useState({ sortBy: "", sortDir: "desc" });
   const [colFilters, setColFilters] = useState({});
   const { widths, startResize, resetWidth } = useColumnWidths("pitch-brands", DEFAULT_WIDTHS);
+  const [editing, setEditing] = useState(null);
+  const [removing, setRemoving] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     api.getPitchBrandCategories()
@@ -203,6 +224,28 @@ export default function PitchBrandsPage() {
       await loadRequests();
     } catch (err) { setFormError(err.message); }
     finally { setSending(false); }
+  };
+
+  const refresh = async (b) => {
+    setBusy(b.id);
+    try {
+      await api.refreshPitchBrand(b.id);
+      waitingRef.current = true;
+      await loadRequests();
+      setNotice(`Reading ${b.name} again. It updates in a few seconds.`);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+  const remove = async () => {
+    const b = removing;
+    setBusy(b.id);
+    try {
+      const r = await api.removePitchBrand(b.id);
+      setRemoving(null);
+      setNotice(`${b.name} is off Pitch.${r.drafts_closed ? ` ${r.drafts_closed} unsent ${r.drafts_closed === 1 ? "draft was" : "drafts were"} closed.` : ""}`);
+      await loadBrands();
+    } catch (e) { setError(e.message); setRemoving(null); }
+    finally { setBusy(null); }
   };
 
   const handleSort = (field, defaultDir) => { setSort((cur) => nextSort(cur, field, defaultDir)); setOffset(0); };
@@ -283,7 +326,8 @@ export default function PitchBrandsPage() {
         )}
       </Card>
 
-      {error && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13, display: "flex", justifyContent: "space-between" }}><span>{error}</span><button onClick={() => setError(null)} style={{ ...link, border: "none", padding: 0 }}>dismiss</button></div>}
+      {notice && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: t.surfaceAlt, color: t.textMid, fontSize: 13, display: "flex", justifyContent: "space-between" }}><span>{notice}</span><button onClick={() => setNotice(null)} style={{ ...link, border: "none", padding: 0 }}>dismiss</button></div>}
 
       <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
         {loading && brands.length === 0 ? (
@@ -313,7 +357,7 @@ export default function PitchBrandsPage() {
                 {brands.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>No brands match.</td></tr>}
                 {brands.map((b) => (
                   <tr key={b.id}>
-                    {COLUMNS.map((col) => <td key={col.key} style={td}>{renderCell(col.key, b, { t, categories })}</td>)}
+                    {COLUMNS.map((col) => <td key={col.key} style={td}>{renderCell(col.key, b, { t, categories, link, busy, onEdit: setEditing, onRefresh: refresh, onRemove: setRemoving })}</td>)}
                   </tr>
                 ))}
               </tbody>
@@ -329,6 +373,84 @@ export default function PitchBrandsPage() {
           <button style={link} disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
         </div>
       </div>
+
+      <EditBrandModal
+        brand={editing}
+        categoryOptions={categoryOptions}
+        onClose={() => setEditing(null)}
+        onSaved={(b) => { setEditing(null); setBrands((cur) => cur.map((x) => (x.id === b.id ? { ...x, ...b } : x))); setNotice(`Saved ${b.name}.`); }}
+      />
+
+      <Modal open={!!removing} onClose={() => setRemoving(null)} title="Remove from Pitch" width={460}>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: t.textMid, lineHeight: 1.5 }}>
+          Creators will no longer see or pitch <strong style={{ color: t.text }}>{removing?.name}</strong>, and any unsent drafts to it close. Pitches already sent keep their history. Adding it again here brings it back.
+        </p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Btn size="sm" variant="outline" onClick={() => setRemoving(null)}>Cancel</Btn>
+          <Btn size="sm" color="#B91C1C" loading={busy === removing?.id} onClick={remove}>Remove</Btn>
+        </div>
+      </Modal>
     </div>
+  );
+}
+
+function EditBrandModal({ brand, categoryOptions, onClose, onSaved }) {
+  const { theme: t } = useTheme();
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    if (!brand) return;
+    setForm({
+      name: brand.name || "",
+      instagram: brand.instagram || "",
+      contact_email: brand.contact_email || "",
+      category: brand.category || "",
+      country: brand.country || "",
+      description: brand.description || "",
+    });
+    setError(null);
+  }, [brand]);
+  const field = (key) => ({ value: form[key] ?? "", onChange: (e) => setForm((f) => ({ ...f, [key]: e.target.value })) });
+
+  const save = async () => {
+    // Only what changed, so an edit never overwrites the store's own reading
+    // of a field the admin did not touch.
+    const changed = Object.fromEntries(Object.entries(form).filter(([k, v]) => (brand[k] ?? "") !== v));
+    if (Object.keys(changed).length === 0) { onClose(); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await api.updatePitchBrand(brand.id, changed);
+      onSaved(r.brand);
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal open={!!brand} onClose={onClose} title={`Edit ${brand?.name || "brand"}`} width={560}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div><Label>Name</Label><Input {...field("name")} /></div>
+        <div><Label>Instagram handle</Label><Input {...field("instagram")} placeholder="drinkolipop" /></div>
+        <div><Label>Contact email</Label><Input {...field("contact_email")} type="email" placeholder="partnerships@brand.com" /></div>
+        <div>
+          <Label>Category</Label>
+          <Select value={form.category ?? ""} onChange={(v) => setForm((f) => ({ ...f, category: v }))} options={categoryOptions} placeholder="Not sure" />
+        </div>
+        <div><Label>Country</Label><Input {...field("country")} placeholder="GB" maxLength={2} /></div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <Label>About</Label>
+          <Input {...field("description")} multiline rows={4} placeholder="What the brand is, in a sentence or two" />
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: t.textMuted, marginTop: 10 }}>
+        A contact email entered here counts as verified. A new Instagram handle has its follower counts read again within the hour.
+      </div>
+      {error && <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+        <Btn size="sm" variant="outline" onClick={onClose}>Cancel</Btn>
+        <Btn size="sm" loading={saving} disabled={saving} onClick={save}>Save</Btn>
+      </div>
+    </Modal>
   );
 }
