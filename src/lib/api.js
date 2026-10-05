@@ -192,6 +192,17 @@ export const api = {
   refreshPitchBrand: (id) => request(`/pitch-brands/${id}/refresh`, { method: "POST" }),
   addPitchBrand: (data, dbTarget) =>
     request("/pitch-brands/requests", { method: "POST", body: JSON.stringify(data), dbTarget }),
+  // Pitch: every pitch creators sent and what came of it, and the creators
+  // who pitch. Read-only on pitches; weekly picks is the one switch.
+  getPitchSummary: ({ days } = {}) => request(`/pitch/summary?${buildQs({ days })}`),
+  getPitches: ({ view, limit = 25, offset = 0, filters, sortBy, sortDir } = {}) =>
+    request(`/pitch/pitches?${buildQs({ view, limit, offset, filters, sortBy, sortDir })}`),
+  getPitch: (id) => request(`/pitch/pitches/${id}`),
+  getPitchCreators: ({ view, limit = 25, offset = 0, filters, sortBy, sortDir } = {}) =>
+    request(`/pitch/creators?${buildQs({ view, limit, offset, filters, sortBy, sortDir })}`),
+  setPitchCreatorWeekly: (userId, weekly) =>
+    request(`/pitch/creators/${userId}`, { method: "PATCH", body: JSON.stringify({ weekly }) }),
+  addPitchCreator: (email) => request("/pitch/creators", { method: "POST", body: JSON.stringify({ email }) }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>

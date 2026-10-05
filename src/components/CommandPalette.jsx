@@ -15,6 +15,9 @@ const PAGES = [
   ["Autopilot", "/ops/autopilot", "recruiting sourcing"],
   ["AI creators", "/ops/ai-creators", "avatars roster synthetic casting"],
   ["Campaign content", "/ops/content", "creator content files deliverables uploads generated assets library"],
+  ["Pitch", "/ops/pitch", "pitches proposals sent creators brands lemlist"],
+  ["Pitch creators", "/ops/pitch/creators", "weekly picks"],
+  ["Pitch brands", "/ops/pitch/brands", "add brand store handle"],
   ["Trials", "/trials"], ["Impersonation", "/users"],
   ["Brands", "/gtm/brands"], ["Creators", "/gtm/creators"],
   // "Replies" pointed at /ai/inbox — the retired system's inbox, holding one

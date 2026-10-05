@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTheme } from "../contexts/ThemeContext";
-import { api, friendlyDate } from "../lib/api";
-import { Card } from "../components/ui/Card";
-import { Btn } from "../components/ui/Button";
-import { Input } from "../components/ui/Input";
-import { Label } from "../components/ui/Label";
-import { Select } from "../components/ui/Select";
-import { Tag } from "../components/ui/Tag";
-import { SkeletonTable } from "../components/ui/Skeleton";
-import { Modal } from "../components/ui/Modal";
+import { useNavigate } from "react-router-dom";
+import { useTheme } from "../../contexts/ThemeContext";
+import { api, friendlyDate } from "../../lib/api";
+import { Card } from "../../components/ui/Card";
+import { Btn } from "../../components/ui/Button";
+import { Input } from "../../components/ui/Input";
+import { Label } from "../../components/ui/Label";
+import { Select } from "../../components/ui/Select";
+import { Tag } from "../../components/ui/Tag";
+import { SkeletonTable } from "../../components/ui/Skeleton";
+import { Modal } from "../../components/ui/Modal";
 import {
   useColumnWidths,
   SortLabel,
@@ -17,9 +18,11 @@ import {
   ResizeHandle,
   HeaderCell,
   headerCellStyle,
-} from "../components/table/tableTools";
+} from "../../components/table/tableTools";
+import { Logo } from "../../components/pitch/PitchParts";
+import { count } from "../../components/pitch/pitchLabels";
 
-// Pitch brands: the external brands creators pitch from Discover.
+// Pitch → Brands: the external brands creators pitch from Discover.
 //
 // Adding one takes an Instagram handle or a store address. The request is
 // written here and service-grpc reads the rest within seconds (the store,
@@ -43,6 +46,7 @@ const COLUMNS = [
   { key: "signals", label: "Signals", width: 200 },
   { key: "source", label: "Source", width: 110, sort: "asc", sortField: "source",
     filter: { type: "text", field: "source", placeholder: "Source…" } },
+  { key: "pitches", label: "Pitches", width: 100, sort: "desc", sortField: "pitches_sent" },
   { key: "added", label: "Added", width: 110, sort: "desc", sortField: "created",
     filter: { type: "date", field: "created" } },
   { key: "actions", label: "Actions", width: 220 },
@@ -59,24 +63,13 @@ const STATUS = {
   failed: { label: "Couldn't add", color: "#B91C1C" },
 };
 
-// 120000 -> "120K"; "" when not known.
-function count(n) {
-  const v = Number(n) || 0;
-  if (v <= 0) return "";
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(v >= 100_000 ? 0 : 1).replace(/\.0$/, "")}K`;
-  return String(v);
-}
-
-function Logo({ src, name, size = 32, t }) {
-  const [broken, setBroken] = useState(false);
-  const box = { width: size, height: size, borderRadius: size / 2, border: `1px solid ${t.border}`, background: "#fff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", fontSize: 11, fontWeight: 600, color: t.textMid };
-  if (!src || broken) return <div style={box}>{(name || "?").trim().charAt(0).toUpperCase()}</div>;
-  return <div style={box}><img src={src} alt="" onError={() => setBroken(true)} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }} /></div>;
-}
-
-function renderCell(key, b, { t, categories, link, busy, onEdit, onRefresh, onRemove }) {
+function renderCell(key, b, { t, categories, link, busy, onEdit, onRefresh, onRemove, onPitches }) {
   switch (key) {
+    case "pitches":
+      // Sent pitches; the count opens them on the Pitches tab.
+      return b.pitches_sent
+        ? <button style={{ ...link, fontWeight: 600, color: t.text }} title={`Show the pitches sent to ${b.name}`} onClick={() => onPitches(b)}>{b.pitches_sent} sent</button>
+        : <span style={{ color: t.textMuted }}>—</span>;
     case "actions":
       // Header left, the row's actions grouped on the right.
       return (
@@ -95,7 +88,7 @@ function renderCell(key, b, { t, categories, link, busy, onEdit, onRefresh, onRe
     case "brand":
       return (
         <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-          <Logo src={b.logo_url} name={b.name} t={t} />
+          <Logo src={b.logo_url} name={b.name} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {b.name}{b.on_linkable && <span style={{ marginLeft: 6 }}><Tag color="#2563EB">On Linkable</Tag></span>}
@@ -144,6 +137,7 @@ function renderCell(key, b, { t, categories, link, busy, onEdit, onRefresh, onRe
 
 export default function PitchBrandsPage() {
   const { theme: t } = useTheme();
+  const navigate = useNavigate();
   const [available, setAvailable] = useState(true);
   const [categories, setCategories] = useState({});
   const [categoryOptions, setCategoryOptions] = useState([]);
@@ -261,7 +255,7 @@ export default function PitchBrandsPage() {
     return (
       <Card>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Pitch isn't on this database yet</div>
-        <div style={{ fontSize: 13, color: t.textMid }}>Switch the database target to dev to add and see Pitch brands.</div>
+        <div style={{ fontSize: 13, color: t.textMid }}>Its tables aren't here, so there are no brands to show or add.</div>
       </Card>
     );
   }
@@ -297,7 +291,7 @@ export default function PitchBrandsPage() {
               const s = STATUS[r.status] || STATUS.pending;
               return (
                 <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 13 }}>
-                  {r.brand_id ? <Logo src={r.logo_url} name={r.name} size={28} t={t} /> : <div style={{ width: 28 }} />}
+                  {r.brand_id ? <Logo src={r.logo_url} name={r.name} size={28} /> : <div style={{ width: 28 }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.name || r.input}
@@ -357,7 +351,7 @@ export default function PitchBrandsPage() {
                 {brands.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>No brands match.</td></tr>}
                 {brands.map((b) => (
                   <tr key={b.id}>
-                    {COLUMNS.map((col) => <td key={col.key} style={td}>{renderCell(col.key, b, { t, categories, link, busy, onEdit: setEditing, onRefresh: refresh, onRemove: setRemoving })}</td>)}
+                    {COLUMNS.map((col) => <td key={col.key} style={td}>{renderCell(col.key, b, { t, categories, link, busy, onEdit: setEditing, onRefresh: refresh, onRemove: setRemoving, onPitches: (x) => navigate(`/ops/pitch?brand=${x.id}&who=${encodeURIComponent(x.name)}`) })}</td>)}
                   </tr>
                 ))}
               </tbody>

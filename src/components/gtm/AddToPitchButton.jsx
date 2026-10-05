@@ -56,7 +56,7 @@ export function AddToPitchButton({ lead }) {
               Sent to Pitch on {sent}. Linkable reads the store and follower counts now, and the brand appears on Pitch brands in a few seconds.
             </p>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              {sent === getDbTarget() && <Btn size="sm" variant="secondary" onClick={() => navigate("/ops/pitch-brands")}>Open Pitch brands</Btn>}
+              {sent === getDbTarget() && <Btn size="sm" variant="secondary" onClick={() => navigate("/ops/pitch/brands")}>Open Pitch brands</Btn>}
               <Btn size="sm" onClick={close}>Done</Btn>
             </div>
           </>

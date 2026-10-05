@@ -38,8 +38,8 @@ const alertsIcon = icon(<>
   <path d="M13.7 21a2 2 0 0 1-3.4 0" />
 </>);
 const healthIcon = icon(<path d="M3 12h4l2.5-6 4 12L16 12h5" />);
-// A paper plane for Pitch: brands a creator sends a proposal to.
-const pitchBrandsIcon = icon(<>
+// A paper plane for Pitch: creators sending brands a proposal.
+const pitchIcon = icon(<>
   <path d="M22 2 11 13" />
   <path d="M22 2 15 22l-4-9-9-4 20-7z" />
 </>);
@@ -291,8 +291,8 @@ export default function Sidebar() {
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
             {navItem("/ops/costs", "Costs & margin", path.startsWith("/ops/costs"), costsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
-            {/* External brands creators pitch; add one by handle or store. */}
-            {navItem("/ops/pitch-brands", "Pitch brands", path.startsWith("/ops/pitch-brands"), pitchBrandsIcon)}
+            {/* Creators pitching brands: who sent what, the creators, the brands. */}
+            {navItem("/ops/pitch", "Pitch", path.startsWith("/ops/pitch"), pitchIcon)}
             {navItem("/trials", "Trials", path.startsWith("/trials"), trialsIcon)}
           </div>
         )}

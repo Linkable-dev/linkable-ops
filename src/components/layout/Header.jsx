@@ -17,7 +17,9 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/health")) return { title: "Brand health", subtitle: "One score per brand, and who is sliding" };
   if (pathname.startsWith("/ops/campaigns")) return { title: "Campaigns", subtitle: "Campaign operations" };
   if (pathname.startsWith("/ops/autopilot")) return { title: "Autopilot", subtitle: "The creator recruiting machine — read-only" };
-  if (pathname.startsWith("/ops/pitch-brands")) return { title: "Pitch brands", subtitle: "External brands creators can pitch from Discover" };
+  if (pathname.startsWith("/ops/pitch/creators")) return { title: "Pitch", subtitle: "Creators who pitch brands" };
+  if (pathname.startsWith("/ops/pitch/brands")) return { title: "Pitch", subtitle: "External brands creators can pitch from Discover" };
+  if (pathname.startsWith("/ops/pitch")) return { title: "Pitch", subtitle: "Every pitch creators sent, and what came of it" };
   if (pathname.startsWith("/ops/costs")) return { title: "Costs & margin", subtitle: "Revenue, provider spend, and what's left" };
   if (pathname.startsWith("/ops/ai-creators")) return { title: "AI creators", subtitle: "Invented people every brand generates with" };
   if (pathname.startsWith("/ops/content")) return { title: "Campaign content", subtitle: "What creators delivered, and what the machine generated" };

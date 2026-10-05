@@ -18,7 +18,10 @@ const AskPage = lazy(() => import("./pages/AskPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const CampaignsOpsPage = lazy(() => import("./pages/CampaignsOpsPage"));
 const AutopilotPage = lazy(() => import("./pages/AutopilotPage"));
-const PitchBrandsPage = lazy(() => import("./pages/PitchBrandsPage"));
+const PitchesPage = lazy(() => import("./pages/pitch/PitchesPage"));
+const PitchCreatorsPage = lazy(() => import("./pages/pitch/PitchCreatorsPage"));
+const PitchBrandsPage = lazy(() => import("./pages/pitch/PitchBrandsPage"));
+const PitchSection = lazy(() => import("./components/pitch/PitchParts.jsx").then(m => ({ default: m.PitchSection })));
 const CostsPage = lazy(() => import("./pages/CostsPage"));
 const AiCreatorsPage = lazy(() => import("./pages/AiCreatorsPage"));
 const ContentPage = lazy(() => import("./pages/ContentPage"));
@@ -63,7 +66,13 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
                     <Route path="/ops/autopilot" element={<AutopilotPage />} />
-                    <Route path="/ops/pitch-brands" element={<PitchBrandsPage />} />
+                    <Route element={<PitchSection />}>
+                      <Route path="/ops/pitch" element={<PitchesPage />} />
+                      <Route path="/ops/pitch/creators" element={<PitchCreatorsPage />} />
+                      <Route path="/ops/pitch/brands" element={<PitchBrandsPage />} />
+                    </Route>
+                    {/* The page was "Pitch brands" until it became a tab of Pitch. */}
+                    <Route path="/ops/pitch-brands" element={<Navigate to="/ops/pitch/brands" replace />} />
                     <Route path="/ops/costs" element={<CostsPage />} />
                     <Route path="/ops/ai-creators" element={<AiCreatorsPage />} />
                     <Route path="/ops/content" element={<ContentPage />} />

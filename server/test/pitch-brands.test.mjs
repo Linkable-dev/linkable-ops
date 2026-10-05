@@ -53,14 +53,19 @@ test("the brand list pages and filters on the server", async (t) => {
   const seen = [];
   const request = await serve(t, async (sql, params) => {
     seen.push({ sql, params });
-    return /count\(\*\)/.test(sql) ? { rows: [{ n: 41 }] } : { rows: [{ id: "b1", name: "OLIPOP" }] };
+    return /LIMIT/.test(sql) ? { rows: [{ id: "b1", name: "OLIPOP", pitches_sent: 2 }] } : { rows: [{ n: 41 }] };
   });
   const r = await request("/?limit=20&offset=20&sortBy=instagram_followers&sortDir=desc&filter[name]=oli");
   assert.equal(r.status, 200);
   assert.equal(r.body.total, 41);
-  const list = seen.find((q) => !/count\(\*\)/.test(q.sql));
+  assert.equal(r.body.items[0].pitches_sent, 2);
+  const list = seen.find((q) => /LIMIT/.test(q.sql));
   assert.match(list.sql, /ORDER BY b\.instagram_followers DESC/);
+  assert.match(list.sql, /AS pitches_sent/);
   assert.deepEqual(list.params, ["%oli%", 20, 20]);
+  // Most pitched first: the count is a column of the list, sortable by name.
+  await request("/?sortBy=pitches_sent&sortDir=desc");
+  assert.match(seen.at(-2).sql + seen.at(-1).sql, /ORDER BY pitches_sent DESC/);
 });
 
 const ID = "11111111-2222-3333-4444-555555555555";

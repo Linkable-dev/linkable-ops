@@ -19,6 +19,7 @@ import { contentRoutes } from "./routes/content.js";
 import { blogRoutes } from "./routes/blog.js";
 import { costsRoutes } from "./routes/costs.js";
 import { pitchBrandsRoutes } from "./routes/pitch-brands.js";
+import { pitchRoutes } from "./routes/pitch.js";
 import { dbTargetMiddleware } from "./middleware/dbTarget.js";
 
 // The API, in one place.
@@ -92,6 +93,9 @@ app.use("/api/content", dbTargetMiddleware, requireOpsAdmin, contentRoutes());
 // External brands creators can pitch: an admin adds one by handle or store
 // address and service-grpc reads the rest.
 app.use("/api/pitch-brands", dbTargetMiddleware, requireOpsAdmin, pitchBrandsRoutes());
+// Pitch itself: who sent which pitch to whom and what came of it, and the
+// creators who pitch.
+app.use("/api/pitch", dbTargetMiddleware, requireOpsAdmin, pitchRoutes());
 // GTM outreach as agents: a goal, a budget and a clock — see lib/outbound-agent.js.
 app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());

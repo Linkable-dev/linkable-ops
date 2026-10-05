@@ -56,6 +56,7 @@ const SORTS = {
   category: "b.category",
   source: "b.source",
   created: "b.created",
+  pitches_sent: "pitches_sent",
 };
 const FILTERS = {
   name: textFilter("b.name", "b.domain", "b.instagram"),
@@ -67,6 +68,11 @@ const FILTERS = {
   instagram_followers: numberFilter("b.instagram_followers"),
   created: dateFilter("b.created"),
 };
+
+// How many pitches creators sent this brand; the list only (RETURNING has no
+// use for it).
+const PITCHES_SENT = `(SELECT count(*)::int FROM pitches p
+    WHERE p.pitch_brand_id = b.id AND p.sent_at IS NOT NULL AND p.deleted = '-infinity') AS pitches_sent`;
 
 const BRAND_COLUMNS = `
   b.id, b.name, b.domain, b.instagram, b.logo_url, b.category, b.country, b.source,
@@ -94,7 +100,7 @@ export function pitchBrandsRoutes({ query = cloudSqlQuery } = {}) {
       const countParams = [...params];
       params.push(limit, offset);
       const [{ rows }, count] = await Promise.all([
-        query(`SELECT ${BRAND_COLUMNS} FROM pitch_brands b ${where} ORDER BY ${order}, b.id LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
+        query(`SELECT ${BRAND_COLUMNS}, ${PITCHES_SENT} FROM pitch_brands b ${where} ORDER BY ${order}, b.id LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
         query(`SELECT count(*)::int AS n FROM pitch_brands b ${where}`, countParams),
       ]);
       res.json({ available: true, items: rows, total: count.rows[0]?.n ?? 0 });
