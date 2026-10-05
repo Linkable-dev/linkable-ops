@@ -159,9 +159,12 @@ export function SkeletonBars({ rows = 4, labelWidth = 64, valueWidth = 150, barH
  *   avatar   – 32px circle
  *   text     – single line of text
  *   two-line – title + smaller sub line (name + email, title + slug…)
+ *   who      – 32px circle beside a title + sub line (a person or a brand)
  *   pill     – status tag
  *   num      – right-aligned figure
  *   actions  – right-aligned small buttons
+ *   toggle   – an on/off switch
+ *   button   – one right-aligned pill button
  *   empty    – nothing
  */
 export function SkeletonCell({ kind = "text", seed = 0, height = 12 }) {
@@ -174,6 +177,15 @@ export function SkeletonCell({ kind = "text", seed = 0, height = 12 }) {
         <Skeleton width={vary(seed + 3, 30, 30)} height={height - 2} />
       </div>
     );
+    case "who": return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Skeleton width={32} height={32} radius="50%" />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          <Skeleton width={vary(seed, 50, 35)} height={height} />
+          <Skeleton width={vary(seed + 3, 35, 30)} height={height - 2} />
+        </div>
+      </div>
+    );
     case "pill": return <Skeleton width={64} height={18} radius={999} />;
     case "num": return <div style={{ textAlign: "right" }}><Skeleton width={vary(seed, 30, 30)} height={height} /></div>;
     case "actions": return (
@@ -182,6 +194,8 @@ export function SkeletonCell({ kind = "text", seed = 0, height = 12 }) {
         <Skeleton width={44} height={height} />
       </div>
     );
+    case "toggle": return <Skeleton width={36} height={20} radius={999} />;
+    case "button": return <div style={{ display: "flex", justifyContent: "flex-end" }}><Skeleton width={58} height={30} radius={999} /></div>;
     case "empty": return null;
     default: return <Skeleton width={vary(seed, 40, 50)} height={height} />;
   }

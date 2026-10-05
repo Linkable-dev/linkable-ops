@@ -7,7 +7,7 @@ import { Btn } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Toggle } from "../../components/ui/Toggle";
 import { TabBar } from "../../components/ui/TabBar";
-import { SkeletonTable } from "../../components/ui/Skeleton";
+import { Skeleton, SkeletonTableRows } from "../../components/ui/Skeleton";
 import {
   useColumnWidths, SortLabel, nextSort, ColumnFilter, ResizeHandle, HeaderCell, headerCellStyle,
 } from "../../components/table/tableTools";
@@ -42,6 +42,9 @@ const COLUMNS = [
   { key: "actions", label: "Actions", width: 120 },
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
+// What each column looks like while it loads.
+const SKELETON_KIND = { creator: "who", weekly: "toggle", actions: "button" };
+const SKELETON_COLS = COLUMNS.map((c) => ({ kind: SKELETON_KIND[c.key] || "text" }));
 
 const HELP = [
   ["Who is here", "Every creator who has opened the Pitch tab in the app. Any creator can; nobody is invited or added by hand."],
@@ -203,16 +206,16 @@ export default function PitchCreatorsPage() {
         </form>
       </div>
 
-      <TabBar tabs={VIEWS.map(([id, label]) => [id, counts ? `${label} · ${counts[id] ?? 0}` : label])}
+      <TabBar tabs={VIEWS.map(([id, label]) => [id, counts
+                ? `${label} · ${counts[id] ?? 0}`
+                : <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{label} · <Skeleton width={12} height={11} /></span>])}
               active={view} onSelect={(v) => { setView(v); setOffset(0); }} />
 
       {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
       {notice && <Banner onDismiss={() => setNotice(null)}>{notice}</Banner>}
 
       <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
-        {loading && rows.length === 0 ? (
-          <SkeletonTable rows={8} headerBackground="transparent" columns={COLUMNS.map((c) => ({ key: c.key, label: c.label, kind: c.key === "creator" ? "two-line" : "text" }))} />
-        ) : (
+        {/* The real header stays while rows load, so sorting and filters never vanish. */}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>{COLUMNS.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}</colgroup>
@@ -234,8 +237,9 @@ export default function PitchCreatorsPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {rows.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>No creator matches.</td></tr>}
-                {rows.map((c) => (
+                {loading && <SkeletonTableRows rows={rows.length || 8} cols={SKELETON_COLS} rowHeight={34} cellPadding="12px 14px" />}
+                {!loading && rows.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>No creator matches.</td></tr>}
+                {!loading && rows.map((c) => (
                   <tr key={c.user_id}>
                     {COLUMNS.map((col) => <td key={col.key} style={td}>{renderCell(col.key, c)}</td>)}
                   </tr>
@@ -243,11 +247,10 @@ export default function PitchCreatorsPage() {
               </tbody>
             </table>
           </div>
-        )}
       </Card>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
-        <span>{total === 0 ? "No creators" : `${pageStart}–${pageEnd} of ${total}`}</span>
+        <span>{loading ? <Skeleton width={70} height={12} /> : total === 0 ? "No creators" : `${pageStart}–${pageEnd} of ${total}`}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Btn size="sm" variant="secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</Btn>
           <Btn size="sm" variant="secondary" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Btn>

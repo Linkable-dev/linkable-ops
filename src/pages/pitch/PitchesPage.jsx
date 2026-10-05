@@ -7,7 +7,7 @@ import { Btn } from "../../components/ui/Button";
 import { Select } from "../../components/ui/Select";
 import { Tag } from "../../components/ui/Tag";
 import { TabBar } from "../../components/ui/TabBar";
-import { SkeletonTable } from "../../components/ui/Skeleton";
+import { Skeleton, SkeletonTableRows } from "../../components/ui/Skeleton";
 import {
   useColumnWidths, SortLabel, nextSort, ColumnFilter, ResizeHandle, HeaderCell, headerCellStyle,
 } from "../../components/table/tableTools";
@@ -51,6 +51,9 @@ const COLUMNS = [
   { key: "actions", label: "Actions", width: 100 },
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
+// What each column looks like while it loads.
+const SKELETON_KIND = { creator: "who", brand: "who", status: "pill", sent_to: "two-line", actions: "button" };
+const SKELETON_COLS = COLUMNS.map((c) => ({ kind: SKELETON_KIND[c.key] || "text" }));
 
 const HELP = [
   ["What this is", "Every pitch a creator sent to a brand through Pitch, newest first. Drafts are the pitches Linkable wrote that nobody has sent yet."],
@@ -128,6 +131,7 @@ export default function PitchesPage() {
 
   const [period, setPeriod] = useState("30");
   const [summary, setSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
   const [view, setView] = useState("sent");
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -143,9 +147,11 @@ export default function PitchesPage() {
     let live = true;
     api.getPitchSummary({ days: period === "all" ? undefined : period })
       .then((r) => { if (live) setSummary(r); })
-      .catch((e) => { if (live) setError(e.message); });
+      .catch((e) => { if (live) setError(e.message); })
+      .finally(() => { if (live) setSummaryLoading(false); });
     return () => { live = false; };
   }, [period]);
+  const changePeriod = (p) => { if (p === period) return; setSummaryLoading(true); setPeriod(p); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -195,7 +201,7 @@ export default function PitchesPage() {
         <div style={{ fontWeight: 600, fontSize: 15 }}>How pitches are doing</div>
         <HelpTip title="Pitches"><HelpList items={HELP} /></HelpTip>
         <div style={{ marginLeft: "auto", width: 170 }}>
-          <Select value={period} onChange={setPeriod} options={PERIODS} size="sm" ariaLabel="Period" />
+          <Select value={period} onChange={changePeriod} options={PERIODS} size="sm" ariaLabel="Period" />
         </div>
       </div>
 
@@ -204,17 +210,17 @@ export default function PitchesPage() {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
-        <StatTile label="Sent" value={summary ? f.sent : "…"}
-                  sub={summary ? `by ${f.creators} ${f.creators === 1 ? "creator" : "creators"} to ${f.brands} ${f.brands === 1 ? "brand" : "brands"}` : ""} />
-        <StatTile label="Viewed proposal" value={summary ? f.viewed : "…"} sub={pct(f.viewed, f.sent)} />
-        <StatTile label="Replied" value={summary ? f.replied : "…"} sub={pct(f.replied, f.sent)} />
-        <StatTile label="Accepted" value={summary ? f.accepted : "…"} sub={pct(f.accepted, f.sent)} />
-        <StatTile label="Trials started" value={summary ? f.trials : "…"} />
-        <StatTile label="Paying brands" value={summary ? f.paying : "…"} />
-        <StatTile strong label="Paying per 100 sent" value={summary ? summary.paying_per_100 : "…"} sub="The number Pitch is judged on" />
+        <StatTile loading={summaryLoading} label="Sent" value={f.sent}
+                  sub={`by ${f.creators} ${f.creators === 1 ? "creator" : "creators"} to ${f.brands} ${f.brands === 1 ? "brand" : "brands"}`} />
+        <StatTile loading={summaryLoading} label="Viewed proposal" value={f.viewed} sub={pct(f.viewed, f.sent)} />
+        <StatTile loading={summaryLoading} label="Replied" value={f.replied} sub={pct(f.replied, f.sent)} />
+        <StatTile loading={summaryLoading} label="Accepted" value={f.accepted} sub={pct(f.accepted, f.sent)} />
+        <StatTile loading={summaryLoading} label="Trials started" value={f.trials} />
+        <StatTile loading={summaryLoading} label="Paying brands" value={f.paying} />
+        <StatTile loading={summaryLoading} strong label="Paying per 100 sent" value={summary?.paying_per_100} sub="The number Pitch is judged on" />
       </div>
       <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>
-        {summary && <>
+        {summaryLoading ? <Skeleton width={460} height={12} /> : summary && <>
           Right now {now.sending} sending · {now.drafts} {now.drafts === 1 ? "draft" : "drafts"} waiting for their creator
           {now.no_contact > 0 && <> · <span style={{ color: t.danger }}>{now.no_contact} with no contact found</span></>}
           {" "}· {now.weekly_creators} {now.weekly_creators === 1 ? "creator" : "creators"} on weekly picks
@@ -234,10 +240,8 @@ export default function PitchesPage() {
       {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
 
       <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
-        {loading && rows.length === 0 ? (
-          <SkeletonTable rows={8} headerBackground="transparent" columns={COLUMNS.map((c) => ({ key: c.key, label: c.label, kind: c.key === "creator" || c.key === "brand" ? "two-line" : "text" }))} />
-        ) : (
-          <div style={{ overflowX: "auto" }}>
+        {/* The real header stays while rows load, so sorting and filters never vanish. */}
+        <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>{COLUMNS.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}</colgroup>
               <thead><tr>
@@ -258,12 +262,13 @@ export default function PitchesPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {rows.length === 0 && (
+                {loading && <SkeletonTableRows rows={rows.length || 8} cols={SKELETON_COLS} rowHeight={34} cellPadding="12px 14px" />}
+                {!loading && rows.length === 0 && (
                   <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>
                     {view === "sent" ? "No pitch sent matches." : view === "drafts" ? "No draft matches." : "No pitch matches."}
                   </td></tr>
                 )}
-                {rows.map((p) => (
+                {!loading && rows.map((p) => (
                   <tr key={p.id} onClick={() => open(p.id)} style={{ cursor: "pointer" }}
                       onMouseEnter={(e) => { e.currentTarget.style.background = t.surfaceAlt; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
@@ -272,12 +277,11 @@ export default function PitchesPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
+        </div>
       </Card>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
-        <span>{total === 0 ? "No pitches" : `${pageStart}–${pageEnd} of ${total}`}</span>
+        <span>{loading ? <Skeleton width={70} height={12} /> : total === 0 ? "No pitches" : `${pageStart}–${pageEnd} of ${total}`}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Btn size="sm" variant="secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</Btn>
           <Btn size="sm" variant="secondary" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Btn>

@@ -3,6 +3,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { api } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { Tag } from "../ui/Tag";
+import { Skeleton, SkeletonRow } from "../ui/Skeleton";
 import { Avatar, Logo, Who, Banner } from "./PitchParts";
 import { pitchStatus, pitchTerms, eventLabel, eventNote, when, CHANNEL_LABEL } from "./pitchLabels";
 
@@ -26,7 +27,6 @@ export function PitchDetailModal({ id, onClose }) {
 }
 
 function PitchLoader({ id, onTitle }) {
-  const { theme: t } = useTheme();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -44,8 +44,49 @@ function PitchLoader({ id, onTitle }) {
   }, [id, onTitle]);
 
   if (error) return <Banner tone="error">{error}</Banner>;
-  if (!data) return <div style={{ fontSize: 13, color: t.textMuted, padding: "24px 0" }}>Loading the pitch…</div>;
+  if (!data) return <PitchBodySkeleton />;
   return <PitchBody p={data.pitch} events={data.events} replies={data.replies} showIgnored={showIgnored} setShowIgnored={setShowIgnored} />;
+}
+
+// The pitch's own layout, shimmering: who → whom, the tags, the facts,
+// the email, the proposal.
+function PitchBodySkeleton() {
+  const { theme: t } = useTheme();
+  const who = (
+    <div style={{ flex: "1 1 220px", display: "flex", alignItems: "center", gap: 10 }}>
+      <Skeleton width={40} height={40} radius="50%" />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <Skeleton width="55%" height={15} />
+        <Skeleton width="75%" height={11} />
+      </div>
+    </div>
+  );
+  const section = <div style={{ margin: "22px 0 10px" }}><Skeleton width={90} height={10} /></div>;
+  return (
+    <div aria-busy="true" aria-label="Loading the pitch">
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>{who}<span style={{ color: t.border, fontSize: 18 }}>→</span>{who}</div>
+      <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
+        {[48, 60, 64, 48].map((w, i) => <Skeleton key={i} width={w} height={20} radius={999} />)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px 20px", marginTop: 18 }}>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <Skeleton width={70} height={11} />
+            <Skeleton width={`${50 + (i * 13) % 40}%`} height={13} />
+          </div>
+        ))}
+      </div>
+      {section}
+      <div style={{ background: t.surfaceAlt, borderRadius: 10, padding: "12px 14px" }}>
+        <SkeletonRow widths={["40%", "92%", "85%", "60%", "30%"]} height={12} />
+      </div>
+      {section}
+      <div style={{ display: "flex", gap: 14 }}>
+        <Skeleton width={96} height={96} radius={10} />
+        <div style={{ flex: 1 }}><SkeletonRow widths={["50%", "95%", "88%", "40%", "45%"]} height={12} /></div>
+      </div>
+    </div>
+  );
 }
 
 function PitchBody({ p, events, replies, showIgnored, setShowIgnored }) {

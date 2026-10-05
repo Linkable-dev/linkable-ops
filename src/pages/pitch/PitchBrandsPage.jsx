@@ -8,7 +8,7 @@ import { Input } from "../../components/ui/Input";
 import { Label } from "../../components/ui/Label";
 import { Select } from "../../components/ui/Select";
 import { Tag } from "../../components/ui/Tag";
-import { SkeletonTable } from "../../components/ui/Skeleton";
+import { Skeleton, SkeletonTableRows, SkeletonListRows } from "../../components/ui/Skeleton";
 import { Modal } from "../../components/ui/Modal";
 import {
   useColumnWidths,
@@ -52,6 +52,9 @@ const COLUMNS = [
   { key: "actions", label: "Actions", width: 220 },
 ];
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
+// What each column looks like while it loads.
+const SKELETON_KIND = { brand: "who", actions: "actions" };
+const SKELETON_COLS = COLUMNS.map((c) => ({ kind: SKELETON_KIND[c.key] || "text" }));
 
 const SOURCE_LABEL = { ops: "Ops", instagram_dm: "Instagram DMs", import: "Import", creator: "A creator", detected: "Detected", linkable: "Linkable", ugc_call: "UGC call" };
 
@@ -151,6 +154,7 @@ export default function PitchBrandsPage() {
 
   // Recent requests
   const [requests, setRequests] = useState([]);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
   const waitingRef = useRef(false);
 
   // The brand list
@@ -199,6 +203,7 @@ export default function PitchBrandsPage() {
       // A request just finished: the new brand belongs in the list.
       if (wasWaiting && !waiting) loadBrands();
     } catch { /* the list below shows errors; polling just tries again */ }
+    finally { setRequestsLoaded(true); }
   }, [loadBrands]);
   useEffect(() => { loadRequests(); }, [loadRequests]);
   useEffect(() => {
@@ -284,6 +289,12 @@ export default function PitchBrandsPage() {
         </form>
         {formError && <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{formError}</div>}
 
+        {!requestsLoaded && (
+          <div style={{ marginTop: 18, borderTop: `1px solid ${t.border}`, paddingTop: 14 }}>
+            <div style={{ marginBottom: 8 }}><Skeleton width={110} height={11} /></div>
+            <SkeletonListRows rows={3} avatar={{ size: 28, radius: 14 }} lines={[["35%", 13], ["55%", 11]]} action={{ width: 64, height: 20 }} padding="8px 0" gap={12} lastDivider />
+          </div>
+        )}
         {requests.length > 0 && (
           <div style={{ marginTop: 18, borderTop: `1px solid ${t.border}`, paddingTop: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Recently added</div>
@@ -324,9 +335,7 @@ export default function PitchBrandsPage() {
       {notice && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: t.surfaceAlt, color: t.textMid, fontSize: 13, display: "flex", justifyContent: "space-between" }}><span>{notice}</span><button onClick={() => setNotice(null)} style={{ ...link, border: "none", padding: 0 }}>dismiss</button></div>}
 
       <Card style={{ padding: 0, marginBottom: 0, overflow: "hidden" }}>
-        {loading && brands.length === 0 ? (
-          <SkeletonTable rows={8} headerBackground="transparent" columns={COLUMNS.map((c) => ({ key: c.key, label: c.label, kind: c.key === "brand" ? "two-line" : "text" }))} />
-        ) : (
+        {/* The real header stays while rows load, so sorting and filters never vanish. */}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", minWidth: Object.values(widths).reduce((a, b) => a + b, 0), borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>{COLUMNS.map((c) => <col key={c.key} style={{ width: widths[c.key] }} />)}</colgroup>
@@ -348,8 +357,9 @@ export default function PitchBrandsPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {brands.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>No brands match.</td></tr>}
-                {brands.map((b) => (
+                {loading && <SkeletonTableRows rows={brands.length || 8} cols={SKELETON_COLS} rowHeight={34} cellPadding="12px 14px" />}
+                {!loading && brands.length === 0 && <tr><td style={{ ...td, color: t.textMuted }} colSpan={COLUMNS.length}>No brands match.</td></tr>}
+                {!loading && brands.map((b) => (
                   <tr key={b.id}>
                     {COLUMNS.map((col) => <td key={col.key} style={td}>{renderCell(col.key, b, { t, categories, link, busy, onEdit: setEditing, onRefresh: refresh, onRemove: setRemoving, onPitches: (x) => navigate(`/ops/pitch?brand=${x.id}&who=${encodeURIComponent(x.name)}`) })}</td>)}
                   </tr>
@@ -357,11 +367,10 @@ export default function PitchBrandsPage() {
               </tbody>
             </table>
           </div>
-        )}
       </Card>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
-        <span>{total === 0 ? "No brands" : `${pageStart}–${pageEnd} of ${total}`}</span>
+        <span>{loading ? <Skeleton width={70} height={12} /> : total === 0 ? "No brands" : `${pageStart}–${pageEnd} of ${total}`}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <button style={link} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
           <button style={link} disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { PITCH_TABS } from "./pitchLabels";
+import { Skeleton } from "../ui/Skeleton";
 
 // The Pitch section: its tab strip over whichever tab is open. The strip
 // lives in the route, as GTM's does, so a tab added later cannot forget it.
@@ -63,8 +64,9 @@ export function Who({ picture, title, sub, subHref }) {
   );
 }
 
-// One number with its name and, under it, what it is out of.
-export function StatTile({ label, value, sub, strong }) {
+// One number with its name and, under it, what it is out of. Loading keeps
+// the name and shimmers the number, so the tiles never jump.
+export function StatTile({ label, value, sub, strong, loading }) {
   const { theme: t } = useTheme();
   return (
     <div style={{
@@ -72,8 +74,13 @@ export function StatTile({ label, value, sub, strong }) {
       padding: "14px 16px", minWidth: 0,
     }}>
       <div style={{ fontSize: 12, color: t.textMuted, fontWeight: 500, marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: t.text, lineHeight: 1.1, letterSpacing: -0.4 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: t.textMuted, marginTop: 6 }}>{sub}</div>}
+      {loading ? <>
+        <Skeleton width={44} height={24} />
+        <div style={{ marginTop: 6 }}><Skeleton width="70%" height={12} /></div>
+      </> : <>
+        <div style={{ fontSize: 22, fontWeight: 700, color: t.text, lineHeight: 1.1, letterSpacing: -0.4 }}>{value}</div>
+        {sub && <div style={{ fontSize: 12, color: t.textMuted, marginTop: 6 }}>{sub}</div>}
+      </>}
     </div>
   );
 }
