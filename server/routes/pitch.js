@@ -124,7 +124,10 @@ const PITCH_FILTERS = {
   brand_id: byId("p.pitch_brand_id"),
 };
 
-// Creators: everyone with a pitch, and everyone switched into weekly picks.
+// Creators: everyone who opened Pitch. The first time a creator opens it,
+// service-grpc records them (pitch_creators, via DetectCreatorBrands) and
+// writes their first three drafts; pitch_creators.created is that moment.
+// Anyone with a pitch but no row (older data) is included too.
 const CREATOR_FROM = `
   FROM (SELECT user_id FROM pitch_creators
         UNION SELECT creator_user_id FROM pitches WHERE deleted = '-infinity') c
@@ -132,7 +135,9 @@ const CREATOR_FROM = `
   LEFT JOIN pitch_creators pc ON pc.user_id = u.id
   ${INFLUENCER("u.id")}
   LEFT JOIN LATERAL (
-    SELECT count(*) FILTER (WHERE p.status = 'ready')::int AS drafts,
+    SELECT count(*)::int AS written,
+           count(*) FILTER (WHERE p.status = 'ready')::int AS drafts,
+           count(*) FILTER (WHERE p.status = 'expired')::int AS expired,
            count(*) FILTER (WHERE p.sent_at IS NOT NULL)::int AS sent,
            count(*) FILTER (WHERE p.sent_at IS NOT NULL AND p.view_count > 0)::int AS viewed,
            count(*) FILTER (WHERE p.replied_at IS NOT NULL)::int AS replied,
@@ -148,6 +153,8 @@ const CREATOR_COLUMNS = `
   COALESCE(pc.enabled, false) AS weekly,
   (COALESCE(pc.media_kit_url, '') <> '' OR COALESCE(pc.media_kit_path, '') <> '') AS has_media_kit,
   (COALESCE(i.about, '') <> '') AS has_about,
+  COALESCE(pc.created, s.first_pitch_at) AS opened_at,
+  COALESCE(s.written, 0) AS written, COALESCE(s.expired, 0) AS expired,
   COALESCE(s.drafts, 0) AS drafts, COALESCE(s.sent, 0) AS sent, COALESCE(s.viewed, 0) AS viewed,
   COALESCE(s.replied, 0) AS replied, COALESCE(s.accepted, 0) AS accepted,
   COALESCE(s.no_contact, 0) AS no_contact, s.last_sent_at, s.first_pitch_at`;
@@ -166,12 +173,14 @@ const CREATOR_SORTS = {
   replied: "COALESCE(s.replied, 0)",
   accepted: "COALESCE(s.accepted, 0)",
   last_sent: "s.last_sent_at",
+  opened: "COALESCE(pc.created, s.first_pitch_at)",
 };
 const CREATOR_FILTERS = {
   name: textFilter(CREATOR_NAME, "u.email", "i.instagram_username"),
   weekly: boolFilter("pc.enabled"),
   sent: numberFilter("COALESCE(s.sent, 0)"),
   last_sent: dateFilter("s.last_sent_at"),
+  opened: dateFilter("COALESCE(pc.created, s.first_pitch_at)"),
 };
 
 // Since when the summary counts: a number of days, or everything.
@@ -305,15 +314,20 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls } = {}) {
     const params = [];
     const conds = [CREATOR_VIEWS[view], ...filterConditions(parseColumnFilters(req.query), CREATOR_FILTERS, params)].filter(Boolean);
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-    const order = orderBySql(req.query, CREATOR_SORTS, "s.last_sent_at DESC NULLS LAST, s.first_pitch_at DESC NULLS LAST, u.id");
+    const order = orderBySql(req.query, CREATOR_SORTS, "s.last_sent_at DESC NULLS LAST, COALESCE(pc.created, s.first_pitch_at) DESC NULLS LAST, u.id");
     const countParams = [...params];
     params.push(limit, offset);
     try {
-      const [{ rows }, count] = await Promise.all([
+      const [{ rows }, count, counts] = await Promise.all([
         query(`SELECT ${CREATOR_COLUMNS} ${CREATOR_FROM} ${where} ORDER BY ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
         query(`SELECT count(*)::int AS n ${CREATOR_FROM} ${where}`, countParams),
+        // The three views' sizes, whatever is filtered, for the pills.
+        query(`SELECT count(*)::int AS "all",
+                      count(*) FILTER (WHERE ${CREATOR_VIEWS.sent})::int AS sent,
+                      count(*) FILTER (WHERE ${CREATOR_VIEWS.weekly})::int AS weekly
+                 ${CREATOR_FROM}`),
       ]);
-      res.json({ available: true, view, items: await withAvatars(rows, sign), total: count.rows[0]?.n ?? 0 });
+      res.json({ available: true, view, items: await withAvatars(rows, sign), total: count.rows[0]?.n ?? 0, counts: counts.rows[0] || {} });
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false, view, items: [], total: 0 });
       res.status(500).json({ error: e.message });

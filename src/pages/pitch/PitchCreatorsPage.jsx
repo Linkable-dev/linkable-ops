@@ -15,25 +15,28 @@ import { HelpList, HelpTip } from "../../components/gtm/QueueParts";
 import { Avatar, Who, Banner } from "../../components/pitch/PitchParts";
 import { count } from "../../components/pitch/pitchLabels";
 
-// The creators who pitch: what each one sent and how it went, and the one
-// switch ops holds over them, weekly picks (pitch_creators.enabled).
+// Every creator who opened Pitch: when they first did, what Linkable wrote
+// for them, what they sent and how it went, and the one switch ops holds
+// over them, weekly picks (pitch_creators.enabled).
 
 const PAGE = 25;
-const VIEWS = [["all", "All"], ["sent", "Sent a pitch"], ["weekly", "Weekly picks"]];
+const VIEWS = [["all", "Opened Pitch"], ["sent", "Sent a pitch"], ["weekly", "On weekly picks"]];
 
 const COLUMNS = [
   { key: "creator", label: "Creator", width: 250, sort: "asc", sortField: "name",
     filter: { type: "text", field: "name", placeholder: "Name, email or handle…" } },
-  { key: "followers", label: "Followers", width: 125, sort: "desc", sortField: "followers" },
-  { key: "sent", label: "Sent", width: 90, sort: "desc", sortField: "sent",
+  { key: "opened", label: "Opened Pitch", width: 175, sort: "desc", sortField: "opened",
+    filter: { type: "date", field: "opened" } },
+  { key: "drafts", label: "Drafts waiting", width: 170, sort: "desc", sortField: "drafts" },
+  { key: "sent", label: "Sent", width: 110, sort: "desc", sortField: "sent",
     filter: { type: "number", field: "sent" } },
   { key: "viewed", label: "Viewed", width: 90, sort: "desc", sortField: "viewed" },
-  { key: "replied", label: "Replied", width: 90, sort: "desc", sortField: "replied" },
-  { key: "accepted", label: "Accepted", width: 100, sort: "desc", sortField: "accepted" },
-  { key: "drafts", label: "Drafts", width: 90, sort: "desc", sortField: "drafts" },
-  { key: "last_sent", label: "Last sent", width: 120, sort: "desc", sortField: "last_sent",
+  { key: "replied", label: "Replied", width: 100, sort: "desc", sortField: "replied" },
+  { key: "accepted", label: "Accepted", width: 110, sort: "desc", sortField: "accepted" },
+  { key: "last_sent", label: "Last sent", width: 145, sort: "desc", sortField: "last_sent",
     filter: { type: "date", field: "last_sent" } },
-  { key: "profile", label: "Profile", width: 130 },
+  { key: "profile", label: "Profile", width: 120 },
+  { key: "followers", label: "Followers", width: 120, sort: "desc", sortField: "followers" },
   { key: "weekly", label: "Weekly picks", width: 160, sort: "desc", sortField: "weekly",
     filter: { type: "boolean", field: "weekly" } },
   { key: "actions", label: "Actions", width: 120 },
@@ -41,9 +44,11 @@ const COLUMNS = [
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMNS.map((c) => [c.key, c.width]));
 
 const HELP = [
-  ["Who is here", "Every creator with a pitch, sent or drafted, and everyone on weekly picks. Any creator can pitch; they appear here once they open Pitch."],
+  ["Who is here", "Every creator who has opened the Pitch tab in the app. Any creator can; nobody is invited or added by hand."],
+  ["Opened Pitch", "The first time they opened it. Linkable writes them three draft pitches at that moment, each to a brand picked for them."],
+  ["Drafts waiting", "Drafts written for them this week that they have not sent. Unsent drafts expire when the week ends on Sunday night, and new ones are written the next time they open Pitch."],
+  ["None written", "They opened Pitch but no draft was ever written for them, which means writing failed. The grpc logs say why."],
   ["Sent", "Pitches the creator pressed Send on. Viewed, Replied and Accepted count how many of those the brand opened, answered and accepted."],
-  ["Drafts", "Pitches Linkable wrote for the creator that are not sent yet. Unsent drafts expire at the end of their week."],
   ["Weekly picks", "On, Linkable writes the creator three pitches every Monday, ready before they open Pitch. Off, pitches are written when they open it. Each pitch is written by AI, so weekly picks cost a little every week whether or not the creator comes back."],
   ["Profile", "The About and media kit a pitch shows the brand. Pitch asks for them until they are saved."],
 ];
@@ -58,6 +63,7 @@ export default function PitchCreatorsPage() {
   const [view, setView] = useState("all");
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState(null);
   const [available, setAvailable] = useState(true);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -77,6 +83,7 @@ export default function PitchCreatorsPage() {
       setAvailable(r.available);
       setRows(r.items);
       setTotal(r.total);
+      setCounts(r.counts || null);
       setError(null);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -129,10 +136,19 @@ export default function PitchCreatorsPage() {
       case "viewed": return num(c.viewed, t);
       case "replied": return num(c.replied, t);
       case "accepted": return num(c.accepted, t);
+      case "opened":
+        return c.opened_at
+          ? <span style={{ color: t.textMid, whiteSpace: "nowrap" }} title={new Date(c.opened_at).toLocaleString()}>{friendlyDate(c.opened_at)}</span>
+          : <span style={{ color: t.textMuted }}>—</span>;
       case "drafts":
+        // Nothing was ever written: opening Pitch should have written three.
+        if (!c.written) {
+          return <span style={{ color: t.danger }} title="They opened Pitch but no draft was ever written for them. The grpc logs say why.">None written</span>;
+        }
         return (
           <span>
             {num(c.drafts, t)}
+            {c.expired > 0 && <span style={{ color: t.textMuted, fontSize: 12 }} title="Drafts from an earlier week they never sent. New ones are written the next time they open Pitch."> · {c.expired} expired</span>}
             {c.no_contact > 0 && <span style={{ color: t.danger, fontSize: 12 }} title="Sent, but no contact was found for the brand, so it came back as a draft"> · {c.no_contact} no contact</span>}
           </span>
         );
@@ -174,10 +190,12 @@ export default function PitchCreatorsPage() {
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 320px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Creators who pitch</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Creators who opened Pitch</div>
             <HelpTip title="Creators"><HelpList items={HELP} /></HelpTip>
           </div>
-          <div style={{ fontSize: 13, color: t.textMid, marginTop: 4 }}>What each creator sent and how it went. Weekly picks has Linkable write their pitches every Monday.</div>
+          <div style={{ fontSize: 13, color: t.textMid, marginTop: 4, maxWidth: 720, lineHeight: 1.5 }}>
+            Every creator who has opened the Pitch tab in the app. Opening it writes them three draft pitches, each to a brand picked for them. Sent is how many they actually sent.
+          </div>
         </div>
         <form onSubmit={add} style={{ display: "flex", gap: 8, alignItems: "center", flex: "0 1 420px" }}>
           <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Creator's account email" type="email" style={{ flex: 1 }} />
@@ -185,7 +203,8 @@ export default function PitchCreatorsPage() {
         </form>
       </div>
 
-      <TabBar tabs={VIEWS} active={view} onSelect={(v) => { setView(v); setOffset(0); }} />
+      <TabBar tabs={VIEWS.map(([id, label]) => [id, counts ? `${label} · ${counts[id] ?? 0}` : label])}
+              active={view} onSelect={(v) => { setView(v); setOffset(0); }} />
 
       {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
       {notice && <Banner onDismiss={() => setNotice(null)}>{notice}</Banner>}

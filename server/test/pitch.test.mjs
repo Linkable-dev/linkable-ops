@@ -136,3 +136,23 @@ test("weekly picks switch on only for a live creator", async (t) => {
   assert.equal(gone.status, 404);
   plain(gone.body.error);
 });
+
+test("the creator list says when each opened Pitch, and how big each view is", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, params) => {
+    seen.push({ sql, params });
+    if (/AS "all"/.test(sql)) return { rows: [{ all: 9, sent: 1, weekly: 0 }] };
+    if (/LIMIT/.test(sql)) return { rows: [{ user_id: ID, written: 0, drafts: 0, opened_at: "2026-10-05T17:58:47Z", profile_pic_name: "", instagram_profile_image: "" }] };
+    return { rows: [{ n: 9 }] };
+  });
+  const r = await request("/creators?sortBy=opened&sortDir=desc&filter[opened]=last:7");
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.counts, { all: 9, sent: 1, weekly: 0 });
+  assert.equal(r.body.items[0].written, 0);
+  const list = seen.find((q) => /LIMIT/.test(q.sql));
+  assert.match(list.sql, /COALESCE\(pc\.created, s\.first_pitch_at\) AS opened_at/);
+  assert.match(list.sql, /ORDER BY COALESCE\(pc\.created, s\.first_pitch_at\) DESC/);
+  assert.deepEqual(list.params, [7, 25, 0]);
+  // The pills count every creator, whatever the list is filtered by.
+  assert.deepEqual(seen.find((q) => /AS "all"/.test(q.sql)).params, undefined);
+});
