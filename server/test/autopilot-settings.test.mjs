@@ -90,7 +90,7 @@ test("an active campaign with no agent is enrolled, and only then", async (t) =>
   assert.match(insert.sql_full, /p\.status = 2/);
   assert.match(insert.sql_full, /p\.deleted = '-infinity'/);
   assert.match(insert.sql_full, /ON CONFLICT DO NOTHING/);
-  assert.deepEqual(insert.values, [campaign, "autonomous", 30, 3]);
+  assert.deepEqual(insert.values, [campaign, "autonomous", 30, 3, null]);
 
   // The line in the agent's own log says it was switched on, not merely
   // changed, and it goes through this router's query rather than round it.
@@ -102,6 +102,49 @@ test("an active campaign with no agent is enrolled, and only then", async (t) =>
     { mode: "assisted", goal_applications: 40, max_runs: 2 });
   assert.equal(again.body.launched, false);
   assert.match(seen.at(-1).values[3], /^An admin set it to assisted/);
+});
+
+// Auto-reply decides whether a machine answers a stranger in the brand's name,
+// so: it starts on for a launch (as a brand's own launch does), a save that
+// leaves it out cannot change it, and the log names it whenever it moves.
+test("auto-reply starts on, is kept unless sent, and is logged when it changes", async (t) => {
+  const seen = [];
+  let current = null; // the agent's auto_reply; null = no row yet
+  const request = await serve(t, async (sql, values) => {
+    seen.push({ sql, values });
+    if (/INSERT INTO sourcing_agents/.test(sql)) {
+      if (current !== null) return { rows: [] };
+      current = values[4] ?? true;
+      return { rows: [{ id: "agent-1" }] };
+    }
+    if (/UPDATE sourcing_agents/.test(sql)) {
+      const was = current;
+      current = values[4] ?? current;
+      return { rows: [{ id: "agent-1", mode: values[1], status: "idle", auto_reply: current, was_auto_reply: was }] };
+    }
+    return { rows: [] };
+  });
+  const campaign = "22222222-2222-2222-2222-222222222222";
+  const put = (body) => request(`/campaigns/${campaign}/agent`, "PUT",
+    { mode: "autonomous", goal_applications: 25, max_runs: 2, ...body });
+
+  assert.equal((await put({ auto_reply: "yes" })).status, 400);
+  assert.equal(seen.length, 0, "an invalid auto_reply reached SQL");
+
+  const launched = await put({});
+  assert.equal(launched.body.agent.auto_reply, true);
+  assert.match(seen.find((s) => /INSERT INTO sourcing_agents/.test(s.sql)).sql, /COALESCE\(\$5::boolean, true\)/);
+  assert.match(seen.at(-1).values[3], /switched Autopilot on — .*, auto-reply on$/);
+
+  // Stopping without naming it leaves it alone.
+  const stopped = await put({ mode: "off" });
+  assert.equal(stopped.body.agent.auto_reply, true);
+  assert.match(seen.find((s) => /UPDATE sourcing_agents/.test(s.sql)).sql, /COALESCE\(\$5::boolean, a\.auto_reply\)/);
+  assert.doesNotMatch(seen.at(-1).values[3], /auto-reply/);
+
+  const off = await put({ auto_reply: false });
+  assert.equal(off.body.agent.auto_reply, false);
+  assert.match(seen.at(-1).values[3], /, auto-reply off$/);
 });
 
 test("missing migrations are reported as unavailable", async (t) => {

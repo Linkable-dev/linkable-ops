@@ -3,6 +3,8 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { api } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { Btn } from "../ui/Button";
+import { Toggle } from "../ui/Toggle";
+import { friendlyDate } from "../../lib/relativeTime";
 
 /**
  * Starting and stopping Autopilot, deliberately not a toggle.
@@ -23,6 +25,11 @@ import { Btn } from "../ui/Button";
  * wrong. Switching off ends the searching and the pushing; the sequence
  * already holding creators carries on sending its follow-ups, and only
  * pausing the campaign in Lemlist stops those.
+ *
+ * Auto-reply is a setting, so it IS a switch, but switching it on can send at
+ * once: every answer already drafted and cleared goes out on the next reply
+ * ticks. Turning it on over a backlog therefore gets its own confirmation with
+ * the count, the same way a launch does.
  */
 
 // What one search actually costs and reaches, from the production runs on
@@ -62,10 +69,13 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
   const running = row.mode !== "none" && row.mode !== "off";
   const launched = row.mode !== "none";
 
-  const [step, setStep] = useState("settings"); // settings | launch | stop
+  const [step, setStep] = useState("settings"); // settings | launch | stop | replies
   const [mode, setMode] = useState(running ? row.mode : "autonomous");
   const [goal, setGoal] = useState(String(row.goal_applications ?? 25));
   const [budget, setBudget] = useState(String(row.max_runs ?? 2));
+  // On for a first launch, as it is when a brand launches one. A campaign that
+  // has run before opens on whatever it was left with.
+  const [autoReply, setAutoReply] = useState(launched ? Boolean(row.auto_reply) : true);
   const [busy, setBusy] = useState(false);
 
   const wholeGoal = Math.floor(Number(goal));
@@ -73,6 +83,16 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
   const numbersOk =
     Number.isFinite(wholeGoal) && wholeGoal >= 1 && wholeGoal <= 500 &&
     Number.isFinite(wholeBudget) && wholeBudget >= 1 && wholeBudget <= 10;
+  // The budget counts searches already spent, so a relaunch only has what is
+  // left of it. At zero the agent stops on its first tick without searching.
+  const searchesLeft = Math.max(0, (wholeBudget || 0) - (row.runs_used || 0));
+
+  // Replies only leave when the mode is autonomous AND auto-reply is on.
+  const ready = row.replies_ready || 0;
+  const forAPerson = Math.max(0, (row.replies_waiting || 0) - ready);
+  const willSend = autoReply && mode === "autonomous";
+  const wasSending = Boolean(row.auto_reply) && row.mode === "autonomous";
+  const startsBacklog = willSend && !wasSending && ready > 0;
 
   async function save(nextMode) {
     setBusy(true);
@@ -81,6 +101,7 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
         mode: nextMode,
         goal_applications: wholeGoal,
         max_runs: wholeBudget,
+        auto_reply: autoReply,
       });
       onSaved?.(row.product_id, d.agent);
       onClose?.();
@@ -99,21 +120,44 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
   const foot = { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 };
 
   // --- what a launch is about to do, in the numbers it will actually spend --
-  const consequences = mode === "autonomous"
-    ? [
-      `It searches up to ${plural(wholeBudget || 0, "time", "times")}, each costing about ${CREDITS_PER_SEARCH} Influencers Club credits.`,
-      `Each search reaches roughly ${CREATORS_PER_SEARCH} creators with a findable address, and emails every one of them.`,
-      `Emails leave Linkable's own mailboxes at about ${EMAILS_PER_DAY} a day, under this brand's name, and cannot be unsent.`,
-      `It stops on its own at ${plural(wholeGoal || 0, "application", "applications")}, or when the searches run out.`,
-    ]
-    : [
-      `It searches up to ${plural(wholeBudget || 0, "time", "times")}, each costing about ${CREDITS_PER_SEARCH} Influencers Club credits.`,
-      "It stops before emailing anybody. The list waits for a person to push it.",
-    ];
+  const searchLines = searchesLeft === 0
+    ? [`It has already used all ${plural(wholeBudget || 0, "search", "searches")}, so it does not search or email anyone new. Raise the budget to change that.`]
+    : mode === "autonomous"
+      ? [
+        `It searches up to ${plural(searchesLeft, "time", "times")}, each costing about ${CREDITS_PER_SEARCH} Influencers Club credits.`,
+        `Each search reaches roughly ${CREATORS_PER_SEARCH} creators with a findable address, and emails every one of them.`,
+        `Emails leave Linkable's own mailboxes at about ${EMAILS_PER_DAY} a day, under this brand's name, and cannot be unsent.`,
+        `It stops on its own at ${plural(wholeGoal || 0, "application", "applications")}, or when the searches run out.`,
+      ]
+      : [
+        `It searches up to ${plural(searchesLeft, "time", "times")}, each costing about ${CREDITS_PER_SEARCH} Influencers Club credits.`,
+        "It stops before emailing anybody. The list waits for a person to push it.",
+      ];
+  const replyLines = !willSend
+    ? ["Replies wait for a person in the Replies tab."]
+    : ready > 0
+      ? [
+        `It answers replies by itself. ${plural(ready, "answer is", "answers are")} already drafted and go out within minutes, the oldest to a reply from ${friendlyDate(row.oldest_ready_at)}. They cannot be unsent.`,
+      ]
+      : ["It answers replies by itself. Anything the campaign does not answer waits for a person."];
+  const consequences = [...searchLines, ...replyLines];
+
+  // A relaunch with nothing left to search sends no new emails, so it is not
+  // asked as if it would.
+  const launchTitle = searchesLeft === 0 || mode !== "autonomous"
+    ? "Switch Autopilot on?"
+    : "Start emailing creators?";
+  const launchLabel = mode !== "autonomous"
+    ? "Launch, without emailing"
+    : searchesLeft > 0
+      ? "Launch and start emailing"
+      : willSend ? "Switch on and answer replies" : "Switch on";
 
   const title = step === "settings"
     ? `Autopilot — ${row.campaign_name || "this campaign"}`
-    : step === "launch" ? "Start emailing creators?" : "Stop Autopilot?";
+    : step === "launch" ? launchTitle
+      : step === "replies" ? "Send the drafted answers?"
+        : "Stop Autopilot?";
 
   return (
     <Modal open onClose={busy ? undefined : onClose} title={title} width={560}>
@@ -173,10 +217,36 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
             </div>
           )}
 
+          <div style={{ ...label, margin: "18px 0 8px" }}>Replies</div>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <Toggle checked={autoReply} onChange={setAutoReply} label="Answer replies automatically" />
+            <div style={muted}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 2 }}>
+                Answer replies automatically
+              </div>
+              {autoReply
+                ? "Sends the answers the AI is sure of. Anything the campaign does not answer waits for a person in the Replies tab."
+                : "Every answer waits for a person in the Replies tab."}
+              {autoReply && mode !== "autonomous" && " It only sends in “Run it for me” mode."}
+              {(row.replies_waiting || 0) > 0 && (
+                <div style={{ marginTop: 4, color: startsBacklog ? "#B45309" : theme.textMuted }}>
+                  {plural(row.replies_waiting, "reply is", "replies are")} waiting
+                  {ready > 0 && `, ${ready} with an answer ready to send`}
+                  {forAPerson > 0 && ready > 0 && `, ${forAPerson} for a person`}.
+                </div>
+              )}
+            </div>
+          </div>
+
           <div style={foot}>
             <Btn variant="secondary" onClick={onClose} disabled={busy}>Cancel</Btn>
             {running && (
-              <Btn variant="outline" disabled={!numbersOk} loading={busy} onClick={() => save(mode)}>
+              <Btn
+                variant="outline"
+                disabled={!numbersOk}
+                loading={busy}
+                onClick={() => (startsBacklog ? setStep("replies") : save(mode))}
+              >
                 Save changes
               </Btn>
             )}
@@ -203,9 +273,31 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
           </div>
           <div style={foot}>
             <Btn variant="secondary" onClick={() => setStep("settings")} disabled={busy}>Back</Btn>
-            <Btn loading={busy} onClick={() => save(mode)}>
-              {mode === "autonomous" ? "Launch and start emailing" : "Launch, without emailing"}
-            </Btn>
+            <Btn loading={busy} onClick={() => save(mode)}>{launchLabel}</Btn>
+          </div>
+        </>
+      )}
+
+      {step === "replies" && (
+        <>
+          <div style={{ fontSize: 13, color: theme.text, marginBottom: 12, lineHeight: 1.5 }}>
+            {plural(ready, "drafted answer goes", "drafted answers go")} out for{" "}
+            <strong>{row.campaign_name}</strong> within minutes, about 10 every 5 minutes, under{" "}
+            {row.brand_name || "this brand"}&apos;s name. They cannot be unsent.
+          </div>
+          <div style={{ ...muted, marginBottom: 10 }}>
+            The oldest answers a reply from {friendlyDate(row.oldest_ready_at)}. A draft is written
+            once, when the reply arrives, so an old one can describe the campaign as it was then.
+            If you are unsure, read them in the Replies tab first.
+          </div>
+          {forAPerson > 0 && (
+            <div style={muted}>
+              {plural(forAPerson, "other reply still waits", "other replies still wait")} for a person.
+            </div>
+          )}
+          <div style={foot}>
+            <Btn variant="secondary" onClick={() => setStep("settings")} disabled={busy}>Back</Btn>
+            <Btn loading={busy} onClick={() => save(mode)}>Turn on and send {ready}</Btn>
           </div>
         </>
       )}
@@ -221,6 +313,11 @@ export default function AutopilotControlModal({ row, onClose, onSaved, onError }
             {" "}already in the sequence carry on receiving its follow-ups. To stop those as well, pause
             the campaign in Lemlist.
           </div>
+          {wasSending && (
+            <div style={{ ...muted, marginBottom: 10 }}>
+              It also stops answering replies by itself. New ones wait for a person in the Replies tab.
+            </div>
+          )}
           <div style={muted}>
             Switching it back on later keeps the searches it has already spent.
           </div>

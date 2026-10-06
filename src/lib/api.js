@@ -232,10 +232,11 @@ export const api = {
   // How far the agent may go, and bringing its next check forward. Neither
   // makes it act — the tick still checks the campaign, the allowance and the
   // budget before it spends anything.
-  setAutopilotAgent: (id, { mode, goal_applications, max_runs }) =>
+  // auto_reply left undefined keeps the agent's current value.
+  setAutopilotAgent: (id, { mode, goal_applications, max_runs, auto_reply }) =>
     request(`/autopilot/campaigns/${id}/agent`, {
       method: "PUT",
-      body: JSON.stringify({ mode, goal_applications, max_runs }),
+      body: JSON.stringify({ mode, goal_applications, max_runs, auto_reply }),
     }),
   wakeAutopilotAgent: (id) => request(`/autopilot/campaigns/${id}/wake`, { method: "POST" }),
 

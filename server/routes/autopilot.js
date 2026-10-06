@@ -16,7 +16,8 @@ import {
 // What this may write, and what it may not.
 //
 // Writable: the settings the agent READS before it acts — its mode, its goal,
-// its search budget, the brand's monthly allowance, and its clock. Each is a
+// its search budget, whether it may answer replies itself (auto_reply), the
+// brand's monthly allowance, and its clock. Each is a
 // column the agent consults on its next tick, so every guard still runs, on
 // the values set here. The agent-settings write is the same statement gRPC
 // issues (UpdateAgentSettings in repository/postgres/sourcing_agent.go), with
@@ -282,6 +283,24 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
           FROM sourcing_outreach_events e
           WHERE e.event_type = 'emailsReplied' AND e.sourcing_candidate_id IS NOT NULL
           GROUP BY e.product_id
+        ),
+        unanswered AS (
+          -- What switching auto-reply on would send. "Ready" uses the same
+          -- conditions as SendableByAgent in service-grpc, minus the agent's
+          -- own: pending, drafted, cleared by the drafter, and a thread to
+          -- answer in. Those all go out on the first reply ticks, so the
+          -- dialog has to say how many before somebody flips the switch.
+          SELECT sr.product_id,
+            count(*) FILTER (WHERE sr.status = 'pending')                          AS waiting,
+            count(*) FILTER (WHERE sr.status = 'pending' AND sr.needs_human = false
+                               AND sr.draft <> ''
+                               AND COALESCE(c.lemlist_contact_id, '') <> '')       AS ready,
+            min(sr.received_at) FILTER (WHERE sr.status = 'pending' AND sr.needs_human = false
+                               AND sr.draft <> ''
+                               AND COALESCE(c.lemlist_contact_id, '') <> '')       AS oldest_ready_at
+          FROM sourcing_replies sr
+          LEFT JOIN sourcing_candidates c ON c.id = sr.sourcing_candidate_id
+          GROUP BY sr.product_id
         )
         SELECT
           a.id                                     AS agent_id,
@@ -303,6 +322,9 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
           COALESCE(a.max_runs, ${HOUSE_MAX_RUNS})  AS max_runs,
           COALESCE(a.lemlist_campaign_id, '') <> '' AS has_sequence,
           COALESCE(a.auto_reply, false)            AS auto_reply,
+          COALESCE(u.waiting, 0)::int              AS replies_waiting,
+          COALESCE(u.ready, 0)::int                AS replies_ready,
+          u.oldest_ready_at,
           a.last_acted_at,
           a.next_action_at,
           COALESCE(a.created, p.activated_at)      AS enrolled_at,
@@ -355,6 +377,7 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
         LEFT JOIN brands b ON b.user_id = p.user_id
         LEFT JOIN funnel f ON f.product_id = p.id
         LEFT JOIN replied r ON r.product_id = p.id
+        LEFT JOIN unanswered u ON u.product_id = p.id
         LEFT JOIN LATERAL (
           SELECT e.created, e.action, e.summary
           FROM sourcing_agent_events e
@@ -426,7 +449,11 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
     }
   });
 
-  // PUT /api/autopilot/campaigns/:id/agent   { mode, goal_applications, max_runs }
+  // PUT /api/autopilot/campaigns/:id/agent   { mode, goal_applications, max_runs, auto_reply? }
+  //
+  // auto_reply is optional: left out, the agent keeps the value it has, so a
+  // caller that only stops Autopilot cannot switch replies off by accident.
+  // It sends only while the mode is autonomous (SendableByAgent checks both).
   //
   // How far the agent may go. The same UPDATE gRPC issues, clamps included,
   // because two statements meaning to do the same thing eventually do not: an
@@ -456,6 +483,11 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       if (goal === null || maxRuns === null) {
         return res.status(400).json({ error: "Goal and budget must be whole numbers" });
       }
+      const rawAutoReply = req.body?.auto_reply;
+      if (rawAutoReply !== undefined && rawAutoReply !== null && typeof rawAutoReply !== "boolean") {
+        return res.status(400).json({ error: "Auto-reply must be on or off" });
+      }
+      const autoReply = typeof rawAutoReply === "boolean" ? rawAutoReply : null;
 
       // Enrol, if it has never been. Mirrors EnsureAgentRecruiting in
       // repository/postgres/sourcing_agent.go: same columns, same ON CONFLICT
@@ -469,36 +501,45 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       // ON CONFLICT DO NOTHING means a second admin pressing the same button
       // changes nothing here and everything in the UPDATE below, which is the
       // right way round.
+      //
+      // Auto-reply starts on unless the caller said otherwise, as it does for a
+      // campaign the brand launches (EnsureAgentRecruiting, since 6 Oct 2026).
       const enrolled = mode === "off" ? { rows: [] } : await query(
-        `INSERT INTO sourcing_agents (product_id, created_by_user_id, mode, goal_applications, max_runs)
-         SELECT p.id, p.user_id, $2, $3, $4
+        `INSERT INTO sourcing_agents (product_id, created_by_user_id, mode, goal_applications, max_runs, auto_reply)
+         SELECT p.id, p.user_id, $2, $3, $4, COALESCE($5::boolean, true)
            FROM products p
           WHERE p.id = $1::uuid AND p.${ND} AND p.status = ${CAMPAIGN_ACTIVE}
          ON CONFLICT DO NOTHING
          RETURNING id`,
-        [req.params.id, mode, goal, maxRuns],
+        [req.params.id, mode, goal, maxRuns, autoReply],
       );
       const justLaunched = enrolled.rows.length > 0;
 
+      // The FROM reads the row as it was before this statement, which is how
+      // the log line below can say whether auto-reply actually changed.
       const { rows } = await query(
-        `UPDATE sourcing_agents
+        `UPDATE sourcing_agents a
             SET mode = $2,
                 goal_applications = $3,
                 max_runs = $4,
+                auto_reply = COALESCE($5::boolean, a.auto_reply),
                 -- Turning it on, or widening its budget, makes it due again:
                 -- an agent given more rope should get back to work rather than
                 -- sit finished until somebody notices.
                 status = CASE
                     WHEN $2 = 'off' THEN 'paused'
-                    WHEN status IN ('done', 'paused', 'failed') THEN 'idle'
-                    ELSE status
+                    WHEN a.status IN ('done', 'paused', 'failed') THEN 'idle'
+                    ELSE a.status
                 END,
                 next_action_at = CASE WHEN $2 = 'off' THEN NULL ELSE current_timestamp END,
-                stopped_reason = CASE WHEN $2 = 'off' THEN stopped_reason ELSE '' END,
+                stopped_reason = CASE WHEN $2 = 'off' THEN a.stopped_reason ELSE '' END,
                 updated = current_timestamp
-          WHERE product_id = $1::uuid AND ${ND}
-          RETURNING id, mode, status, goal_applications, max_runs, runs_used, next_action_at`,
-        [req.params.id, mode, goal, maxRuns],
+           FROM (SELECT id, auto_reply FROM sourcing_agents
+                  WHERE product_id = $1::uuid AND ${ND}) prev
+          WHERE a.id = prev.id
+          RETURNING a.id, a.mode, a.status, a.goal_applications, a.max_runs, a.runs_used,
+                    a.next_action_at, a.auto_reply, prev.auto_reply AS was_auto_reply`,
+        [req.params.id, mode, goal, maxRuns, autoReply],
       );
       if (!rows.length) {
         // Either the campaign is not there, or it is not ACTIVE and so was not
@@ -512,15 +553,21 @@ export function autopilotRoutes({ query = cloudSqlQuery } = {}) {
       // Into the agent's own log, because that is where anybody looking at
       // this campaign in a month will be reading — including the brand.
       const budgetWords = `budget ${maxRuns} ${maxRuns === 1 ? "search" : "searches"}`;
+      // Named when it is new or changed, so a reply that went out on its own
+      // can be traced to the save that allowed it.
+      const replyChanged = rows[0].auto_reply !== rows[0].was_auto_reply;
+      const replyWords = justLaunched || replyChanged
+        ? `, auto-reply ${rows[0].auto_reply ? "on" : "off"}`
+        : "";
       await logAgentEvent(query, rows[0].id, req.params.id, "settings",
         justLaunched
-          ? `An admin switched Autopilot on — ${mode}, goal ${goal}, ${budgetWords}`
-          : `An admin set it to ${mode} — goal ${goal}, ${budgetWords}`,
+          ? `An admin switched Autopilot on — ${mode}, goal ${goal}, ${budgetWords}${replyWords}`
+          : `An admin set it to ${mode} — goal ${goal}, ${budgetWords}${replyWords}`,
         req.admin?.email || "");
       console.log(
         `[autopilot-agent] admin=${req.admin?.email || "?"} db=${req.dbTarget || "prod"} ` +
         `product=${req.params.id} mode=${mode} goal=${goal} runs=${maxRuns} ` +
-        `${justLaunched ? "launched" : "updated"}`,
+        `auto_reply=${rows[0].auto_reply} ${justLaunched ? "launched" : "updated"}`,
       );
       res.json({ agent: rows[0], launched: justLaunched });
     } catch (e) {

@@ -52,6 +52,9 @@ const STATUS_COLORS = {
   paused:  { bg: "#F3F4F6", fg: "#4B5563", bgDark: "#1F2937", fgDark: "#9CA3AF" },
   failed:  { bg: "#FEE2E2", fg: "#991B1B", bgDark: "#3F1313", fgDark: "#FCA5A5" },
   off:     { bg: "#F3F4F6", fg: "#4B5563", bgDark: "#1F2937", fgDark: "#9CA3AF" },
+  // Auto-reply's two states that are not "off".
+  on:      { bg: "#D1FAE5", fg: "#065F46", bgDark: "#0E2E22", fgDark: "#6EE7B7" },
+  "on, not sending": { bg: "#FEF3C7", fg: "#92400E", bgDark: "#3B2A0E", fgDark: "#FCD34D" },
   // A campaign that has never been enrolled. Not grey like "off", because off
   // is a decision and this is an unanswered question — the rows somebody came
   // to this page to act on.
@@ -86,6 +89,9 @@ const AGENT_COLUMNS = [
   // actually left is the line underneath.
   { key: "emailed", label: "Queued", sort: "desc", right: true, width: 110 },
   { key: "replied", label: "Replied", sort: "desc", right: true, width: 90 },
+  // Whether replies are answered without a person, and what is sitting
+  // unanswered. Changed from the gear, like the mode.
+  { key: "auto_reply", label: "Auto-reply", width: 130 },
   { key: "applied", label: "Applied", sort: "desc", right: true, width: 100 },
   { key: "runs_used", label: "Searches", sort: "desc", right: true, width: 110 },
   { key: "last_event_at", label: "Last did", sort: "desc", width: 120 },
@@ -192,6 +198,27 @@ function renderAgentCell(key, r, { theme, pill, onManage }) {
       );
     case "replied":
       return r.replied;
+    case "auto_reply": {
+      if (r.mode === "none") return "—";
+      // On only counts when the mode lets it send. "on" next to an agent that
+      // is off read as replies going out when none were.
+      const sending = r.auto_reply && r.mode === "autonomous";
+      const idle = r.replies_ready > 0 && !sending;
+      return (
+        <>
+          {pill(sending ? "on" : r.auto_reply ? "on, not sending" : "off", STATUS_COLORS)}
+          {idle ? (
+            <div style={{ color: "#B45309", fontSize: 11, marginTop: 3 }}>
+              {r.replies_ready} ready, not sent
+            </div>
+          ) : r.replies_waiting > 0 ? (
+            <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 3 }}>
+              {r.replies_waiting} waiting
+            </div>
+          ) : null}
+        </>
+      );
+    }
     case "applied":
       // The number the whole machine exists to produce, next to the goal it
       // was given.
@@ -429,6 +456,7 @@ export default function AutopilotPage() {
               status: agent.status ?? r.status,
               goal_applications: agent.goal_applications ?? r.goal_applications,
               max_runs: agent.max_runs ?? r.max_runs,
+              auto_reply: agent.auto_reply ?? r.auto_reply,
               next_action_at: agent.next_action_at ?? r.next_action_at,
               stopped_reason: agent.mode === "off" ? r.stopped_reason : "",
             }
