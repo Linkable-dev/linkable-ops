@@ -13,6 +13,8 @@
 // the arguable part and belong somewhere readable and testable.
 
 import { cloudSqlQuery } from "./cloudsql.js";
+import { mainAppSchema } from "./mainAppSchema.js";
+import { subscriptionLateral } from "./mainAppSql.js";
 
 export const HEALTH_WEIGHTS = {
   loggedIn: 20,   // are they still turning up
@@ -101,8 +103,14 @@ export function scoreBrand(b) {
     risks.push("No clicks or sales in the last 30 days");
   }
 
-  // Billing trumps everything else: a frozen charge locks the app.
-  if (b.sub_status === "FROZEN") risks.unshift("Payment failed — the app is locked for them");
+  // Billing trumps everything else. A frozen Shopify charge locks the app; a
+  // card plan (billed by Stripe) reads FROZEN while its card is declined and
+  // past due, and the plan stays on while Stripe retries.
+  if (b.sub_status === "FROZEN") {
+    risks.unshift(b.sub_provider === "stripe"
+      ? "Card payment past due — Stripe is retrying; they need to update their card"
+      : "Payment failed — the app is locked for them");
+  }
 
   return { score: Math.max(0, Math.min(100, Math.round(score))), reasons, risks };
 }
@@ -111,11 +119,19 @@ const ND = (a) => `${a}.deleted = '-infinity'::timestamptz`;
 
 // One row per active brand with everything the scorer needs.
 export async function loadBrandFacts() {
+  const schema = await mainAppSchema();
+  // Card plans (main app #371) are app_subscriptions rows with provider
+  // 'stripe'; the lateral picks the row of the plan the brand holds now.
+  const subCols = schema.appSubscriptions
+    ? `asub.status AS sub_status, asub.price_amount, asub.price_currency,
+           asub.interval AS sub_interval, COALESCE(asub.test, false) AS sub_test,
+           asub.provider AS sub_provider, asub.stripe_status AS sub_stripe_status,`
+    : `NULL::text AS sub_status, NULL::numeric AS price_amount, NULL::text AS price_currency,
+           NULL::text AS sub_interval, false AS sub_test, NULL::text AS sub_provider, NULL::text AS sub_stripe_status,`;
   const { rows } = await cloudSqlQuery(`
     SELECT u.id AS user_id, u.email, b.store_name, u.created AS signed_up_at,
            u.account_id, b.trial_expiration_date, b.trial_plan_name,
-           asub.status AS sub_status, asub.price_amount, asub.price_currency,
-           asub.interval AS sub_interval, COALESCE(asub.test, false) AS sub_test,
+           ${subCols}
            sig.last_sign_in,
            COALESCE(camp.n, 0) AS active_campaigns,
            COALESCE(acc.n, 0) AS creators_accepted,
@@ -126,12 +142,7 @@ export async function loadBrandFacts() {
            COALESCE(lk.clicks, 0) AS clicks_30d
     FROM users u
     JOIN brands b ON b.user_id = u.id
-    LEFT JOIN LATERAL (
-      SELECT status, price_amount, price_currency, interval, test
-      FROM app_subscriptions WHERE user_id = u.id
-      ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
-               shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST LIMIT 1
-    ) asub ON true
+    ${subscriptionLateral(schema, "status, price_amount, price_currency, interval, test")}
     LEFT JOIN LATERAL (
       SELECT MAX(t.created) AS last_sign_in FROM tokens t
       WHERE ((COALESCE(u.sub, '') <> '' AND t.sub = u.sub) OR t.email = u.email)
@@ -140,6 +151,7 @@ export async function loadBrandFacts() {
     LEFT JOIN LATERAL (
       SELECT COUNT(*) AS n FROM products p
       WHERE p.user_id = u.id AND p.status = 2 AND ${ND("p")}
+        ${schema.isCampaign ? "AND p.is_campaign = true" : ""}
     ) camp ON true
     LEFT JOIN LATERAL (
       SELECT COUNT(DISTINCT l.influencer_user_id) AS n FROM links l
@@ -171,11 +183,15 @@ export async function loadBrandFacts() {
   return rows;
 }
 
-// Paying means the same thing here as on the Home tiles: a real Shopify plan,
-// not a test charge, not still inside a trial.
+// Paying means the same thing here as on the Home tiles: a real plan (Shopify,
+// or a card plan billed by Stripe), not a test charge, not still inside a
+// trial. A card plan's trial is Stripe's (stripe_status trialing).
 function planState(b) {
-  const inTrial = b.trial_expiration_date && new Date(b.trial_expiration_date) > new Date();
-  const hasPlan = /^shopify_[0-9]+/.test(b.account_id || "");
+  const card = /^stripe_/.test(b.account_id || "");
+  const inTrial = card
+    ? b.sub_stripe_status === "trialing"
+    : b.trial_expiration_date && new Date(b.trial_expiration_date) > new Date();
+  const hasPlan = card || /^shopify_[0-9]+/.test(b.account_id || "");
   const paying = hasPlan && !inTrial && !b.sub_test && (!b.sub_status || b.sub_status === "ACTIVE");
   return { inTrial: !!inTrial, hasPlan, paying, granted: !!(b.trial_plan_name || "").trim() };
 }
@@ -243,6 +259,7 @@ export async function brandHealth({ limit = 25 } = {}) {
       granted_trial: state.granted,
       trial_ends: b.trial_expiration_date || null,
       sub_status: b.sub_status || null,
+      sub_provider: b.sub_provider || null,
       last_sign_in: b.last_sign_in || null,
       active_campaigns: num(b.active_campaigns),
       creators_accepted: num(b.creators_accepted),

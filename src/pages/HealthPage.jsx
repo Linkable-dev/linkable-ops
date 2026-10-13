@@ -53,7 +53,7 @@ function BrandRow({ b, theme, isLast, onOpen, showTrial }) {
             <span style={{ fontSize: 11, color: theme.textMuted }}>trial ends {friendlyDate(b.trial_ends)}</span>
           )}
           {b.sub_status === "FROZEN" && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#DC2626" }}>payment failed</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#DC2626" }}>{b.sub_provider === "stripe" ? "card past due" : "payment failed"}</span>
           )}
         </div>
         <div style={{ fontSize: 12, color: theme.textMid, marginTop: 3, lineHeight: 1.5 }}>

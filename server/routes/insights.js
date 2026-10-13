@@ -9,7 +9,8 @@ import { cloudSqlQuery, getCloudSqlPool } from "../lib/cloudsql.js";
 import { supabase } from "../lib/supabase.js";
 import { getDefaultTeamId } from "../automation/conversation-state.js";
 import { blogDb } from "../lib/blog-supabase.js";
-import { commissionEarnedSql } from "../lib/mainAppSql.js";
+import { commissionEarnedSql, CARD_PLAN_SQL, CARD_PLAN_TITLES, formatMoney } from "../lib/mainAppSql.js";
+import { mainAppSchema } from "../lib/mainAppSchema.js";
 import { draftNudge, isEmailable } from "../lib/nudge-writer.js";
 import { loadRules, setRule, LIMITS as NUDGE_LIMITS } from "../lib/auto-nudge.js";
 import { sendNudgeEmail, nudgeFrom, nudgeReplyTo } from "../lib/nudge-mailer.js";
@@ -28,11 +29,6 @@ const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.d
 const LINK = { INVITED: 1, APPLIED: 2, ACCEPTED: 3, REJECTED: 4, ENDED: 5 };
 // products.status 5 is a Shopify-synced product that was never launched as a campaign.
 const PRODUCT_STATUS = { 0: "unset", 1: "new", 2: "active", 3: "paused", 4: "ended", 5: "not launched" };
-
-const hasTable = (name) =>
-  cloudSqlQuery(`SELECT to_regclass($1) IS NOT NULL AS ok`, [`public.${name}`])
-    .then((r) => r.rows[0]?.ok === true)
-    .catch(() => false);
 
 const int = (v) => parseInt(v || 0, 10) || 0;
 const num = (v) => parseFloat(v || 0) || 0;
@@ -245,20 +241,68 @@ export async function buildAlerts({ shipDays = 5, applyDays = 7, trialDays = 3, 
     console.warn("[insights/alerts] inbox health check skipped:", e.message);
   }
 
-  // Payment failures, only where the subscription mirror exists.
-  if (await hasTable("app_subscriptions")) {
+  // Payment failures, only where the subscription mirror exists. A Shopify
+  // plan's failed charge is FROZEN by Shopify and locks the app; a card plan
+  // (main app #371, billed by Stripe in GBP) reads FROZEN too while Stripe has
+  // it past_due/unpaid, but the brand keeps its plan while Stripe retries and
+  // the fix is a new card in Linkable, not anything in Shopify.
+  const schema = await mainAppSchema();
+  if (schema.appSubscriptions) {
+    const cardCols = schema.cardBilling
+      ? `s.provider, s.stripe_status, s.plan_key, s.billing_period`
+      : `'shopify'::text AS provider, ''::text AS stripe_status, ''::text AS plan_key, ''::text AS billing_period`;
+    // The open invoice Stripe is retrying: what it is owed and when it tries next.
+    const invoiceJoin = schema.cardBilling && schema.invoiceRetries
+      ? `LEFT JOIN LATERAL (
+           SELECT bi.amount_due, bi.currency, bi.attempt_count, bi.next_payment_attempt
+             FROM billing_invoices bi
+            WHERE bi.user_id = u.id AND bi.status = 'open' AND s.provider = 'stripe'
+            ORDER BY bi.invoice_created DESC LIMIT 1
+         ) inv ON true`
+      : "";
+    const invoiceCols = invoiceJoin
+      ? `inv.amount_due, inv.currency AS invoice_currency, inv.attempt_count, inv.next_payment_attempt`
+      : `NULL::bigint AS amount_due, NULL::text AS invoice_currency, NULL::int AS attempt_count, NULL::timestamptz AS next_payment_attempt`;
+    // Only the subscription of the plan the brand holds now: an old frozen
+    // Shopify row says nothing about a brand that has since moved to a card.
+    const currentPlan = schema.cardBilling
+      ? `AND s.provider = CASE WHEN ${CARD_PLAN_SQL} THEN 'stripe' ELSE 'shopify' END`
+      : "";
     const { rows } = await cloudSqlQuery(`
-      SELECT DISTINCT ON (u.id) ${brandSel}, s.status, s.updated, s.price_amount
+      SELECT DISTINCT ON (u.id) ${brandSel}, s.status, s.updated, s.price_amount, s.price_currency, s.interval,
+             ${cardCols}, ${invoiceCols}
       FROM app_subscriptions s JOIN users u ON u.id = s.user_id JOIN brands b ON b.user_id = u.id
-      WHERE ${BRAND_ACTIVE} AND s.status = 'FROZEN' AND COALESCE(s.test, false) = false
+      ${invoiceJoin}
+      WHERE ${BRAND_ACTIVE} AND s.status = 'FROZEN' AND COALESCE(s.test, false) = false ${currentPlan}
       ORDER BY u.id, s.updated DESC`);
-    for (const r of rows) alerts.push({
-      key: `frozen:${r.user_id}`, fingerprint: new Date(r.updated).toISOString().slice(0, 10), kind: "billing", severity: "danger",
-      title: "Fix a failed payment",
-      detail: `Shopify froze ${name(r)}'s $${num(r.price_amount)} subscription because the charge failed; the app stays locked until it succeeds.`,
-      action: "Ask the brand to update the payment method in Shopify.",
-      since: r.updated, brand: brand(r), href: "/users",
-    });
+    for (const r of rows) {
+      if (r.provider === "stripe") {
+        const plan = CARD_PLAN_TITLES[r.plan_key] || "card";
+        const per = r.billing_period === "yearly" || /year/i.test(r.interval || "") ? "year" : "month";
+        const price = formatMoney(num(r.price_amount), r.price_currency || "GBP");
+        const owed = r.amount_due != null && Number(r.amount_due) > 0
+          ? formatMoney(Number(r.amount_due) / 100, r.invoice_currency || r.price_currency || "GBP")
+          : price;
+        const tries = int(r.attempt_count);
+        const next = r.next_payment_attempt ? ` Stripe tries again ${daysUntil(r.next_payment_attempt)}.` : "";
+        alerts.push({
+          key: `frozen:${r.user_id}`, fingerprint: new Date(r.updated).toISOString().slice(0, 10), kind: "billing", severity: "danger",
+          title: "Card payment past due",
+          detail: `${name(r)}'s card was declined for the ${plan} plan (${price} a ${per}), so ${owed} is past due` +
+            `${tries > 1 ? ` after ${tries} tries` : ""}.${next} Their plan stays on while Stripe retries.`,
+          action: "Ask the brand to update their card in Linkable (Settings, Plan); a new card is charged straight away.",
+          since: r.updated, brand: brand(r), href: "/users",
+        });
+      } else {
+        alerts.push({
+          key: `frozen:${r.user_id}`, fingerprint: new Date(r.updated).toISOString().slice(0, 10), kind: "billing", severity: "danger",
+          title: "Fix a failed payment",
+          detail: `Shopify froze ${name(r)}'s ${formatMoney(num(r.price_amount), r.price_currency || "USD")} subscription because the charge failed; the app stays locked until it succeeds.`,
+          action: "Ask the brand to update the payment method in Shopify.",
+          since: r.updated, brand: brand(r), href: "/users",
+        });
+      }
+    }
   }
 
   const rank = { danger: 0, warn: 1, info: 2 };
@@ -408,7 +452,20 @@ function daysUntil(iso) {
 /* --------------------------------------------------------------- brand 360 */
 
 async function brand360(userId) {
-  const hasSubs = await hasTable("app_subscriptions");
+  const schema = await mainAppSchema();
+  const hasSubs = schema.appSubscriptions;
+  // Card plans (#371) sit in app_subscriptions with provider 'stripe'; the plan
+  // the brand holds now (account_id) is listed first.
+  const subCardCols = schema.cardBilling
+    ? `, provider, stripe_status, plan_key, billing_period, cancel_at_period_end`
+    : "";
+  const subOrder = schema.cardBilling
+    ? `(provider = CASE WHEN (SELECT account_id FROM users WHERE id = $1::uuid) LIKE 'stripe\\_%' THEN 'stripe' ELSE 'shopify' END) DESC,
+       (status = 'ACTIVE' AND cancelled_at IS NULL) DESC, COALESCE(shopify_created_at, created) DESC NULLS LAST`
+    : `(status = 'ACTIVE' AND cancelled_at IS NULL) DESC, shopify_created_at DESC NULLS LAST`;
+  // Campaigns are products rows with is_campaign (#376); the catalogue is
+  // shop_products. Before that, every products row was both.
+  const campaignOnly = schema.isCampaign ? "AND p.is_campaign = true" : "";
   const { rows: profileRows } = await cloudSqlQuery(`
     SELECT u.id AS user_id, u.email, u.created AS user_created, u.account_id, u.shopify_shop, u.deleted AS user_deleted,
            (u.deleted = 'infinity'::timestamptz) AS active,
@@ -423,13 +480,13 @@ async function brand360(userId) {
   const profile = profileRows[0];
   if (!profile) return null;
 
-  const [subscription, campaigns, creators, orders, totals, impersonations, grants] = await Promise.all([
+  const [subscription, campaigns, creators, orders, totals, impersonations, grants, catalogue] = await Promise.all([
     hasSubs
       ? cloudSqlQuery(`
           SELECT status, name, test, price_amount, price_currency, interval, price_after_discount, trial_ends_at,
-                 current_period_end, cancelled_at, shopify_created_at, synced_at
+                 current_period_end, cancelled_at, shopify_created_at, synced_at${subCardCols}
           FROM app_subscriptions WHERE user_id = $1::uuid
-          ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC, shopify_created_at DESC NULLS LAST LIMIT 5`, [userId])
+          ORDER BY ${subOrder} LIMIT 5`, [userId])
       : { rows: [] },
     cloudSqlQuery(`
       SELECT p.id, p.title, p.status, p.created, p.activated_at, p.shipping, p.sale_commission,
@@ -441,7 +498,7 @@ async function brand360(userId) {
              (SELECT COUNT(*) FROM orders o JOIN links l2 ON l2.id = o.link_id WHERE l2.product_id = p.id AND ${ND("o")} AND ${ND("l2")}) AS sales,
              (SELECT COALESCE(SUM(o.shopify_amount), 0) FROM orders o JOIN links l2 ON l2.id = o.link_id WHERE l2.product_id = p.id AND ${ND("o")} AND ${ND("l2")}) AS revenue
       FROM products p LEFT JOIN links l ON l.product_id = p.id AND ${ND("l")}
-      WHERE p.user_id = $1::uuid AND ${ND("p")}
+      WHERE p.user_id = $1::uuid AND ${ND("p")} ${campaignOnly}
       GROUP BY p.id ORDER BY (p.status = 5), (p.status = 2) DESC, p.created DESC LIMIT 100`, [userId]),
     cloudSqlQuery(`
       SELECT DISTINCT ON (l.product_id, l.influencer_user_id)
@@ -468,6 +525,9 @@ async function brand360(userId) {
       GROUP BY 1 ORDER BY gmv DESC`, [userId]),
     cloudSqlQuery(`SELECT created, admin_email FROM admin_impersonations WHERE target_user_id = $1::uuid ORDER BY created DESC LIMIT 10`, [userId]).catch(() => ({ rows: [] })),
     cloudSqlQuery(`SELECT granted_at, admin_email, plan, days, interval, note FROM admin_trial_grants WHERE target_user_id = $1::uuid ORDER BY granted_at DESC LIMIT 10`, [userId]).catch(() => ({ rows: [] })),
+    schema.shopProducts
+      ? cloudSqlQuery(`SELECT COUNT(*) AS n FROM shop_products WHERE user_id = $1::uuid AND deleted = '-infinity'::timestamptz`, [userId])
+      : Promise.resolve(null),
   ]);
 
   // Outbound history lives in Supabase: sends to this email, AI threads, and the
@@ -505,6 +565,9 @@ async function brand360(userId) {
     subscriptionHistory: subscription.rows,
     // Synced-but-never-launched products (status 5) are counted, not listed.
     notLaunched: campaigns.rows.filter((c) => c.status === 5).length,
+    // The brand's catalogue (shop_products), where the target has one; null
+    // before the campaigns model, when products was the catalogue too.
+    catalogueProducts: catalogue ? int(catalogue.rows[0]?.n) : null,
     campaigns: campaigns.rows.filter((c) => c.status !== 5).map((c) => ({
       ...c, status_label: PRODUCT_STATUS[c.status] || `status ${c.status}`,
       invited: int(c.invited), applied: int(c.applied), accepted: int(c.accepted), shipped: int(c.shipped),
@@ -561,12 +624,19 @@ async function homeSeries(rangeKey) {
   const series = async (label, sql, params = []) => {
     try { const { rows } = await cloudSqlQuery(sql, params); return rows; } catch (e) { console.warn(`[insights/series] ${label}: ${e.message}`); return []; }
   };
-  const hasSubs = await hasTable("app_subscriptions");
+  const schema = await mainAppSchema();
+  const hasSubs = schema.appSubscriptions;
+  // The MRR tile beside this line is Shopify's USD; card plans (GBP, no
+  // shopify_created_at) have their own tile, so the line keeps to Shopify rows.
+  const shopifyOnly = schema.cardBilling ? "AND COALESCE(s.provider, 'shopify') = 'shopify'" : "";
+  const shopifyOnlyBare = schema.cardBilling ? "AND COALESCE(provider, 'shopify') = 'shopify'" : "";
+  const campaignOnly = schema.isCampaign ? "AND is_campaign = true" : "";
   const [buckets, brands, creators, campaigns, accepted, orders, clicks, trials, mrr] = await Promise.all([
     cloudSqlQuery(`SELECT g::date AS date FROM generate_series($1::date, date_trunc($2, NOW())::date, $3::interval) g`, [start, unit, step]).then((r) => r.rows.map((x) => x.date)),
     series("brands", `SELECT ${bucket("u.created")} AS date, COUNT(*) AS n FROM users u JOIN brands b ON b.user_id = u.id WHERE u.role = 2 AND u.created >= $1::date GROUP BY 1`, [start]),
-    series("creators", `SELECT ${bucket("created")} AS date, COUNT(*) AS n FROM influencers WHERE created >= $1::date GROUP BY 1`, [start]),
-    series("campaigns", `SELECT ${bucket("COALESCE(activated_at, created)")} AS date, COUNT(*) AS n FROM products WHERE ${ND("products")} AND activated_at IS NOT NULL AND COALESCE(activated_at, created) >= $1::date GROUP BY 1`, [start]),
+    // Signed-up creators only (users.status = 1 is a husk), as the Creators tile.
+    series("creators", `SELECT ${bucket("i.created")} AS date, COUNT(*) AS n FROM influencers i JOIN users u ON u.id = i.user_id WHERE i.created >= $1::date AND u.status <> 1 GROUP BY 1`, [start]),
+    series("campaigns", `SELECT ${bucket("COALESCE(activated_at, created)")} AS date, COUNT(*) AS n FROM products WHERE ${ND("products")} ${campaignOnly} AND activated_at IS NOT NULL AND COALESCE(activated_at, created) >= $1::date GROUP BY 1`, [start]),
     series("accepted", `SELECT ${bucket("COALESCE(accepted_at, created)")} AS date, COUNT(*) AS n FROM links WHERE ${ND("links")} AND status = ${LINK.ACCEPTED} AND COALESCE(accepted_at, created) >= $1::date GROUP BY 1`, [start]),
     series("orders", `SELECT ${bucket("created")} AS date, COUNT(*) AS n, COALESCE(SUM(shopify_amount), 0) AS gmv, COALESCE(${commissionEarnedSql()}, 0) AS commission FROM orders WHERE ${ND("orders")} AND created >= $1::date GROUP BY 1`, [start]),
     series("clicks", `SELECT ${bucket("created")} AS date, COUNT(*) AS n FROM link_clicks WHERE created >= $1::date GROUP BY 1`, [start]),
@@ -582,7 +652,7 @@ async function homeSeries(rangeKey) {
             ON s.shopify_created_at < g + $3::interval
            AND (s.cancelled_at IS NULL OR s.cancelled_at >= g + $3::interval)
            AND (s.trial_ends_at IS NULL OR s.trial_ends_at < g + $3::interval)
-           AND COALESCE(s.test, false) = false AND s.price_amount > 0
+           AND COALESCE(s.test, false) = false AND s.price_amount > 0 ${shopifyOnly}
            -- Same live-marketplace rule as the MRR tile; without it the tile
            -- and the sparkline beside it disagree again.
            AND NOT EXISTS (
@@ -592,7 +662,7 @@ async function homeSeries(rangeKey) {
            -- and the sparkline drifted away from the MRR tile beside it.
            AND COALESCE(NULLIF(s.price_currency, ''), 'USD') = (
              SELECT COALESCE(NULLIF(price_currency, ''), 'USD') FROM app_subscriptions
-             WHERE COALESCE(test, false) = false AND price_amount > 0
+             WHERE COALESCE(test, false) = false AND price_amount > 0 ${shopifyOnlyBare}
              GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1)
           GROUP BY 1 ORDER BY 1`, [start, unit, step])
       : Promise.resolve(null),
@@ -633,6 +703,8 @@ const ASK_TABLES = [
   "campaign_matches", "external_creators", "external_creator_links", "payouts", "app_subscriptions",
   "admin_trial_grants", "admin_impersonations", "link_clicks", "instagram_analytics", "referrals", "referral_programs",
   "brand_referrals", "brand_referral_payouts", "product_variants", "order_fulfillments", "shopify_partner_transactions",
+  // Newer main-app tables; askSchema() only lists the ones the target has.
+  "shop_products", "shop_product_variants", "billing_invoices", "creator_fee_charges", "payout_holds",
 ];
 const HIDDEN_COL = /(token|password|hash|secret|otp|verifier|stripe_|shopify_token|facebook_token|raw_json|raw_api_response|\bsub\b|storefront)/i;
 const FORBIDDEN_SQL = /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|execute|vacuum|analyze|refresh|listen|notify|set|reset|begin|commit|rollback|lock|cluster|comment|security|pg_sleep|pg_read|pg_ls|lo_|dblink|current_setting)\b/i;
@@ -657,11 +729,13 @@ Domain notes (important):
 - Soft deletes: every main table has a "deleted" timestamptz. A LIVE row has deleted IS NULL OR deleted IN ('infinity','-infinity'). Always filter live rows unless the question is about deleted data.
 - users.role: 1 admin, 2 brand, 3 creator (influencer). brands.user_id and influencers.user_id reference users.id. products.user_id is the brand's user id; links.brand_user_id / links.influencer_user_id likewise.
 - A "campaign" is a row in products. products.status: 1 new, 2 active, 3 paused, 4 ended. products.activated_at is when it went live.
+- Where products has an is_campaign column, only rows with is_campaign = true are campaigns (a product can run several campaigns, products.shop_product_id), and the brand's product catalogue is shop_products (with shop_product_variants). Without that column every products row is both the product and its campaign.
 - links = a creator on a campaign. links.status: 1 invited (brand-initiated, pending creator), 2 applied (creator-initiated, pending brand), 3 accepted, 4 rejected, 5 ended. links.clicks_counter = clicks.
 - orders reference links (orders.link_id); orders.shopify_amount is in orders.shopify_currency (do not sum across currencies without grouping). orders.commission is text holding the commission RATE IN PERCENT for that order (e.g. '30' = 30%), copied from products.sale_commission — NEVER sum it as money; commission earned is SUM(shopify_amount * commission::numeric / 100).
 - sample_requests.status: 'pending' | 'accepted' | 'shipped' | others. payouts.status 'paid' means money went out; amount_value is text.
 - Paid plans: users.account_id like 'shopify_<price>_<monthly|yearly>' (e.g. shopify_199_monthly); 'shopify_free_plan' is free; empty = never subscribed. Trials: brands.trial_expiration_date > NOW() means in trial; brands.trial_plan_name set = Linkable-granted trial.
 - app_subscriptions (when present) mirrors Shopify: status ACTIVE/CANCELLED/FROZEN/EXPIRED, price_amount, price_after_discount, interval, trial_ends_at, cancelled_at, test.
+- Card plans (when app_subscriptions has a provider column): brands without Shopify pay by card through Stripe. users.account_id reads 'stripe_<starter|growth|scale>_<monthly|yearly>' while the plan runs; the app_subscriptions row has provider = 'stripe', price_amount in price_currency (GBP), billing_period monthly/yearly, and status FROZEN when the card was declined (past due). Shopify plans are USD: never add GBP card amounts to USD Shopify amounts without grouping by currency. billing_invoices (when present) lists card plan invoices; total and amount_paid are in minor units (pence).
 - Timestamps are timestamptz; use NOW() and date_trunc for periods. Prefer readable column aliases.`;
 
 const AskSchema = z.object({
@@ -1039,7 +1113,7 @@ export function insightsRoutes() {
       const scored = facts.map((b) => ({
         user_id: b.user_id,
         score: scoreBrand(b).score,
-        paying: /^shopify_[0-9]+/.test(b.account_id || "") && !b.sub_test,
+        paying: /^(shopify_[0-9]+|stripe_)/.test(b.account_id || "") && !b.sub_test,
       }));
       res.json(await snapshotHealth(scored));
     } catch (e) { console.error("[insights/health/snapshot]", e); res.status(500).json({ error: e.message }); }

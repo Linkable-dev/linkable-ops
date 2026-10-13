@@ -13,6 +13,7 @@ import { BrandLink } from "../components/brand/BrandLink";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
+import { isCardPlan, cardPlanName, cardStatusLabel } from "../lib/cardPlans";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import {
   useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
@@ -93,7 +94,8 @@ const CREATOR_COLUMNS = [
     filter: { type: "number" } },
   { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
     filter: { type: "date" } },
-  { key: "actions",                   label: "",             width: ACTIONS_WIDTH, resizable: false },
+  // Room for Rule out + Hold payouts + View.
+  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 80, resizable: false },
 ];
 
 function avatarFor(row, kind) {
@@ -129,6 +131,7 @@ export default function UsersPage() {
   const [impersonating, setImpersonating] = useState(null); // user_id being acted on
   const [restoring, setRestoring] = useState(null); // user_id being restored
   const [disqualifying, setDisqualifying] = useState(null); // user_id being ruled out
+  const [holding, setHolding] = useState(null); // user_id whose payouts are being held/released
   const [actionError, setActionError] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [filters, setFilters] = useState({});
@@ -272,6 +275,52 @@ export default function UsersPage() {
       setActionError(`${row.email}: ${err.message}`);
     } finally {
       setDisqualifying(null);
+    }
+  }
+
+  // Holding a creator's payouts stops the main app transferring anything more
+  // to her until someone releases them. Like ruling out, it asks for the reason
+  // (kept with the hold); releasing asks only for a yes.
+  async function handlePayoutHold(row) {
+    const label = row.instagram_username ? `@${row.instagram_username.replace(/^@+/, "")}`
+      : (`${row.first_name || ""} ${row.last_name || ""}`.trim() || row.email);
+    let reason = "";
+    if (!row.payouts_held) {
+      const answer = await ask({
+        title: `Hold ${label}'s payouts?`,
+        body: "Nothing more is paid out to them until you release it: commission payouts are not charged and fees the brand already paid wait with Linkable.",
+        confirmLabel: "Hold payouts", danger: true,
+        prompt: { placeholder: "Why? (kept with the hold)", required: true },
+      });
+      if (!answer || !answer.trim()) return;
+      reason = answer.trim();
+    } else {
+      const ok = await ask({
+        title: `Release ${label}'s payouts?`,
+        body: `Held${row.payout_held_by ? ` by ${row.payout_held_by}` : ""}${row.payout_hold_reason ? `: ${row.payout_hold_reason}` : ""}. Releasing pays what was waiting with the next runs.`,
+        confirmLabel: "Release payouts",
+      });
+      if (!ok) return;
+    }
+    setActionError("");
+    setHolding(row.user_id);
+    try {
+      const out = row.payouts_held
+        ? await api.releaseCreatorPayouts(row.user_id)
+        : await api.holdCreatorPayouts(row.user_id, reason);
+      setRows((rs) => rs.map((r) => (r.user_id === row.user_id
+        ? {
+          ...r,
+          payouts_held: !out.released_at,
+          payout_hold_reason: out.released_at ? "" : out.reason,
+          payout_held_by: out.released_at ? null : out.held_by,
+          payout_held_at: out.released_at ? null : out.held_at,
+        }
+        : r)));
+    } catch (err) {
+      setActionError(`${row.email}: ${err.message}`);
+    } finally {
+      setHolding(null);
     }
   }
 
@@ -475,9 +524,11 @@ export default function UsersPage() {
               orderedColumns={orderedColumns}
               busy={impersonating === row.user_id}
               disqualifyBusy={disqualifying === row.user_id}
+              holdBusy={holding === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
               onManage={() => setManageRow(row)}
               onDisqualify={() => handleDisqualify(row)}
+              onPayoutHold={() => handlePayoutHold(row)}
             />
           ))
         )}
@@ -530,7 +581,7 @@ export default function UsersPage() {
 function renderUserCell(key, row, ctx) {
   const {
     tab, theme, avatar, initials, showImg, onImgError,
-    busy, disqualifyBusy, onImpersonate, onManage, onDisqualify,
+    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold,
   } = ctx;
   switch (key) {
     case "avatar":
@@ -639,6 +690,20 @@ function renderUserCell(key, row, ctx) {
               {row.disqualified_at ? "Ruled out" : "Rule out"}
             </Btn>
           )}
+          {tab === "creators" && row.payout_holds_available && (
+            <Btn
+              size="sm"
+              variant={row.payouts_held ? "solid" : "outline"}
+              color={row.payouts_held ? "#D97706" : undefined}
+              onClick={onPayoutHold}
+              loading={holdBusy}
+              title={row.payouts_held
+                ? `Payouts held${row.payout_held_by ? ` by ${row.payout_held_by}` : ""}${row.payout_held_at ? ` on ${new Date(row.payout_held_at).toLocaleDateString()}` : ""}: ${row.payout_hold_reason || "no reason recorded"} — click to release`
+                : "Stop paying this creator until you release it"}
+            >
+              {row.payouts_held ? "Payouts held" : "Hold payouts"}
+            </Btn>
+          )}
           {tab === "brands" && (
             <Btn
               size="sm"
@@ -661,7 +726,7 @@ function renderUserCell(key, row, ctx) {
   }
 }
 
-function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, onImpersonate, onManage, onDisqualify }) {
+function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -671,7 +736,7 @@ function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBu
   const ctx = {
     tab, theme, avatar, initials, showImg,
     onImgError: () => setImgFailed(true),
-    busy, disqualifyBusy, onImpersonate, onManage, onDisqualify,
+    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold,
   };
 
   return (
@@ -821,6 +886,9 @@ function PurgeCell({ row, theme }) {
 // and the $199 family "Growth"; brands see them as "Growth" and "Starter".
 function paidPlanFromAccountId(accountId) {
   if (!accountId) return null;
+  // A card plan (stripe_<plan>_<period>, billed by Stripe in GBP) keeps the
+  // name the app gives it.
+  if (isCardPlan(accountId)) return `${cardPlanName(accountId)} · card`;
   // Customer-facing labels (2026-07 rebrand): the $499 tier shows to brands as
   // "Growth" and the $199 tier as "Starter". Internally the app still calls these
   // Scale/Growth (plan_detection, entitlement, account_id), but ops mirrors what
@@ -951,7 +1019,41 @@ function SubscriptionCell({ row, theme }) {
   let color = theme.textMid;
   let title = "";
 
-  if (status) {
+  if (status && row.sub_provider === "stripe") {
+    // A card plan: Stripe's own status says more than the mapped one.
+    const stripeStatus = row.sub_stripe_status || "";
+    const ends = row.sub_cancel_at_period_end && row.sub_current_period_end
+      ? ` · ends ${new Date(row.sub_current_period_end).toLocaleDateString()}` : "";
+    label = `${planName}${testTag}`;
+    if (status === "FROZEN") {
+      sub = cardStatusLabel(stripeStatus) || "Card past due";
+      color = "#EF4444";
+      title = "Card payment declined — Stripe is retrying. The plan stays on meanwhile; the brand needs to update its card in Linkable (Settings, Plan).";
+    } else if (stripeStatus === "trialing") {
+      const trialEnds = row.sub_trial_ends_at ? new Date(row.sub_trial_ends_at).getTime() : null;
+      const daysLeft = trialEnds ? Math.max(0, Math.ceil((trialEnds - now) / 86_400_000)) : null;
+      sub = daysLeft != null ? `Card trial · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left${ends}` : `Card trial${ends}`;
+      color = "#F59E0B";
+      title = trialEnds ? `Card plan in its trial — Stripe charges the card on ${new Date(trialEnds).toLocaleDateString()}` : "Card plan in its trial";
+    } else if (status === "ACTIVE" && isTest) {
+      sub = "Test";
+      color = "#6B7280";
+      title = "Stripe test-mode subscription — never charged, not real revenue";
+    } else if (status === "ACTIVE") {
+      sub = `Paying${ends}`;
+      color = "#10B981";
+      title = `Paying by card (Stripe)${row.sub_current_period_end ? ` — current period ends ${new Date(row.sub_current_period_end).toLocaleDateString()}` : ""}`;
+    } else if (SUB_TERMINAL.has(status)) {
+      const when = row.sub_cancelled_at ? new Date(row.sub_cancelled_at).toLocaleDateString() : null;
+      sub = when ? `Cancelled ${when}` : "Cancelled";
+      color = "#E11D48";
+      title = `Card plan ${stripeStatus || status.toLowerCase()}${when ? ` on ${when}` : ""}`;
+    } else {
+      sub = cardStatusLabel(stripeStatus) || status.charAt(0) + status.slice(1).toLowerCase();
+      color = theme.textMid;
+      title = `Stripe subscription status: ${stripeStatus || status}`;
+    }
+  } else if (status) {
     // Authoritative: a real Shopify subscription row exists.
     if (status === "ACTIVE") {
       const trialEnds = row.sub_trial_ends_at ? new Date(row.sub_trial_ends_at).getTime() : null;
@@ -1034,7 +1136,7 @@ function SubscriptionCell({ row, theme }) {
       label = planName;
       sub = "No active sub";
       color = "#9CA3AF";
-      title = `account_id "${accountId}" on file, but no active Shopify subscription is synced — likely cancelled (or awaiting next sync)`;
+      title = `account_id "${accountId}" on file, but no active ${isCardPlan(accountId) ? "card (Stripe)" : "Shopify"} subscription is synced — likely cancelled (or awaiting next sync)`;
     }
   } else if (grant) {
     // No live Shopify plan, but a Linkable grant is on file.
