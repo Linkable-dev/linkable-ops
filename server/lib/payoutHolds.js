@@ -4,9 +4,11 @@
 // paid wait with the platform. Releasing lets the next runs pay as usual.
 //
 // The main app owns this, so ops asks it: HoldCreatorPayouts /
-// ReleaseCreatorPayouts on UsersService, signed with the service token
-// (lib/mainAppGrpc.js), which those RPCs accept from "our own server
-// (linkable-ops)" and record under the actor we pass. Release in particular
+// ReleaseCreatorPayouts on UsersService, each call signed with a fresh
+// short-lived token from ops' OWN service key (MAIN_APP_SERVICE_KEY, see
+// lib/mainAppGrpc.js; never the main app's private.key), which the gRPC
+// server accepts for these payments-admin RPCs only and records under the
+// actor we pass. Release in particular
 // does more than flip a row: it settles the fees that were waiting straight
 // away.
 //
@@ -73,7 +75,7 @@ async function callRpc(method, creatorUserId, reason, actor, target) {
       if (err.grpcCode === GRPC.UNIMPLEMENTED) return null; // that deployment predates holds: use SQL
       if (HTTP_FOR_GRPC[err.grpcCode]) throw fail(HTTP_FOR_GRPC[err.grpcCode], err.message);
       if (err.grpcCode === GRPC.UNAUTHENTICATED) {
-        throw fail(502, "The main app refused ops' service token. Check MAIN_APP_SERVICE_KEY.");
+        throw fail(502, "The main app refused ops' service token. MAIN_APP_SERVICE_KEY must be the ops private key whose public half is in the gRPC service's SERVICE_PUBLIC_KEYS (ops=…).");
       }
       throw fail(502, err.message || "The main app could not do that. Try again.");
     }

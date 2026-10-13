@@ -3,17 +3,25 @@
 //
 // No @grpc/grpc-js and no .proto files: the messages ops sends and reads are
 // a handful of string fields, so they are encoded here by hand, and gRPC is
-// plain HTTP/2 (node:http2). Each call carries a service token, the same kind
-// the SvelteKit server signs (client/src/lib/grpc.ts): an RS256 JWT with a
-// "service" claim, signed with the app's private key, in
-// x-service-authorization. The gRPC server checks it against its public key
-// (service-grpc/utils/utils_service_auth.go), and an RPC that allows our own
-// servers (utils.IsInternalCall) then runs as "linkable-ops".
+// plain HTTP/2 (node:http2).
+//
+// Auth: ops has its OWN key pair (main app PR #388,
+// service-grpc/utils/utils_service_keys.go). Every call carries a fresh
+// RS256 JWT in x-service-authorization with {"service":"ops", iat: now,
+// exp: now + 5 min}, signed with the ops private key. The gRPC server knows
+// the public half from SERVICE_PUBLIC_KEYS ("ops=<base64 PEM>") and accepts
+// such a token only for the payments-admin RPCs (HoldCreatorPayouts,
+// ReleaseCreatorPayouts, ListPayoutHolds, ListPayoutReports,
+// ResolvePayoutReport), and only if exp is at most 15 minutes after iat.
+//
+// NEVER put the main app's own private key (client/src/lib/server/private.key)
+// here: it signs user tokens and would give ops full access to every RPC.
 //
 // Configuration (server env, Vercel for the deployed panel):
-//   MAIN_APP_SERVICE_KEY    the main app's RSA private key (PEM; "\n" escapes
-//                           are accepted so it fits in one env line). Unset =
-//                           no gRPC; callers fall back to their SQL path.
+//   MAIN_APP_SERVICE_KEY    the OPS private key (RSA, PEM; "\n" escapes are
+//                           accepted so it fits one env line). One key pair per
+//                           environment. Unset = no gRPC; callers fall back to
+//                           their SQL path.
 //   MAIN_APP_GRPC_URL       prod gRPC origin (default: the Cloud Run service)
 //   MAIN_APP_GRPC_URL_DEV   dev gRPC origin (default: the dev Cloud Run service)
 import http2 from "node:http2";
@@ -43,15 +51,16 @@ function grpcUrl(target) {
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-let cachedToken = { value: "", expiresAt: 0 };
-function serviceToken() {
-  const now = Math.floor(Date.now() / 1000);
-  if (cachedToken.value && now < cachedToken.expiresAt - 300) return cachedToken.value;
+// The scoped-key contract caps a token at 15 minutes; ops signs a fresh one
+// for every call, valid for 5.
+export const SERVICE_NAME = "ops";
+export const TOKEN_TTL_SECONDS = 5 * 60;
+
+export function serviceToken(now = Math.floor(Date.now() / 1000)) {
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const payload = b64url(JSON.stringify({ service: "linkable-ops", iat: now, exp: now + 3600 }));
+  const payload = b64url(JSON.stringify({ service: SERVICE_NAME, iat: now, exp: now + TOKEN_TTL_SECONDS }));
   const signature = crypto.createSign("RSA-SHA256").update(`${header}.${payload}`).sign(serviceKey());
-  cachedToken = { value: `${header}.${payload}.${b64url(signature)}`, expiresAt: now + 3600 };
-  return cachedToken.value;
+  return `${header}.${payload}.${b64url(signature)}`;
 }
 
 /* ------------------------------------------------------- protobuf, strings */
