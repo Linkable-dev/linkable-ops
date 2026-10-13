@@ -451,6 +451,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ disqualified, reason }),
     }),
+  // Hold a creator's payouts while something is looked into, and release them
+  // (main app payments part 2). A reason is required to hold.
+  getPayoutHold: (userId) =>
+    request(`/admin-users/${userId}/payout-hold`),
+  holdCreatorPayouts: (userId, reason) =>
+    request(`/admin-users/${userId}/payout-hold`, { method: "POST", body: JSON.stringify({ reason }) }),
+  releaseCreatorPayouts: (userId) =>
+    request(`/admin-users/${userId}/payout-release`, { method: "POST" }),
   impersonateUser: (userId) =>
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
   grantTrial: (userId, body) =>

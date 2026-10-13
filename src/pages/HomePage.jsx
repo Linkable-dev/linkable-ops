@@ -303,9 +303,11 @@ export default function HomePage() {
       )}
 
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
-      <Section title="Recurring revenue" hint="from active paid subscriptions, billed in USD (trials and Shopify test charges excluded)">
+      <Section title="Recurring revenue" hint={revenue.card
+        ? "from active paid subscriptions: Shopify plans in USD, card plans in GBP, kept apart (trials and test charges excluded)"
+        : "from active paid subscriptions, billed in USD (trials and Shopify test charges excluded)"}>
         <div className="lk-grid">
-          <Stat label="MRR" value={money(revenue.mrr, { cents: true })} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox && delta("mrr") ? { ...delta("mrr"), text: `${delta("mrr").text} (from subscription records)` } : null} />
+          <Stat label={revenue.card ? "MRR · Shopify" : "MRR"} value={money(revenue.mrr, { cents: true })} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}${revenue.card ? " on Shopify" : ""}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox && delta("mrr") ? { ...delta("mrr"), text: `${delta("mrr").text} (from subscription records)` } : null} />
           <Stat label="ARR" value={money(revenue.arr, { cents: true })} sub="MRR × 12" spark={series?.mrrApprox ? spark("mrr") : null} />
           <Stat label="ARPA" value={money(revenue.arpa, { cents: true })} sub="avg revenue / paying brand" />
           <Stat
@@ -314,6 +316,31 @@ export default function HomePage() {
             accent={AMBER}
             sub={`${num(revenue.pipelineBrands)} brand${revenue.pipelineBrands === 1 ? "" : "s"} in trial → future MRR`}
           />
+          {/* Card plans (brands without Shopify), billed by Stripe in GBP. Not
+              added to the USD tiles: there is no exchange rate to trust here. */}
+          {revenue.card && (
+            <>
+              <Stat
+                label="MRR · card plans"
+                value={money(revenue.card.mrr, { cents: true, currency: revenue.card.currency })}
+                accent={GREEN}
+                sub={`${num(revenue.card.payingBrands)} paying by card${revenue.card.pastDueBrands ? ` · ${num(revenue.card.pastDueBrands)} past due` : ""}`}
+              />
+              <Stat label="ARR · card plans" value={money(revenue.card.arr, { cents: true, currency: revenue.card.currency })} sub="card MRR × 12" />
+              <Stat
+                label="Card past due"
+                value={num(revenue.card.pastDueBrands)}
+                accent={revenue.card.pastDueBrands ? RED : undefined}
+                sub="declined card, Stripe retrying"
+              />
+              <Stat
+                label="Card trial pipeline"
+                value={money(revenue.card.pipelineMrr, { currency: revenue.card.currency })}
+                accent={AMBER}
+                sub={`${num(revenue.card.pipelineBrands)} card brand${revenue.card.pipelineBrands === 1 ? "" : "s"} in trial`}
+              />
+            </>
+          )}
         </div>
 
         {revenue.byTier.length > 0 && (
@@ -321,13 +348,13 @@ export default function HomePage() {
             <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 500, marginBottom: 14 }}>MRR by plan</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {revenue.byTier.map((t) => (
-                <div key={t.tier} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 64, fontSize: 13, fontWeight: 600, color: theme.text }}>{t.tier}</div>
+                <div key={`${t.provider || "shopify"}:${t.tier}`} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 96, fontSize: 13, fontWeight: 600, color: theme.text }}>{t.tier}</div>
                   <div style={{ flex: 1, height: 10, background: theme.surfaceAlt, borderRadius: 6, overflow: "hidden" }}>
                     <div style={{ width: `${(t.mrr / maxTierMrr) * 100}%`, height: "100%", background: GREEN, borderRadius: 6 }} />
                   </div>
                   <div style={{ width: 150, textAlign: "right", fontSize: 13, color: theme.textMid }}>
-                    <span style={{ fontWeight: 600, color: theme.text }}>{money(t.mrr)}</span> · {num(t.brands)} brand{t.brands === 1 ? "" : "s"}
+                    <span style={{ fontWeight: 600, color: theme.text }}>{money(t.mrr, { currency: t.currency || "USD" })}</span> · {num(t.brands)} brand{t.brands === 1 ? "" : "s"}
                   </div>
                 </div>
               ))}

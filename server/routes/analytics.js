@@ -1,6 +1,10 @@
 import express from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
-import { commissionEarnedSql, NOT_TEST_SUB } from "../lib/mainAppSql.js";
+import {
+  commissionEarnedSql, NOT_TEST_SUB, SHOPIFY_PLAN_SQL, CARD_PLAN_SQL,
+  cardPlanAmountSql, cardPlanTierSql, subscriptionLateral,
+} from "../lib/mainAppSql.js";
+import { mainAppSchema } from "../lib/mainAppSchema.js";
 
 export function analyticsRoutes() {
   const router = express.Router();
@@ -8,12 +12,18 @@ export function analyticsRoutes() {
   // Dashboard: business KPIs for Linkable influencer platform
   router.get("/overview", async (req, res) => {
     try {
+      // Since main app #376 a products row is a campaign (is_campaign) and the
+      // catalogue is shop_products. Where the target predates it, products is
+      // still the one table for both and is counted as before.
+      const schema = await mainAppSchema();
+      const campaignsModel = schema.isCampaign;
+      const isCampaign = campaignsModel ? "AND is_campaign = true" : "";
       const results = await Promise.all([
         // Core counts
         cloudSqlQuery(`SELECT COUNT(*) as total FROM brands WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM influencers WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM external_creators WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
-        cloudSqlQuery(`SELECT COUNT(*) as total FROM products WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
+        cloudSqlQuery(`SELECT COUNT(*) as total FROM products WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz)) ${isCampaign}`),
         // links.status 3 = accepted (the only state that is live for tracking); total includes pending/rejected/ended
         cloudSqlQuery(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 3) as active FROM links WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
         cloudSqlQuery(`SELECT COUNT(*) as total FROM orders WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))`),
@@ -59,8 +69,8 @@ export function analyticsRoutes() {
         // Chats per week (last 6 months)
         cloudSqlQuery(`SELECT DATE_TRUNC('week', created)::date as date, COUNT(*) as count FROM chats WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz)) AND created >= NOW() - INTERVAL '6 months' GROUP BY DATE_TRUNC('week', created) ORDER BY date`),
 
-        // Products per month (all time)
-        cloudSqlQuery(`SELECT DATE_TRUNC('month', created)::date as date, COUNT(*) as count FROM products WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz)) AND created > '2020-01-01' GROUP BY DATE_TRUNC('month', created) ORDER BY date`),
+        // Products (campaigns, where the target has them) per month (all time)
+        cloudSqlQuery(`SELECT DATE_TRUNC('month', created)::date as date, COUNT(*) as count FROM products WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz)) ${isCampaign} AND created > '2020-01-01' GROUP BY DATE_TRUNC('month', created) ORDER BY date`),
 
         // Influencer locations (top countries)
         cloudSqlQuery(`SELECT location_country as country, COUNT(*) as count FROM influencers WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz)) AND location_country IS NOT NULL AND location_country != '' GROUP BY location_country ORDER BY count DESC LIMIT 10`),
@@ -97,11 +107,12 @@ export function analyticsRoutes() {
           FROM campaign_matches WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz)) AND score IS NOT NULL
           GROUP BY bracket ORDER BY bracket`),
 
-        // Top brands by product count
+        // Top brands by product (campaign, where the target has them) count
         cloudSqlQuery(`SELECT b.store_name as name, COUNT(p.id) as products
           FROM brands b JOIN products p ON p.brand_id = b.id
           WHERE (b.deleted IS NULL OR b.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
             AND (p.deleted IS NULL OR p.deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
+            ${campaignsModel ? "AND p.is_campaign = true" : ""}
             AND b.store_name IS NOT NULL AND b.store_name != ''
           GROUP BY b.store_name ORDER BY products DESC LIMIT 8`),
 
@@ -159,6 +170,13 @@ export function analyticsRoutes() {
         cloudSqlQuery(`SELECT status, COUNT(*) as count, COALESCE(SUM(amount_value::numeric), 0) as total_amount
           FROM payouts WHERE (deleted IS NULL OR deleted IN ('infinity'::timestamptz, '-infinity'::timestamptz))
           GROUP BY status ORDER BY count DESC`),
+
+        // The catalogue: the brands' own products, one row each however many
+        // campaigns run on them. Only where the target has shop_products.
+        schema.shopProducts
+          ? cloudSqlQuery(`SELECT COUNT(*) as total FROM shop_products sp JOIN brands b ON b.id = sp.brand_id
+              WHERE sp.deleted = '-infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz`)
+          : Promise.resolve({ rows: [{ total: null }] }),
       ]);
 
       const [
@@ -172,6 +190,7 @@ export function analyticsRoutes() {
         creatorCategories, creatorGender, sampleStatuses,
         verifiedSplit, matchScores, topBrands, igStats,
         brandMonetization, trialPlans, revenueStats, creatorStripe, payoutStats,
+        catalogueCount,
       ] = results;
 
       res.json({
@@ -179,7 +198,11 @@ export function analyticsRoutes() {
           brands: parseInt(brandsCount.rows[0].total),
           influencers: parseInt(influencersCount.rows[0].total),
           externalCreators: parseInt(externalCreatorsCount.rows[0].total),
+          // Campaigns where the target has the campaigns model, else every
+          // products row (the old meaning). productsModel says which.
           products: parseInt(productsCount.rows[0].total),
+          productsModel: campaignsModel ? "campaigns" : "products",
+          catalogueProducts: catalogueCount.rows[0]?.total == null ? null : parseInt(catalogueCount.rows[0].total),
           links: parseInt(linksCount.rows[0].total),
           activeLinks: parseInt(linksCount.rows[0].active || 0),
           orders: parseInt(ordersCount.rows[0].total),
@@ -269,24 +292,16 @@ export function analyticsRoutes() {
   router.get("/home", async (req, res) => {
     try {
       // app_subscriptions is the main app's Shopify source-of-truth, but it does
-      // not exist on every DB target yet (e.g. prod until the subscription system
-      // is promoted). Referencing it unconditionally would make the whole /home
-      // query 500. Probe once and only join it where it exists; otherwise fall
-      // back to the account_id-only revenue logic (the original behaviour).
-      const hasAppSubs = await cloudSqlQuery(
-        `SELECT to_regclass('public.app_subscriptions') IS NOT NULL AS ok`,
-      )
-        .then((r) => r.rows[0]?.ok === true)
-        .catch(() => false);
-      const subLateral = hasAppSubs
-        ? `LEFT JOIN LATERAL (
-             SELECT status, price_after_discount, test FROM app_subscriptions
-             WHERE user_id = u.id
-             ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
-                      shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
-             LIMIT 1
-           ) asub ON true`
-        : "";
+      // not exist on every DB target yet. Referencing it unconditionally would
+      // make the whole /home query 500, so mainAppSchema() says what the target
+      // has and the SQL below only names what exists; otherwise it falls back to
+      // the account_id-only revenue logic (the original behaviour). The same goes
+      // for card plans (app_subscriptions.provider) and campaigns
+      // (products.is_campaign): absent on prod until the promotion.
+      const schema = await mainAppSchema();
+      const hasAppSubs = schema.appSubscriptions;
+      const card = schema.cardBilling;
+      const subLateral = subscriptionLateral(schema, "status, price_after_discount, price_amount, price_currency, test");
       const amtExpr = hasAppSubs
         ? `COALESCE(NULLIF(asub.price_after_discount, 0), (substring(u.account_id from 'shopify_([0-9]+)'))::numeric)`
         : `(substring(u.account_id from 'shopify_([0-9]+)'))::numeric`;
@@ -301,6 +316,31 @@ export function analyticsRoutes() {
       const subActiveFilter = hasAppSubs
         ? `AND (asub.status IS NULL OR asub.status = 'ACTIVE') AND ${NOT_TEST_SUB()}`
         : "";
+      // Card plans (main app #371): Stripe bills them in GBP. Same columns, in
+      // the same order, as the Shopify half of each paid CTE below. A card brand is
+      // live while Stripe says active, in the pipeline while trialing; past_due
+      // and unpaid (FROZEN in the status column) collect nothing, as a frozen
+      // Shopify charge doesn't. Stripe test-mode subscriptions (every one on
+      // dev) are test rows and excluded like Shopify test charges.
+      const CARD_ROW = `${CARD_PLAN_SQL} AND asub.provider = 'stripe' AND ${NOT_TEST_SUB()}`;
+      const cardPaid = card
+        ? `UNION ALL
+            SELECT 'stripe' AS provider, ${cardPlanTierSql} AS tier, ${cardPlanAmountSql()} AS amt,
+                   (u.account_id LIKE '%yearly%') AS yearly,
+                   (asub.stripe_status = 'trialing') AS in_trial
+            FROM users u JOIN brands b ON b.user_id = u.id
+            ${subLateral}
+            WHERE ${BRAND_ACTIVE} AND ${CARD_ROW} AND asub.stripe_status IN ('active', 'trialing')`
+        : "";
+      // In the subscription-health split a card brand counts where a Shopify
+      // one would: paying once Stripe has billed it (a declined card stays in
+      // "paying", as a frozen Shopify charge does), in trial while trialing.
+      const cardPaying = card ? `OR (${CARD_ROW} AND asub.stripe_status <> 'trialing')` : "";
+      const cardInTrial = card ? `OR (${CARD_ROW} AND asub.stripe_status = 'trialing')` : "";
+      // Campaigns: since #376 a products row is a campaign only when
+      // is_campaign; the catalogue lives in shop_products. Old rows that were
+      // only ever the catalogue are is_campaign = false.
+      const CAMPAIGN = (a) => (schema.isCampaign ? `AND ${a ? `${a}.` : ""}is_campaign = true` : "");
 
       const [
         mrr, byTier, funnel, marketplace, subs, growth, gmvSeries,
@@ -309,12 +349,12 @@ export function analyticsRoutes() {
         // "not on trial" (a paying brand), not as unknown.
         cloudSqlQuery(`
           WITH paid AS (
-            SELECT ${amtExpr} AS amt,
+            SELECT 'shopify' AS provider, ''::text AS tier, ${amtExpr} AS amt,
                    (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
                    COALESCE(b.trial_expiration_date > NOW(), false) AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
             ${subLateral}
-            WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
+            WHERE ${BRAND_ACTIVE} AND ${SHOPIFY_PLAN_SQL}
               -- If a live subscription row exists it must be ACTIVE: a FROZEN
               -- (payment failed) or stale-cancelled brand keeps its account_id
               -- but collects no revenue, so counting it inflates MRR. No row (or
@@ -323,12 +363,17 @@ export function analyticsRoutes() {
               -- Programme intro ($99 vs $199) and Shopify discounts aren't
               -- over-counted.
               ${subActiveFilter}
+            ${cardPaid}
           )
           SELECT
-            ROUND(SUM(CASE WHEN NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS live_mrr,
-            COUNT(*) FILTER (WHERE NOT in_trial) AS paying_brands,
-            ROUND(SUM(CASE WHEN in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS pipeline_mrr,
-            COUNT(*) FILTER (WHERE in_trial) AS pipeline_brands
+            ROUND(SUM(CASE WHEN provider = 'shopify' AND NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS live_mrr,
+            COUNT(*) FILTER (WHERE provider = 'shopify' AND NOT in_trial) AS paying_brands,
+            ROUND(SUM(CASE WHEN provider = 'shopify' AND in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS pipeline_mrr,
+            COUNT(*) FILTER (WHERE provider = 'shopify' AND in_trial) AS pipeline_brands,
+            ROUND(SUM(CASE WHEN provider = 'stripe' AND NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS card_live_mrr,
+            COUNT(*) FILTER (WHERE provider = 'stripe' AND NOT in_trial) AS card_paying_brands,
+            ROUND(SUM(CASE WHEN provider = 'stripe' AND in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS card_pipeline_mrr,
+            COUNT(*) FILTER (WHERE provider = 'stripe' AND in_trial) AS card_pipeline_brands
           FROM paid`),
 
         // Live MRR split by plan tier, using the customer-facing labels the brand
@@ -336,29 +381,34 @@ export function analyticsRoutes() {
         cloudSqlQuery(`
           WITH paid AS (
             SELECT
+              'shopify' AS provider,
               CASE
                 WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 'Growth'
                 ELSE 'Starter'
               END AS tier,
               ${amtExpr} AS amt,
-              (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly
+              (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
+              false AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
             ${subLateral}
-            WHERE ${BRAND_ACTIVE} AND u.account_id ~ '^shopify_[0-9]+'
+            WHERE ${BRAND_ACTIVE} AND ${SHOPIFY_PLAN_SQL}
               AND COALESCE(b.trial_expiration_date > NOW(), false) = false
               -- Same frozen/stale exclusion as the headline MRR so the tier split
               -- reconciles to live_mrr (no-op when app_subscriptions is absent).
               ${subActiveFilter}
+            ${cardPaid}
           )
-          SELECT tier, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
-          FROM paid GROUP BY tier ORDER BY mrr DESC`),
+          -- Card tiers are named like the Shopify ones but priced in GBP, so
+          -- they stay separate rows with their own currency.
+          SELECT provider, tier, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
+          FROM paid WHERE NOT in_trial GROUP BY provider, tier ORDER BY provider, mrr DESC`),
 
         // Brand activation funnel: signed up -> launched an active campaign ->
         // got an accepted creator -> generated a sale.
         cloudSqlQuery(`
           SELECT
             (SELECT COUNT(*) FROM users u JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE}) AS signed_up,
-            (SELECT COUNT(DISTINCT p.user_id) FROM products p JOIN users u ON u.id = p.user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND p.status = 2 AND p.deleted = '-infinity'::timestamptz) AS launched_campaign,
+            (SELECT COUNT(DISTINCT p.user_id) FROM products p JOIN users u ON u.id = p.user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND p.status = 2 AND p.deleted = '-infinity'::timestamptz ${CAMPAIGN("p")}) AS launched_campaign,
             (SELECT COUNT(DISTINCT l.brand_user_id) FROM links l JOIN users u ON u.id = l.brand_user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND l.status = 3 AND l.deleted = '-infinity'::timestamptz) AS got_creator,
             (SELECT COUNT(DISTINCT l.brand_user_id) FROM orders o JOIN links l ON l.id = o.link_id JOIN users u ON u.id = l.brand_user_id JOIN brands b ON b.user_id = u.id WHERE ${BRAND_ACTIVE} AND o.deleted = '-infinity'::timestamptz) AS got_sale`),
 
@@ -367,7 +417,7 @@ export function analyticsRoutes() {
           SELECT
             (SELECT COUNT(*) FROM influencers WHERE deleted = '-infinity'::timestamptz) AS creators_total,
             (SELECT COUNT(DISTINCT influencer_user_id) FROM links WHERE status = 3 AND deleted = '-infinity'::timestamptz) AS creators_active,
-            (SELECT COUNT(*) FROM products WHERE status = 2 AND deleted = '-infinity'::timestamptz) AS active_campaigns,
+            (SELECT COUNT(*) FROM products WHERE status = 2 AND deleted = '-infinity'::timestamptz ${CAMPAIGN()}) AS active_campaigns,
             (SELECT COALESCE(SUM(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS gmv,
             -- the currency most orders were placed in (orders are stored in the shop currency, not converted)
             (SELECT COALESCE(NULLIF(shopify_currency, ''), 'USD') FROM orders WHERE deleted = '-infinity'::timestamptz
@@ -403,12 +453,12 @@ export function analyticsRoutes() {
         // Subscription/trial health across active brands.
         cloudSqlQuery(`
           SELECT
-            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = false ${notTestFilter}) AS paying,
+            COUNT(*) FILTER (WHERE (${SHOPIFY_PLAN_SQL} AND COALESCE(b.trial_expiration_date > NOW(), false) = false ${notTestFilter}) ${cardPaying}) AS paying,
             -- Standard 14-day trial only (trial_plan_name empty). Admin-granted
             -- trials carry a trial_plan_name and are counted in extended_trial_active
             -- instead, so the two buckets stay mutually exclusive rather than
             -- double-counting a brand that is on a paid plan with a granted trial.
-            COUNT(*) FILTER (WHERE u.account_id ~ '^shopify_[0-9]+' AND COALESCE(b.trial_expiration_date > NOW(), false) = true AND COALESCE(b.trial_plan_name, '') = '') AS in_trial,
+            COUNT(*) FILTER (WHERE (${SHOPIFY_PLAN_SQL} AND COALESCE(b.trial_expiration_date > NOW(), false) = true AND COALESCE(b.trial_plan_name, '') = '') ${cardInTrial}) AS in_trial,
             COUNT(*) FILTER (WHERE COALESCE(b.trial_plan_name, '') <> '' AND b.trial_activation_date > '-infinity'::timestamptz AND b.trial_expiration_date > NOW()) AS extended_trial_active,
             -- Cancelled but still inside the trial-access window: no paid plan
             -- (account_id cleared on cancel) yet trial_expiration_date is in the
@@ -423,7 +473,10 @@ export function analyticsRoutes() {
             -- A live test charge belongs here rather than in "paying": it has an
             -- account_id but bills nobody.
             COUNT(*) FILTER (WHERE ((COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan')) OR ${isTestExpr})
-                             AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS no_paid_plan
+                             AND COALESCE(b.trial_expiration_date > NOW(), false) = false) AS no_paid_plan,
+            -- Card plans whose last charge was declined: Stripe retries, the
+            -- brand keeps its plan meanwhile (main app payments part 2).
+            ${card ? `COUNT(*) FILTER (WHERE ${CARD_ROW} AND asub.stripe_status IN ('past_due', 'unpaid'))` : "0"} AS card_past_due
           FROM users u JOIN brands b ON b.user_id = u.id ${subLateral} WHERE ${BRAND_ACTIVE}`),
 
         // New brands this month vs last (momentum).
@@ -456,7 +509,25 @@ export function analyticsRoutes() {
           arpa: payingBrands ? parseFloat((liveMrr / payingBrands).toFixed(2)) : 0,
           pipelineMrr: parseFloat(m.pipeline_mrr || 0),
           pipelineBrands: parseInt(m.pipeline_brands || 0),
-          byTier: byTier.rows.map((r) => ({ tier: r.tier, mrr: parseFloat(r.mrr || 0), brands: parseInt(r.brands) })),
+          // Card plans, billed by Stripe in GBP. Kept apart from the USD figures
+          // above rather than converted: there is no exchange rate to trust here.
+          // null where the target has no card billing yet.
+          card: card ? {
+            currency: "GBP",
+            mrr: parseFloat(m.card_live_mrr || 0),
+            arr: Math.round(parseFloat(m.card_live_mrr || 0) * 12 * 100) / 100,
+            payingBrands: parseInt(m.card_paying_brands || 0),
+            pipelineMrr: parseFloat(m.card_pipeline_mrr || 0),
+            pipelineBrands: parseInt(m.card_pipeline_brands || 0),
+            pastDueBrands: parseInt(s.card_past_due || 0),
+          } : null,
+          byTier: byTier.rows.map((r) => ({
+            tier: r.provider === "stripe" ? `${r.tier} · card` : r.tier,
+            provider: r.provider,
+            currency: r.provider === "stripe" ? "GBP" : "USD",
+            mrr: parseFloat(r.mrr || 0),
+            brands: parseInt(r.brands),
+          })),
         },
         funnel: {
           signedUp: parseInt(f.signed_up || 0),

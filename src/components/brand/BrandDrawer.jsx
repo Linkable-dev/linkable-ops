@@ -8,6 +8,7 @@ import { Skeleton, SkeletonStatGrid, SkeletonTable, SkeletonKeyValue } from "../
 import GrantTrialModal from "../trials/GrantTrialModal";
 import ManageBrandModal from "../users/ManageBrandModal";
 import { planLabel } from "../trials/planConfig";
+import { isCardPlan, cardPlanName, cardStatusLabel } from "../../lib/cardPlans";
 import {
   useColumnWidths,
   ResizeHandle,
@@ -32,6 +33,7 @@ const shortList = (value, max = 8) => {
 };
 const planFromAccount = (accountId) => {
   if (!accountId) return null;
+  if (isCardPlan(accountId)) return `${cardPlanName(accountId)} · card`;
   if (/shopify_(499|4970|299)/.test(accountId)) return "Growth";
   if (/shopify_(199|1990|99|990)/.test(accountId)) return "Starter";
   if (/free/.test(accountId)) return "Free";
@@ -169,9 +171,15 @@ function SubscriptionPill({ data, theme }) {
   const s = data?.subscription;
   const p = data?.profile;
   const plan = planFromAccount(p?.account_id) || (s?.name ? String(s.name).replace(/^Linkable\s+/i, "").replace(/\s*\(.*\)$/, "") : null);
-  const inTrial = p?.trial_expiration_date && p.trial_expiration_date !== "-infinity" && new Date(p.trial_expiration_date) > new Date();
+  const card = s?.provider === "stripe";
+  const inTrial = card
+    ? s?.stripe_status === "trialing"
+    : p?.trial_expiration_date && p.trial_expiration_date !== "-infinity" && new Date(p.trial_expiration_date) > new Date();
   const status = (s?.status || "").toUpperCase();
-  if (status === "FROZEN") return <Pill bg="#FEE2E2" fg="#991B1B">{plan || "Plan"} · payment failed</Pill>;
+  // A card plan reads FROZEN while Stripe has its declined card past due; the
+  // plan stays on while Stripe retries, so it is not "the app is locked".
+  if (status === "FROZEN") return <Pill bg="#FEE2E2" fg="#991B1B">{plan || "Plan"} · {card ? cardStatusLabel(s.stripe_status).toLowerCase() || "card past due" : "payment failed"}</Pill>;
+  if (card && inTrial) return <Pill bg="#FEF3C7" fg="#92400E">{plan ? `${plan} · ` : ""}card trial{s.trial_ends_at ? ` ends ${friendlyDate(s.trial_ends_at)}` : ""}</Pill>;
   if (status && status !== "ACTIVE") return <Pill bg={theme.surfaceAlt} fg={theme.textMid}>{plan || "Plan"} · {status.toLowerCase()}</Pill>;
   if (inTrial) return <Pill bg="#FEF3C7" fg="#92400E">{plan ? `${plan} · ` : ""}trial ends {friendlyDate(p.trial_expiration_date)}</Pill>;
   if (plan === "Free") return <Pill bg={theme.surfaceAlt} fg={theme.textMid}>Free plan</Pill>;
@@ -220,7 +228,9 @@ function Overview({ data, theme, label, section }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 12 }}>
         <Stat theme={theme} label="GMV attributed" value={gmvValue} sub={`${cur.reduce((a, c) => a + c.orders, 0)} orders`} />
         <Stat theme={theme} label="Commission" value={cur.length ? cur.map((c) => money(c.commission, c.currency, true)).join(" + ") : money(0)} />
-        <Stat theme={theme} label="Campaigns" value={activeCampaigns} sub={`${data.campaigns.length} launched${data.notLaunched ? ` · ${data.notLaunched} synced, not launched` : ""}`} />
+        <Stat theme={theme} label="Campaigns" value={activeCampaigns} sub={data.catalogueProducts != null
+          ? `${data.campaigns.length} campaign${data.campaigns.length === 1 ? "" : "s"} · ${data.catalogueProducts} product${data.catalogueProducts === 1 ? "" : "s"} in catalogue`
+          : `${data.campaigns.length} launched${data.notLaunched ? ` · ${data.notLaunched} synced, not launched` : ""}`} />
         <Stat theme={theme} label="Accepted creators" value={acceptedCreators} sub={`${data.creators.length} relationships`} />
         <Stat theme={theme} label="Link clicks" value={friendlyNumber(data.campaigns.reduce((a, c) => a + c.clicks, 0))} />
         <Stat theme={theme} label="Last sign-in" value={p.last_sign_in ? friendlyDate(p.last_sign_in) : "never"} sub={`signed up ${friendlyDate(p.user_created)}`} />
@@ -230,9 +240,10 @@ function Overview({ data, theme, label, section }) {
         <div style={label}>Subscription</div>
         {s ? (
           <KV theme={theme} rows={[
-            ["Status", `${s.status}${s.test ? " (test)" : ""}${s.cancelled_at ? ` · cancelled ${friendlyDate(s.cancelled_at)}` : ""}`],
+            ["Billed by", s.provider === "stripe" ? "Card (Stripe)" : "Shopify"],
+            ["Status", `${s.provider === "stripe" ? `${cardStatusLabel(s.stripe_status)} (${s.stripe_status || s.status})` : s.status}${s.test ? " (test)" : ""}${s.cancel_at_period_end ? " · cancels at period end" : ""}${s.cancelled_at ? ` · cancelled ${friendlyDate(s.cancelled_at)}` : ""}`],
             ["Plan", `${s.name || planFromAccount(p.account_id) || "—"} · ${money(s.price_after_discount || s.price_amount, s.price_currency || "USD")} / ${s.interval || "month"}${s.price_after_discount && Number(s.price_after_discount) !== Number(s.price_amount) ? ` (list ${money(s.price_amount, s.price_currency || "USD")})` : ""}`],
-            s.trial_ends_at && ["Shopify trial ends", friendlyDate(s.trial_ends_at)],
+            s.trial_ends_at && [s.provider === "stripe" ? "Card trial ends" : "Shopify trial ends", friendlyDate(s.trial_ends_at)],
             s.current_period_end && ["Current period ends", friendlyDate(s.current_period_end)],
             ["account_id", p.account_id || "(empty)"],
             ["Synced", s.synced_at ? friendlyDate(s.synced_at) : "—"],
