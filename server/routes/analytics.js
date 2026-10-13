@@ -415,7 +415,13 @@ export function analyticsRoutes() {
         // Marketplace throughput.
         cloudSqlQuery(`
           SELECT
-            (SELECT COUNT(*) FROM influencers WHERE deleted = '-infinity'::timestamptz) AS creators_total,
+            -- Signed-up creators only: users.status = 1 is a husk (an account
+            -- made for a creator by an invite, never signed up for), the main
+            -- app's one "signed up" rule (SignedUpUserSQL). Husks shown apart.
+            (SELECT COUNT(*) FROM influencers i JOIN users u ON u.id = i.user_id
+              WHERE i.deleted = '-infinity'::timestamptz AND u.status <> 1) AS creators_total,
+            (SELECT COUNT(*) FROM influencers i JOIN users u ON u.id = i.user_id
+              WHERE i.deleted = '-infinity'::timestamptz AND u.status = 1) AS creators_husks,
             (SELECT COUNT(DISTINCT influencer_user_id) FROM links WHERE status = 3 AND deleted = '-infinity'::timestamptz) AS creators_active,
             (SELECT COUNT(*) FROM products WHERE status = 2 AND deleted = '-infinity'::timestamptz ${CAMPAIGN()}) AS active_campaigns,
             (SELECT COALESCE(SUM(shopify_amount), 0) FROM orders WHERE deleted = '-infinity'::timestamptz) AS gmv,
@@ -537,6 +543,7 @@ export function analyticsRoutes() {
         },
         marketplace: {
           creatorsTotal: parseInt(mk.creators_total || 0),
+          creatorsHusks: parseInt(mk.creators_husks || 0),
           creatorsActive: parseInt(mk.creators_active || 0),
           activeCampaigns: parseInt(mk.active_campaigns || 0),
           gmv: parseFloat(mk.gmv || 0),

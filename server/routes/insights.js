@@ -634,7 +634,8 @@ async function homeSeries(rangeKey) {
   const [buckets, brands, creators, campaigns, accepted, orders, clicks, trials, mrr] = await Promise.all([
     cloudSqlQuery(`SELECT g::date AS date FROM generate_series($1::date, date_trunc($2, NOW())::date, $3::interval) g`, [start, unit, step]).then((r) => r.rows.map((x) => x.date)),
     series("brands", `SELECT ${bucket("u.created")} AS date, COUNT(*) AS n FROM users u JOIN brands b ON b.user_id = u.id WHERE u.role = 2 AND u.created >= $1::date GROUP BY 1`, [start]),
-    series("creators", `SELECT ${bucket("created")} AS date, COUNT(*) AS n FROM influencers WHERE created >= $1::date GROUP BY 1`, [start]),
+    // Signed-up creators only (users.status = 1 is a husk), as the Creators tile.
+    series("creators", `SELECT ${bucket("i.created")} AS date, COUNT(*) AS n FROM influencers i JOIN users u ON u.id = i.user_id WHERE i.created >= $1::date AND u.status <> 1 GROUP BY 1`, [start]),
     series("campaigns", `SELECT ${bucket("COALESCE(activated_at, created)")} AS date, COUNT(*) AS n FROM products WHERE ${ND("products")} ${campaignOnly} AND activated_at IS NOT NULL AND COALESCE(activated_at, created) >= $1::date GROUP BY 1`, [start]),
     series("accepted", `SELECT ${bucket("COALESCE(accepted_at, created)")} AS date, COUNT(*) AS n FROM links WHERE ${ND("links")} AND status = ${LINK.ACCEPTED} AND COALESCE(accepted_at, created) >= $1::date GROUP BY 1`, [start]),
     series("orders", `SELECT ${bucket("created")} AS date, COUNT(*) AS n, COALESCE(SUM(shopify_amount), 0) AS gmv, COALESCE(${commissionEarnedSql()}, 0) AS commission FROM orders WHERE ${ND("orders")} AND created >= $1::date GROUP BY 1`, [start]),

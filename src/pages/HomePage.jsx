@@ -395,7 +395,7 @@ export default function HomePage() {
       {/* ── Marketplace ───────────────────────────────────────────────────── */}
       <Section title="Marketplace" hint="the two-sided activity brands and creators generate, in the shop currency">
         <div className="lk-grid">
-          <Stat label="Creators" value={num(marketplace.creatorsTotal)} sub={`${num(marketplace.creatorsActive)} active (accepted a campaign)`} spark={spark("creators")} delta={delta("creators") && { ...delta("creators"), text: `new creators ${delta("creators").text}` }} />
+          <Stat label="Creators (signed up)" value={num(marketplace.creatorsTotal)} sub={`${num(marketplace.creatorsActive)} active (accepted a campaign)${marketplace.creatorsHusks ? ` · ${num(marketplace.creatorsHusks)} invited, not signed up` : ""}`} spark={spark("creators")} delta={delta("creators") && { ...delta("creators"), text: `new signed-up creators ${delta("creators").text}` }} />
           <Stat label="Active campaigns" value={num(marketplace.activeCampaigns)} spark={spark("campaigns")} delta={delta("campaigns") && { ...delta("campaigns"), text: `launches ${delta("campaigns").text}` }} />
           <Stat label="GMV" value={money(marketplace.gmv, { currency: marketplace.gmvCurrency })} sub={`${num(marketplace.orders)} order${marketplace.orders === 1 ? "" : "s"} attributed`} spark={spark("gmv")} delta={delta("gmv")} />
           <Stat label="Commission earned" value={money(marketplace.commissionPaid, { cents: true, currency: marketplace.gmvCurrency })} sub={`creator share of GMV · ${num(marketplace.clicks)} link clicks`} spark={spark("commission")} delta={delta("clicks") && { ...delta("clicks"), text: `clicks ${delta("clicks").text}` }} />
