@@ -19,6 +19,11 @@
 //   creatorFeeCharges  creator_fee_charges, fees charged on approval (#372)
 //   connectIssues      connect_account_issues (#377)
 //   inviteLinks        invite_links, private campaign invite links (#379)
+//   feeStop            creator_fee_charges.release_at + stopped_at: the 48h
+//                      hold after the post link, and support stopping one held
+//                      fee (StopCreatorFee, main app PR #446)
+//   feeReports         payout_reports.fee_id: a brand's "Report a problem" on
+//                      a fee row (#446)
 import { cloudSqlQuery, currentDbTarget } from "./cloudsql.js";
 
 const TTL_MS = 5 * 60_000;
@@ -39,12 +44,14 @@ const PROBE_SQL = `SELECT
   ${tbl("payout_holds")} AS payout_holds,
   ${tbl("creator_fee_charges")} AS creator_fee_charges,
   ${tbl("connect_account_issues")} AS connect_issues,
-  ${tbl("invite_links")} AS invite_links`;
+  ${tbl("invite_links")} AS invite_links,
+  (${col("creator_fee_charges", "release_at")} AND ${col("creator_fee_charges", "stopped_at")}) AS fee_stop,
+  ${col("payout_reports", "fee_id")} AS fee_reports`;
 
 const NOTHING = Object.freeze({
   appSubscriptions: false, cardBilling: false, billingInvoices: false, invoiceRetries: false,
   shopProducts: false, isCampaign: false, payoutHolds: false, creatorFeeCharges: false,
-  connectIssues: false, inviteLinks: false,
+  connectIssues: false, inviteLinks: false, feeStop: false, feeReports: false,
 });
 
 export async function mainAppSchema(target = currentDbTarget()) {
@@ -65,6 +72,8 @@ export async function mainAppSchema(target = currentDbTarget()) {
       creatorFeeCharges: r.creator_fee_charges === true,
       connectIssues: r.connect_issues === true,
       inviteLinks: r.invite_links === true,
+      feeStop: r.fee_stop === true,
+      feeReports: r.fee_reports === true,
     });
   } catch (err) {
     // A failed probe answers "nothing new", so callers run the old SQL. Not

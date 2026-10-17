@@ -13,6 +13,7 @@ import { BrandLink } from "../components/brand/BrandLink";
 import GrantTrialModal from "../components/trials/GrantTrialModal";
 import { planLabel } from "../components/trials/planConfig";
 import ManageBrandModal from "../components/users/ManageBrandModal";
+import CreatorFeesModal from "../components/users/CreatorFeesModal";
 import { isCardPlan, cardPlanName, cardStatusLabel } from "../lib/cardPlans";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import {
@@ -94,9 +95,15 @@ const CREATOR_COLUMNS = [
     filter: { type: "number" } },
   { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
     filter: { type: "date" } },
-  // Room for Rule out + Hold payouts + View.
-  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 80, resizable: false },
+  // Room for Rule out + Hold payouts + Held fees + View.
+  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 180, resizable: false },
 ];
+
+// "@handle", else her name, else her email: how dialogs name a creator.
+function creatorLabel(row) {
+  return row.instagram_username ? `@${row.instagram_username.replace(/^@+/, "")}`
+    : (`${row.first_name || ""} ${row.last_name || ""}`.trim() || row.email);
+}
 
 function avatarFor(row, kind) {
   // Backend pre-signs GCS URLs into signed_logo_pic / signed_profile_pic so
@@ -139,6 +146,7 @@ export default function UsersPage() {
   // reads as the live marketplace; "Show Hidden" folds them back in.
   const [showHidden, setShowHidden] = useState(false);
   const [manageRow, setManageRow] = useState(null); // null = closed
+  const [feesRow, setFeesRow] = useState(null); // creator whose held fees are open; null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
   const { ask, dialog: confirmDialog } = useConfirm();
   const [page, setPage] = useState(1);
@@ -322,6 +330,14 @@ export default function UsersPage() {
     } finally {
       setHolding(null);
     }
+  }
+
+  // A fee was stopped in the Held fees dialog: move it from held to stopped
+  // on her row, so the button's count is right without a refetch.
+  function handleFeesChanged(userId, { held = 0, stopped = 0 }) {
+    setRows((rs) => rs.map((r) => (r.user_id === userId
+      ? { ...r, held_fee_count: Math.max(0, (r.held_fee_count || 0) + held), stopped_fee_count: (r.stopped_fee_count || 0) + stopped }
+      : r)));
   }
 
   async function handleRestore(row) {
@@ -529,6 +545,7 @@ export default function UsersPage() {
               onManage={() => setManageRow(row)}
               onDisqualify={() => handleDisqualify(row)}
               onPayoutHold={() => handlePayoutHold(row)}
+              onFees={() => setFeesRow(row)}
             />
           ))
         )}
@@ -544,6 +561,13 @@ export default function UsersPage() {
         onHiddenChanged={handleHiddenChanged}
         onWiped={fetchRows}
         onGrantTrial={(row) => { setManageRow(null); setTrialModalRow(row); }}
+      />
+
+      <CreatorFeesModal
+        row={feesRow}
+        label={feesRow ? creatorLabel(feesRow) : ""}
+        onClose={() => setFeesRow(null)}
+        onChanged={handleFeesChanged}
       />
 
       <GrantTrialModal
@@ -581,7 +605,7 @@ export default function UsersPage() {
 function renderUserCell(key, row, ctx) {
   const {
     tab, theme, avatar, initials, showImg, onImgError,
-    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold,
+    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onFees,
   } = ctx;
   switch (key) {
     case "avatar":
@@ -704,6 +728,18 @@ function renderUserCell(key, row, ctx) {
               {row.payouts_held ? "Payouts held" : "Hold payouts"}
             </Btn>
           )}
+          {tab === "creators" && row.fee_stop_available && (row.held_fee_count > 0 || row.stopped_fee_count > 0) && (
+            <Btn
+              size="sm"
+              variant="outline"
+              onClick={onFees}
+              title={row.held_fee_count > 0
+                ? `${row.held_fee_count} fee${row.held_fee_count === 1 ? "" : "s"} in the 48h hold after the post link — open to stop one and refund the brand`
+                : "Fees stopped for this creator"}
+            >
+              {row.held_fee_count > 0 ? `Held fees · ${row.held_fee_count}` : "Stopped fees"}
+            </Btn>
+          )}
           {tab === "brands" && (
             <Btn
               size="sm"
@@ -726,7 +762,7 @@ function renderUserCell(key, row, ctx) {
   }
 }
 
-function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold }) {
+function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onFees }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -736,7 +772,7 @@ function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBu
   const ctx = {
     tab, theme, avatar, initials, showImg,
     onImgError: () => setImgFailed(true),
-    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold,
+    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onFees,
   };
 
   return (
