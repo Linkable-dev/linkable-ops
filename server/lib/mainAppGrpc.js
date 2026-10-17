@@ -12,7 +12,8 @@
 // the public half from SERVICE_PUBLIC_KEYS ("ops=<base64 PEM>") and accepts
 // such a token only for the payments-admin RPCs (HoldCreatorPayouts,
 // ReleaseCreatorPayouts, ListPayoutHolds, ListPayoutReports,
-// ResolvePayoutReport), and only if exp is at most 15 minutes after iat.
+// ResolvePayoutReport, StopCreatorFee), and only if exp is at most 15 minutes
+// after iat.
 //
 // NEVER put the main app's own private key (client/src/lib/server/private.key)
 // here: it signs user tokens and would give ops full access to every RPC.
@@ -97,6 +98,13 @@ function readVarint(buf, pos) {
 // Decodes the string fields of a message to { fieldNumber: string }; other
 // wire types are skipped.
 export function decodeStrings(buf) {
+  return decodeFields(buf, { varints: false });
+}
+
+// Like decodeStrings, and also keeps varint fields (int64, bool, enums) as
+// numbers: { fieldNumber: string | number }. Exact up to 2^53, which money in
+// minor units never reaches; negative int64s are not expected.
+export function decodeFields(buf, { varints = true } = {}) {
   const out = {};
   let pos = 0;
   while (pos < buf.length) {
@@ -109,7 +117,9 @@ export function decodeStrings(buf) {
       out[field] = buf.subarray(pos, pos + len).toString("utf8");
       pos += len;
     } else if (wire === 0) {
-      [, pos] = readVarint(buf, pos);
+      let value;
+      [value, pos] = readVarint(buf, pos);
+      if (varints) out[field] = value;
     } else if (wire === 1) {
       pos += 8;
     } else if (wire === 5) {
@@ -124,7 +134,7 @@ export function decodeStrings(buf) {
 /* ------------------------------------------------------------------- calls */
 
 // gRPC status codes ops reacts to.
-export const GRPC = { INVALID_ARGUMENT: 3, NOT_FOUND: 5, PERMISSION_DENIED: 7, FAILED_PRECONDITION: 9, UNIMPLEMENTED: 12, UNAVAILABLE: 14, UNAUTHENTICATED: 16 };
+export const GRPC = { INVALID_ARGUMENT: 3, NOT_FOUND: 5, PERMISSION_DENIED: 7, FAILED_PRECONDITION: 9, ABORTED: 10, UNIMPLEMENTED: 12, UNAVAILABLE: 14, UNAUTHENTICATED: 16 };
 
 export class GrpcError extends Error {
   constructor(code, message) {

@@ -4,6 +4,7 @@ import { signedUrls } from "../lib/gcs.js";
 import { mainAppSchema } from "../lib/mainAppSchema.js";
 import { CARD_PLAN_SQL, subscriptionLateral } from "../lib/mainAppSql.js";
 import { payoutHoldState, holdCreatorPayouts, releaseCreatorPayouts } from "../lib/payoutHolds.js";
+import { listCreatorFees, stopCreatorFee } from "../lib/creatorFees.js";
 import {
   parseColumnFilters, orderBySql, filterConditions,
   textFilter, minNumberFilter, enumFilter, dateFilter,
@@ -224,6 +225,31 @@ export function adminUsersRoutes() {
   router.post("/:userId/payout-release", async (req, res) => {
     try {
       res.json(await releaseCreatorPayouts(req.params.userId, req.admin, req.dbTarget || "prod"));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  // A creator's fees in their 48h hold after the post link, and the ones
+  // already stopped (lib/creatorFees.js). Paged here, never in the browser.
+  router.get("/:userId/creator-fees", async (req, res) => {
+    try {
+      res.json(await listCreatorFees(
+        req.params.userId,
+        { limit: req.query.limit, offset: req.query.offset },
+        req.dbTarget || "prod",
+      ));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  // Stop one held fee: nothing goes to the creator and the brand's card is
+  // refunded in full. Only through the main app's StopCreatorFee (Stripe
+  // refund), so no SQL fallback.
+  router.post("/creator-fees/:feeId/stop", async (req, res) => {
+    try {
+      res.json(await stopCreatorFee(req.params.feeId, req.body?.reason, req.admin?.email, req.dbTarget || "prod"));
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
     }
@@ -828,7 +854,7 @@ async function listCreators(query) {
   const orderBy = orderBySql(query, CREATOR_SORTS, "u.created DESC");
   // Her open payout hold (main app payments part 2), where the target has
   // payout_holds; the Users page shows Hold/Release only when it does.
-  const { payoutHolds } = await mainAppSchema();
+  const { payoutHolds, feeStop } = await mainAppSchema();
   const holdCols = payoutHolds
     ? `true AS payout_holds_available,
             (ph.id IS NOT NULL) AS payouts_held,
@@ -843,6 +869,21 @@ async function listCreators(query) {
           WHERE h.creator_user_id = u.id AND h.released_at IS NULL
           LIMIT 1
        ) ph ON true`
+    : "";
+  // Her fees in the 48h hold (Stop fee) and the ones already stopped, where
+  // the target has the hold (main app #446); the row shows "Held fees" then.
+  const feeCols = feeStop
+    ? `true AS fee_stop_available,
+            COALESCE(cf.held, 0)::int AS held_fee_count,
+            COALESCE(cf.stopped, 0)::int AS stopped_fee_count,`
+    : `false AS fee_stop_available, 0 AS held_fee_count, 0 AS stopped_fee_count,`;
+  const feeJoin = feeStop
+    ? `LEFT JOIN LATERAL (
+         SELECT COUNT(*) FILTER (WHERE f.status = 'charged' AND f.transferred_minor = 0 AND f.stopped_at IS NULL) AS held,
+                COUNT(*) FILTER (WHERE f.stopped_at IS NOT NULL) AS stopped
+           FROM creator_fee_charges f
+          WHERE f.creator_user_id = u.id
+       ) cf ON true`
     : "";
   return cloudSqlQuery(
     `SELECT COUNT(*) OVER()::int AS total_count,
@@ -869,6 +910,7 @@ async function listCreators(query) {
             to_jsonb(i) ->> 'disqualified_at'     AS disqualified_at,
             COALESCE(to_jsonb(i) ->> 'disqualified_reason', '') AS disqualified_reason,
             ${holdCols}
+            ${feeCols}
             sig.last_sign_in,
             COALESCE(part.n, 0)::int    AS active_partnerships,
             COALESCE(rev.amount, 0)     AS total_revenue,
@@ -900,6 +942,7 @@ async function listCreators(query) {
             AND o.deleted = ${ENTITY_ACTIVE}
        ) rev ON true
        ${holdJoin}
+       ${feeJoin}
        WHERE ${where}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,

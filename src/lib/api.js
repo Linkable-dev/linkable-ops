@@ -459,6 +459,12 @@ export const api = {
     request(`/admin-users/${userId}/payout-hold`, { method: "POST", body: JSON.stringify({ reason }) }),
   releaseCreatorPayouts: (userId) =>
     request(`/admin-users/${userId}/payout-release`, { method: "POST" }),
+  // A creator's fees in their 48h hold (and the stopped ones), paged on the
+  // server; stopping one refunds the brand in full and pays her nothing.
+  listCreatorFees: (userId, { limit = 25, offset = 0 } = {}) =>
+    request(`/admin-users/${userId}/creator-fees?${buildQs({ limit, offset })}`),
+  stopCreatorFee: (feeId, reason) =>
+    request(`/admin-users/creator-fees/${feeId}/stop`, { method: "POST", body: JSON.stringify({ reason }) }),
   impersonateUser: (userId) =>
     request(`/admin-users/${userId}/impersonate`, { method: "POST" }),
   grantTrial: (userId, body) =>
