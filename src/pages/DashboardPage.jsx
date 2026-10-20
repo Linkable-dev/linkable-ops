@@ -92,7 +92,17 @@ export default function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 20 }}>
         <Kpi theme={theme} label="Brands" value={kpis.brands} growth={growth.brands} link="/tables/brands" />
         <Kpi theme={theme} label="Creators" value={kpis.influencers + kpis.externalCreators} sub={`${kpis.influencers} registered · ${kpis.externalCreators} external`} link="/tables/influencers" />
-        <Kpi theme={theme} label="Products" value={kpis.products} link="/tables/products" />
+        {/* Since the campaigns model (main app #376) a products row is a
+            campaign and the catalogue is shop_products; kpis.productsModel
+            says which this database has. */}
+        {kpis.productsModel === "campaigns" ? (
+          <>
+            <Kpi theme={theme} label="Campaigns" value={kpis.products} link="/tables/products" />
+            {kpis.catalogueProducts != null && <Kpi theme={theme} label="Catalogue products" value={kpis.catalogueProducts} link="/tables/shop_products" />}
+          </>
+        ) : (
+          <Kpi theme={theme} label="Products" value={kpis.products} link="/tables/products" />
+        )}
         <Kpi theme={theme} label="Links" value={kpis.links} growth={growth.links} sub={`${friendlyNumber(kpis.activeLinks)} accepted (live)`} link="/tables/links" />
         <Kpi theme={theme} label="Orders" value={kpis.orders} link="/tables/orders" />
         <Kpi theme={theme} label="Users" value={kpis.users} growth={growth.users} link="/tables/users" />
@@ -130,7 +140,7 @@ export default function DashboardPage() {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
         <TrendChart theme={theme} title="Messages" period="last 6 months" data={trends.chats} color={theme.accent} tooltipStyle={tooltipStyle} />
-        <TrendChart theme={theme} title="Products Added" period="all time" data={trends.products} color={theme.accent} tooltipStyle={tooltipStyle} />
+        <TrendChart theme={theme} title={kpis.productsModel === "campaigns" ? "Campaigns Created" : "Products Added"} period="all time" data={trends.products} color={theme.accent} tooltipStyle={tooltipStyle} />
       </div>
 
       {/* Distributions */}
@@ -166,14 +176,14 @@ export default function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
         {distributions.topBrands.length > 0 && (
           <Card style={{ marginBottom: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 14 }}>Top Brands by Products</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 14 }}>Top Brands by {kpis.productsModel === "campaigns" ? "Campaigns" : "Products"}</div>
             <ResponsiveContainer width="100%" height={Math.max(180, distributions.topBrands.length * 32)}>
               <BarChart data={distributions.topBrands.map(d => ({ ...d, name: d.name?.length > 16 ? d.name.slice(0, 14) + "…" : d.name }))} layout="vertical" margin={{ left: 120 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={theme.border} horizontal={false} />
                 <XAxis type="number" tick={{ fontSize: 10, fill: theme.textMuted }} tickLine={false} allowDecimals={false} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: theme.textMid }} tickLine={false} axisLine={false} width={110} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="value" fill={theme.accent} radius={[0, 4, 4, 0]} name="Products" />
+                <Bar dataKey="value" fill={theme.accent} radius={[0, 4, 4, 0]} name={kpis.productsModel === "campaigns" ? "Campaigns" : "Products"} />
               </BarChart>
             </ResponsiveContainer>
           </Card>

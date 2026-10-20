@@ -1,6 +1,9 @@
 import express from "express";
 import { cloudSqlQuery, currentDbTarget, getCloudSqlPool } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
+import { mainAppSchema } from "../lib/mainAppSchema.js";
+import { CARD_PLAN_SQL, subscriptionLateral } from "../lib/mainAppSql.js";
+import { payoutHoldState, holdCreatorPayouts, releaseCreatorPayouts } from "../lib/payoutHolds.js";
 import {
   parseColumnFilters, orderBySql, filterConditions,
   textFilter, minNumberFilter, enumFilter, dateFilter,
@@ -198,6 +201,34 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Hold / release a creator's payouts (main app payments part 2). Through the
+  // main app's RPCs when ops has its service key, else the same rows the RPCs
+  // write (lib/payoutHolds.js). A production tool, like restore; refused with
+  // a sentence where the target has no payout_holds table yet.
+  router.get("/:userId/payout-hold", async (req, res) => {
+    try {
+      res.json(await payoutHoldState(req.params.userId, req.dbTarget || "prod"));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  router.post("/:userId/payout-hold", async (req, res) => {
+    try {
+      res.json(await holdCreatorPayouts(req.params.userId, req.body?.reason, req.admin, req.dbTarget || "prod"));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  router.post("/:userId/payout-release", async (req, res) => {
+    try {
+      res.json(await releaseCreatorPayouts(req.params.userId, req.admin, req.dbTarget || "prod"));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 
@@ -291,6 +322,10 @@ async function wipeBrand(userId, admin, dbTarget) {
       ["sourcing_agent_events", "DELETE FROM sourcing_agent_events WHERE product_id IN (SELECT id FROM products WHERE user_id = $1) OR sourcing_agent_id IN (SELECT id FROM sourcing_agents WHERE product_id IN (SELECT id FROM products WHERE user_id = $1))"],
       ["sourcing_contact_log", "DELETE FROM sourcing_contact_log WHERE product_id IN (SELECT id FROM products WHERE user_id = $1) OR sourcing_run_id IN (SELECT id FROM sourcing_runs WHERE product_id IN (SELECT id FROM products WHERE user_id = $1))"],
       ["sourcing_candidates", "DELETE FROM sourcing_candidates WHERE user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      // Another brand's candidate can still point at one of this brand's links
+      // (application_link_id, NO ACTION). The main app's purge unlinks it the
+      // same way (permanentlyDeleteUserData).
+      ["sourcing_candidates (unlinked)", "UPDATE sourcing_candidates SET application_link_id = NULL WHERE application_link_id IN (SELECT id FROM links WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1))", "sourcing_candidates"],
       ["sourcing_agents", "DELETE FROM sourcing_agents WHERE created_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["sourcing_runs", "DELETE FROM sourcing_runs WHERE created_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["sourcing_plans", "DELETE FROM sourcing_plans WHERE updated_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
@@ -301,6 +336,19 @@ async function wipeBrand(userId, admin, dbTarget) {
       ["sample_requests", "DELETE FROM sample_requests WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["invitations", "DELETE FROM invitations WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["short_links", "DELETE FROM short_links WHERE created_by_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      // Fees charged on approval (main app #372). link_id cascades from links,
+      // but brand_user_id has no foreign key, so a fee whose link is gone
+      // already would stay behind.
+      ["creator_fee_charges", "DELETE FROM creator_fee_charges WHERE brand_user_id = $1 OR link_id IN (SELECT id FROM links WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1))"],
+      // Private campaign invite links (#379). Both keys cascade; deleted here so
+      // the count shows.
+      ["invite_links", "DELETE FROM invite_links WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      // Autopilot rows key on the campaign or the brand without a foreign key,
+      // so nothing cascades to them.
+      ["autopilot_picks", "DELETE FROM autopilot_picks WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["autopilot_chats", "DELETE FROM autopilot_chats WHERE brand_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["autopilot_draft_edits", "DELETE FROM autopilot_draft_edits WHERE user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
+      ["autopilot_first_drafts", "DELETE FROM autopilot_first_drafts WHERE user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["links", "DELETE FROM links WHERE brand_user_id = $1 OR product_id IN (SELECT id FROM products WHERE user_id = $1)"],
       ["chats", "DELETE FROM chats WHERE brand_user_id = $1"],
       ["external_creator_invites", "DELETE FROM external_creator_invites WHERE brand_user_id = $1"],
@@ -313,19 +361,40 @@ async function wipeBrand(userId, admin, dbTarget) {
       ["brand_referrals", "DELETE FROM brand_referrals WHERE referrer_user_id = $1 OR referee_user_id = $1"],
       ["referrals", "DELETE FROM referrals WHERE referrer_user_id = $1 OR referee_user_id = $1"],
       ["products", "DELETE FROM products WHERE user_id = $1"],
-      // The Shopify catalogue. It must go after products (campaigns reference
-      // it, with no cascade) and before brands/users (it references both, also
-      // with no cascade) — without these two steps the whole wipe rolls back on
-      // a foreign key violation at the brands step.
+      // The catalogue (main app #376). On dev today shop_products cascades from
+      // users and brands, shop_product_variants from shop_products, and a
+      // campaign's shop_product_id is SET NULL, so these two only make the
+      // counts show — and keep the wipe working on a database created before
+      // those cascades. After products, before brands/users.
       ["shop_product_variants", "DELETE FROM shop_product_variants WHERE shop_product_id IN (SELECT id FROM shop_products WHERE user_id = $1)"],
       ["shop_products", "DELETE FROM shop_products WHERE user_id = $1"],
+      // Card billing (#371): both cascade from users; explicit for the counts.
+      ["billing_invoices", "DELETE FROM billing_invoices WHERE user_id = $1"],
+      ["app_subscriptions", "DELETE FROM app_subscriptions WHERE user_id = $1"],
+      // Saved creators and named lists: brand_user_id has no foreign key.
+      // brand_creator_list_members cascades from its list.
+      ["brand_creator_lists", "DELETE FROM brand_creator_lists WHERE brand_user_id = $1"],
+      ["brand_saved_creators", "DELETE FROM brand_saved_creators WHERE brand_user_id = $1"],
       ["brands", "DELETE FROM brands WHERE user_id = $1"],
       ["users", "DELETE FROM users WHERE id = $1"],
     ];
 
+    // A step whose table this database doesn't have (a main-app feature it has
+    // not been given yet) is skipped rather than failing the whole wipe.
+    // Everything that references users/brands/products/links and is not named
+    // here cascades (checked against the dev schema, 13 Oct 2026): payout_holds,
+    // connect_account_issues, collaborations, creator_reviews, chat_* and the
+    // rest of the ON DELETE CASCADE children.
+    const tables = [...new Set(steps.map(([label, , table]) => table || label))];
+    const { rows: present } = await client.query(
+      `SELECT t FROM unnest($1::text[]) AS t WHERE to_regclass('public.' || t) IS NOT NULL`, [tables],
+    );
+    const exists = new Set(present.map((r) => r.t));
+
     await client.query("BEGIN");
     const deleted = {};
-    for (const [label, sql] of steps) {
+    for (const [label, sql, table] of steps) {
+      if (!exists.has(table || label)) continue;
       const r = await client.query(sql, [userId]);
       deleted[label] = r.rowCount;
     }
@@ -477,10 +546,15 @@ async function setBrandHidden(userId, body) {
 }
 
 // Plan rank by price tier (from users.account_id). Higher = "more paying".
+// Card plans (stripe_<plan>_<period>, GBP) rank with the Shopify plan of the
+// same price: Scale £499 with $499, Growth £199 with $199, Starter £99 with $99.
 const BRAND_PRICE_RANK_SQL = `CASE
   WHEN u.account_id LIKE '%shopify_499%' OR u.account_id LIKE '%shopify_4970%' OR u.account_id LIKE '%shopify_299%' THEN 100
+  WHEN u.account_id LIKE 'stripe\\_scale\\_%' THEN 100
   WHEN u.account_id LIKE '%shopify_199%' THEN 90
+  WHEN u.account_id LIKE 'stripe\\_growth\\_%' THEN 90
   WHEN u.account_id LIKE '%shopify_99%'  THEN 80
+  WHEN u.account_id LIKE 'stripe\\_starter\\_%' THEN 80
   WHEN u.account_id = 'shopify_free_plan' THEN 50
   WHEN COALESCE(u.account_id, '') = '' AND u.created >= NOW() - INTERVAL '14 days' THEN 40
   WHEN COALESCE(u.account_id, '') = '' THEN 10
@@ -518,7 +592,12 @@ const brandSorts = (hasAppSubs) => ({
   subscription:    brandPlanRankSql(hasAppSubs),
 });
 
-const brandFilters = (hasAppSubs) => ({
+// A card plan (main app #371) is paying once Stripe has billed it and in trial
+// while Stripe says trialing; its trial is Stripe's, not brands.trial_*.
+const cardPayingSql = `(${CARD_PLAN_SQL} AND asub.provider = 'stripe' AND asub.stripe_status <> 'trialing')`;
+const cardTrialSql = `(${CARD_PLAN_SQL} AND asub.provider = 'stripe' AND asub.stripe_status = 'trialing')`;
+
+const brandFilters = (hasAppSubs, card = false) => ({
   store_name:      textFilter("b.store_name", "b.store_website"),
   email:           textFilter("u.email"),
   owner_name:      textFilter(`(COALESCE(b.first_name, '') || ' ' || COALESCE(b.last_name, ''))`),
@@ -529,8 +608,8 @@ const brandFilters = (hasAppSubs) => ({
   // active Linkable grant; "offered" is a grant not yet started. These overlap
   // by design (they are different lenses on the same rows).
   subscription: enumFilter({
-    paying:  `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(${brandTrialEndSql(hasAppSubs)} > NOW(), false) = false)`,
-    trial:   `(u.account_id ~ '^shopify_[0-9]+' AND COALESCE(${brandTrialEndSql(hasAppSubs)} > NOW(), false) = true)`,
+    paying:  `((u.account_id ~ '^shopify_[0-9]+' AND COALESCE(${brandTrialEndSql(hasAppSubs)} > NOW(), false) = false)${card ? ` OR ${cardPayingSql}` : ""})`,
+    trial:   `((u.account_id ~ '^shopify_[0-9]+' AND COALESCE(${brandTrialEndSql(hasAppSubs)} > NOW(), false) = true)${card ? ` OR ${cardTrialSql}` : ""})`,
     granted: BRAND_TRIAL_ACTIVE_SQL,
     offered: BRAND_TRIAL_GRANTED_SQL,
     no_plan: `(COALESCE(u.account_id, '') = '' OR u.account_id IN ('shopify_free_plan', 'free_plan'))`,
@@ -556,7 +635,10 @@ async function listBrands(query) {
   // when the table exists on this target. Prefer an ACTIVE row, else the most
   // recently synced (so a lone CANCELLED/EXPIRED row still surfaces as such).
   const hasAppSubs = await appSubscriptionsAvailable();
-  for (const cond of filterConditions(parseColumnFilters(query), brandFilters(hasAppSubs), params)) {
+  // Card plans (provider 'stripe') where the target has card billing.
+  const schema = { ...(await mainAppSchema()), appSubscriptions: hasAppSubs };
+  const card = hasAppSubs && schema.cardBilling;
+  for (const cond of filterConditions(parseColumnFilters(query), brandFilters(hasAppSubs, card), params)) {
     where += ` AND ${cond}`;
   }
   const orderBy = orderBySql(query, brandSorts(hasAppSubs), "u.created DESC");
@@ -568,29 +650,24 @@ async function listBrands(query) {
             asub.price_currency      AS sub_price_currency,
             asub.trial_ends_at       AS sub_trial_ends_at,
             asub.current_period_end  AS sub_current_period_end,
-            asub.cancelled_at        AS sub_cancelled_at,`
+            asub.cancelled_at        AS sub_cancelled_at,
+            asub.provider            AS sub_provider,
+            asub.stripe_status       AS sub_stripe_status,
+            asub.cancel_at_period_end AS sub_cancel_at_period_end,`
     : `NULL AS sub_status, NULL AS sub_name, NULL AS sub_test,
+            NULL AS sub_provider, NULL AS sub_stripe_status, NULL AS sub_cancel_at_period_end,
             NULL::numeric AS sub_price_amount, NULL AS sub_price_currency,
             NULL::timestamptz AS sub_trial_ends_at, NULL::timestamptz AS sub_current_period_end,
             NULL::timestamptz AS sub_cancelled_at,`;
-  const subJoin = hasAppSubs
-    ? `LEFT JOIN LATERAL (
-         SELECT status, name, test, price_amount, price_currency,
-                trial_ends_at, current_period_end, cancelled_at
-           FROM app_subscriptions
-          WHERE user_id = u.id
-          -- Prefer a genuinely-live subscription: ACTIVE *and* never cancelled.
-          -- A row can carry status='ACTIVE' while cancelled_at is set (an
-          -- out-of-order Shopify webhook that arrived after the cancellation) —
-          -- treating that as live would show a cancelled brand as still
-          -- trialing, so it must not win. Otherwise fall back to the most
-          -- recently created subscription, which reflects the current state.
-          ORDER BY (status = 'ACTIVE' AND cancelled_at IS NULL) DESC,
-                   shopify_created_at DESC NULLS LAST,
-                   synced_at DESC NULLS LAST
-          LIMIT 1
-       ) asub ON true`
-    : "";
+  // Prefer a genuinely-live subscription: ACTIVE *and* never cancelled. A row
+  // can carry status='ACTIVE' while cancelled_at is set (an out-of-order
+  // Shopify webhook that arrived after the cancellation) — treating that as
+  // live would show a cancelled brand as still trialing, so it must not win.
+  // Otherwise fall back to the most recently created subscription, which
+  // reflects the current state. With card billing, the row of the provider
+  // account_id names (stripe_… = card) wins first. See subscriptionLateral.
+  const subJoin = subscriptionLateral(schema,
+    "status, name, test, price_amount, price_currency, trial_ends_at, current_period_end, cancelled_at");
 
   return cloudSqlQuery(
     `SELECT COUNT(*) OVER()::int AS total_count,
@@ -749,6 +826,24 @@ async function listCreators(query) {
     where += ` AND ${cond}`;
   }
   const orderBy = orderBySql(query, CREATOR_SORTS, "u.created DESC");
+  // Her open payout hold (main app payments part 2), where the target has
+  // payout_holds; the Users page shows Hold/Release only when it does.
+  const { payoutHolds } = await mainAppSchema();
+  const holdCols = payoutHolds
+    ? `true AS payout_holds_available,
+            (ph.id IS NOT NULL) AS payouts_held,
+            COALESCE(ph.reason, '') AS payout_hold_reason,
+            ph.held_by AS payout_held_by,
+            ph.held_at AS payout_held_at,`
+    : `false AS payout_holds_available, false AS payouts_held, '' AS payout_hold_reason,
+            NULL AS payout_held_by, NULL::timestamptz AS payout_held_at,`;
+  const holdJoin = payoutHolds
+    ? `LEFT JOIN LATERAL (
+         SELECT h.id, h.reason, h.held_by, h.held_at FROM payout_holds h
+          WHERE h.creator_user_id = u.id AND h.released_at IS NULL
+          LIMIT 1
+       ) ph ON true`
+    : "";
   return cloudSqlQuery(
     `SELECT COUNT(*) OVER()::int AS total_count,
             u.id          AS user_id,
@@ -773,6 +868,7 @@ async function listCreators(query) {
             -- on prod to show a dev-only field is a bad trade.
             to_jsonb(i) ->> 'disqualified_at'     AS disqualified_at,
             COALESCE(to_jsonb(i) ->> 'disqualified_reason', '') AS disqualified_reason,
+            ${holdCols}
             sig.last_sign_in,
             COALESCE(part.n, 0)::int    AS active_partnerships,
             COALESCE(rev.amount, 0)     AS total_revenue,
@@ -803,6 +899,7 @@ async function listCreators(query) {
           WHERE l.influencer_user_id = u.id
             AND o.deleted = ${ENTITY_ACTIVE}
        ) rev ON true
+       ${holdJoin}
        WHERE ${where}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
