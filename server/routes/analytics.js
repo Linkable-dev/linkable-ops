@@ -316,22 +316,25 @@ export function analyticsRoutes() {
       const subActiveFilter = hasAppSubs
         ? `AND (asub.status IS NULL OR asub.status = 'ACTIVE') AND ${NOT_TEST_SUB()}`
         : "";
-      // Card plans (main app #371): Stripe bills them in GBP. Same columns, in
+      // Card plans (main app #371): Stripe bills each in the brand's own
+      // currency (GBP, USD or EUR since main app #485, price_currency on the
+      // row), so card figures are kept per currency. Same columns, in
       // the same order, as the Shopify half of each paid CTE below. A card brand is
       // live while Stripe says active, in the pipeline while trialing; past_due
       // and unpaid (FROZEN in the status column) collect nothing, as a frozen
       // Shopify charge doesn't. Stripe test-mode subscriptions (every one on
       // dev) are test rows and excluded like Shopify test charges.
       const CARD_ROW = `${CARD_PLAN_SQL} AND asub.provider = 'stripe' AND ${NOT_TEST_SUB()}`;
-      const cardPaid = card
-        ? `UNION ALL
-            SELECT 'stripe' AS provider, ${cardPlanTierSql} AS tier, ${cardPlanAmountSql()} AS amt,
+      const cardSelect = card
+        ? `SELECT 'stripe' AS provider, ${cardPlanTierSql} AS tier, ${cardPlanAmountSql()} AS amt,
+                   UPPER(COALESCE(NULLIF(asub.price_currency, ''), 'GBP')) AS currency,
                    (u.account_id LIKE '%yearly%') AS yearly,
                    (asub.stripe_status = 'trialing') AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
             ${subLateral}
             WHERE ${BRAND_ACTIVE} AND ${CARD_ROW} AND asub.stripe_status IN ('active', 'trialing')`
         : "";
+      const cardPaid = card ? `UNION ALL ${cardSelect}` : "";
       // In the subscription-health split a card brand counts where a Shopify
       // one would: paying once Stripe has billed it (a declined card stays in
       // "paying", as a frozen Shopify charge does), in trial while trialing.
@@ -343,13 +346,13 @@ export function analyticsRoutes() {
       const CAMPAIGN = (a) => (schema.isCampaign ? `AND ${a ? `${a}.` : ""}is_campaign = true` : "");
 
       const [
-        mrr, byTier, funnel, marketplace, subs, growth, gmvSeries,
+        mrr, byTier, funnel, marketplace, subs, growth, gmvSeries, cardByCurrency,
       ] = await Promise.all([
         // MRR + paying + trial pipeline. coalesce so a NULL trial date reads as
         // "not on trial" (a paying brand), not as unknown.
         cloudSqlQuery(`
           WITH paid AS (
-            SELECT 'shopify' AS provider, ''::text AS tier, ${amtExpr} AS amt,
+            SELECT 'shopify' AS provider, ''::text AS tier, ${amtExpr} AS amt, 'USD'::text AS currency,
                    (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
                    COALESCE(b.trial_expiration_date > NOW(), false) AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
@@ -387,6 +390,7 @@ export function analyticsRoutes() {
                 ELSE 'Starter'
               END AS tier,
               ${amtExpr} AS amt,
+              'USD'::text AS currency,
               (u.account_id LIKE '%yearly%' OR u.account_id LIKE '%annual%') AS yearly,
               false AS in_trial
             FROM users u JOIN brands b ON b.user_id = u.id
@@ -398,10 +402,10 @@ export function analyticsRoutes() {
               ${subActiveFilter}
             ${cardPaid}
           )
-          -- Card tiers are named like the Shopify ones but priced in GBP, so
-          -- they stay separate rows with their own currency.
-          SELECT provider, tier, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
-          FROM paid WHERE NOT in_trial GROUP BY provider, tier ORDER BY provider, mrr DESC`),
+          -- Card tiers are named like the Shopify ones but priced in the
+          -- brand's currency, so they stay separate rows, one per currency.
+          SELECT provider, tier, currency, ROUND(SUM(CASE WHEN yearly THEN amt/12.0 ELSE amt END), 2) AS mrr, COUNT(*) AS brands
+          FROM paid WHERE NOT in_trial GROUP BY provider, tier, currency ORDER BY provider, mrr DESC`),
 
         // Brand activation funnel: signed up -> launched an active campaign ->
         // got an accepted creator -> generated a sale.
@@ -497,6 +501,16 @@ export function analyticsRoutes() {
           SELECT date_trunc('month', created)::date AS date, COALESCE(SUM(shopify_amount), 0) AS gmv, COUNT(*) AS orders
           FROM orders WHERE deleted = '-infinity'::timestamptz AND created >= NOW() - INTERVAL '6 months'
           GROUP BY 1 ORDER BY 1`),
+        // Card plans per currency (a brand bills in its own: GBP, USD or EUR).
+        card
+          ? cloudSqlQuery(`
+              SELECT currency,
+                ROUND(SUM(CASE WHEN NOT in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS mrr,
+                COUNT(*) FILTER (WHERE NOT in_trial) AS paying_brands,
+                ROUND(SUM(CASE WHEN in_trial THEN (CASE WHEN yearly THEN amt/12.0 ELSE amt END) ELSE 0 END), 2) AS pipeline_mrr,
+                COUNT(*) FILTER (WHERE in_trial) AS pipeline_brands
+              FROM (${cardSelect}) paid GROUP BY currency ORDER BY COUNT(*) DESC, currency`)
+          : Promise.resolve({ rows: [] }),
       ]);
 
       const m = mrr.rows[0];
@@ -515,22 +529,28 @@ export function analyticsRoutes() {
           arpa: payingBrands ? parseFloat((liveMrr / payingBrands).toFixed(2)) : 0,
           pipelineMrr: parseFloat(m.pipeline_mrr || 0),
           pipelineBrands: parseInt(m.pipeline_brands || 0),
-          // Card plans, billed by Stripe in GBP. Kept apart from the USD figures
-          // above rather than converted: there is no exchange rate to trust here.
-          // null where the target has no card billing yet.
-          card: card ? {
-            currency: "GBP",
-            mrr: parseFloat(m.card_live_mrr || 0),
-            arr: Math.round(parseFloat(m.card_live_mrr || 0) * 12 * 100) / 100,
-            payingBrands: parseInt(m.card_paying_brands || 0),
-            pipelineMrr: parseFloat(m.card_pipeline_mrr || 0),
-            pipelineBrands: parseInt(m.card_pipeline_brands || 0),
-            pastDueBrands: parseInt(s.card_past_due || 0),
-          } : null,
+          // Card plans, billed by Stripe in each brand's own currency. Kept apart
+          // from the USD figures above, and from each other, rather than
+          // converted: there is no exchange rate to trust here. The headline
+          // fields are the currency with the most card brands (GBP when there
+          // are none); byCurrency lists every one. null where the target has
+          // no card billing yet.
+          card: card ? (() => {
+            const rows = cardByCurrency.rows.map((r) => ({
+              currency: r.currency,
+              mrr: parseFloat(r.mrr || 0),
+              arr: Math.round(parseFloat(r.mrr || 0) * 12 * 100) / 100,
+              payingBrands: parseInt(r.paying_brands || 0),
+              pipelineMrr: parseFloat(r.pipeline_mrr || 0),
+              pipelineBrands: parseInt(r.pipeline_brands || 0),
+            }));
+            const top = rows[0] || { currency: "GBP", mrr: 0, arr: 0, payingBrands: 0, pipelineMrr: 0, pipelineBrands: 0 };
+            return { ...top, byCurrency: rows, pastDueBrands: parseInt(s.card_past_due || 0) };
+          })() : null,
           byTier: byTier.rows.map((r) => ({
             tier: r.provider === "stripe" ? `${r.tier} · card` : r.tier,
             provider: r.provider,
-            currency: r.provider === "stripe" ? "GBP" : "USD",
+            currency: r.currency || (r.provider === "stripe" ? "GBP" : "USD"),
             mrr: parseFloat(r.mrr || 0),
             brands: parseInt(r.brands),
           })),

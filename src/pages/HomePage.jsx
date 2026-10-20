@@ -304,7 +304,7 @@ export default function HomePage() {
 
       {/* ── Recurring revenue ─────────────────────────────────────────────── */}
       <Section title="Recurring revenue" hint={revenue.card
-        ? "from active paid subscriptions: Shopify plans in USD, card plans in GBP, kept apart (trials and test charges excluded)"
+        ? "from active paid subscriptions: Shopify plans in USD, card plans in each brand's currency (GBP, USD or EUR), kept apart (trials and test charges excluded)"
         : "from active paid subscriptions, billed in USD (trials and Shopify test charges excluded)"}>
         <div className="lk-grid">
           <Stat label={revenue.card ? "MRR · Shopify" : "MRR"} value={money(revenue.mrr, { cents: true })} accent={GREEN} sub={`${num(revenue.payingBrands)} paying brand${revenue.payingBrands === 1 ? "" : "s"}${revenue.card ? " on Shopify" : ""}`} spark={series?.mrrApprox ? spark("mrr") : null} delta={series?.mrrApprox && delta("mrr") ? { ...delta("mrr"), text: `${delta("mrr").text} (from subscription records)` } : null} />
@@ -316,15 +316,17 @@ export default function HomePage() {
             accent={AMBER}
             sub={`${num(revenue.pipelineBrands)} brand${revenue.pipelineBrands === 1 ? "" : "s"} in trial → future MRR`}
           />
-          {/* Card plans (brands without Shopify), billed by Stripe in GBP. Not
-              added to the USD tiles: there is no exchange rate to trust here. */}
+          {/* Card plans, billed by Stripe in each brand's own currency. Not
+              added to the USD tiles, nor to each other: there is no exchange
+              rate to trust here. The tiles show the currency with the most card
+              brands; any other currency is listed under the MRR tile. */}
           {revenue.card && (
             <>
               <Stat
                 label="MRR · card plans"
                 value={money(revenue.card.mrr, { cents: true, currency: revenue.card.currency })}
                 accent={GREEN}
-                sub={`${num(revenue.card.payingBrands)} paying by card${revenue.card.pastDueBrands ? ` · ${num(revenue.card.pastDueBrands)} past due` : ""}`}
+                sub={`${num(revenue.card.payingBrands)} paying by card${revenue.card.pastDueBrands ? ` · ${num(revenue.card.pastDueBrands)} past due` : ""}${(revenue.card.byCurrency || []).slice(1).map((c) => ` · also ${money(c.mrr, { cents: true, currency: c.currency })} from ${num(c.payingBrands)}`).join("")}`}
               />
               <Stat label="ARR · card plans" value={money(revenue.card.arr, { cents: true, currency: revenue.card.currency })} sub="card MRR × 12" />
               <Stat

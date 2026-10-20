@@ -30,8 +30,9 @@ export const NOT_TEST_SUB = (alias = "asub") => `COALESCE(${alias}.test, false) 
 //
 // A brand holds a plan when users.account_id names one. Shopify plans read
 // "shopify_<price>_<monthly|yearly>" and are billed in USD by Shopify. Since
-// main app PR #371 a brand without a store can pay by card instead: Stripe
-// bills it in GBP, account_id reads "stripe_<plan>_<monthly|yearly>" while the
+// main app PR #371 a brand can pay by card instead (since #424 a Shopify-store
+// brand too): Stripe bills it in the brand's own currency (GBP, USD or EUR,
+// app_subscriptions.price_currency), account_id reads "stripe_<plan>_<monthly|yearly>" while the
 // plan runs, and its app_subscriptions row has provider 'stripe' with Stripe's
 // own status in stripe_status (trialing / active / past_due / unpaid / ...).
 // A card plan's status column is mapped onto the Shopify vocabulary, so a
@@ -46,9 +47,10 @@ export const CARD_PLAN_SQL = `u.account_id LIKE 'stripe\\_%'`;
 export const paidPlanSql = (schema) =>
   schema.cardBilling ? `(${SHOPIFY_PLAN_SQL} OR ${CARD_PLAN_SQL})` : SHOPIFY_PLAN_SQL;
 
-// What each card plan costs, in GBP (service-grpc/services/card_billing.go
-// cardPlanPence). Only a fallback for a row whose price_amount is missing: the
-// subscription row carries the price Stripe actually charges.
+// What each card plan costs (service-grpc/services/card_billing.go
+// cardPlanPence; the same numbers in GBP, USD and EUR). Only a fallback for a
+// row whose price_amount is missing: the subscription row carries the price
+// Stripe actually charges, in price_currency.
 export const CARD_PLAN_GBP = {
   starter: { monthly: 99, yearly: 990 },
   growth: { monthly: 199, yearly: 1990 },
