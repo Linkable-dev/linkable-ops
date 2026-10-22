@@ -1,7 +1,7 @@
 import { useTheme } from "../../contexts/ThemeContext";
 import { Select } from "./Select";
 
-export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange }) {
+export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, sizes = [25, 50, 100] }) {
   const { theme } = useTheme();
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const from = Math.min((page - 1) * pageSize + 1, total);
@@ -24,7 +24,7 @@ export function Pagination({ page, pageSize, total, onPageChange, onPageSizeChan
             value={pageSize}
             onChange={(v) => onPageSizeChange(Number(v))}
             ariaLabel="Rows per page"
-            options={[25, 50, 100].map((n) => ({ value: n, label: `${n} / page` }))}
+            options={sizes.map((n) => ({ value: n, label: `${n} / page` }))}
           />
         </div>
       </div>

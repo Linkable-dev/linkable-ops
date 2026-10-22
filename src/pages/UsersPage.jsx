@@ -116,7 +116,13 @@ const CARD_SORTS = [
   ["instagram_username:asc", "IG handle, A–Z"],
   ["email:asc", "Email, A–Z"],
 ];
-const CARD_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 };
+// Card pages are multiples of 24 and the grid only ever uses a column count
+// that divides 24, so a full page always fills its last row (50 cards in 7
+// columns left one card alone on a row).
+const CARD_PAGE_SIZES = [24, 48, 96];
+const CARD_COLUMN_COUNTS = [12, 8, 6, 4, 3, 2, 1];
+const CARD_MIN_WIDTH = 220;
+const CARD_GAP = 16;
 
 function avatarFor(row, kind) {
   // Backend pre-signs GCS URLs into signed_logo_pic / signed_profile_pic so
@@ -167,6 +173,8 @@ export default function UsersPage() {
     try { return localStorage.getItem(CREATOR_VIEW_KEY) === "cards" ? "cards" : "table"; } catch { return "table"; }
   });
   const showCards = tab === "creators" && creatorView === "cards";
+  const [cardPageSize, setCardPageSize] = useState(48);
+  const limit = showCards ? cardPageSize : pageSize;
 
   function pickCreatorView(v) {
     setCreatorView(v);
@@ -207,7 +215,7 @@ export default function UsersPage() {
     });
   };
 
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * limit;
   // Only the newest request may fill the table. Switching from Brands to
   // Creators while the (slower) brands query is still out used to let it land
   // last and overwrite the creators: brand accounts listed as creators, and
@@ -221,13 +229,13 @@ export default function UsersPage() {
     try {
       let data;
       if (tab === "deleted") {
-        data = await api.listDeletedBrands({ q, limit: pageSize, offset });
+        data = await api.listDeletedBrands({ q, limit, offset });
       } else {
         const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
         const effective = tab === "brands" && !showHidden
           ? { ...filters, visibility: "visible" }
           : filters;
-        data = await fn({ q, limit: pageSize, offset, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
+        data = await fn({ q, limit, offset, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
       }
       if (isLatest()) setRows(data);
     } catch (err) {
@@ -237,7 +245,7 @@ export default function UsersPage() {
     } finally {
       if (isLatest()) setLoading(false);
     }
-  }, [tab, q, sort, filters, showHidden, pageSize, offset]);
+  }, [tab, q, sort, filters, showHidden, limit, offset]);
 
   // Debounce free-text search; sort/filter changes arrive pre-debounced
   // (ColumnFilter commits after a pause) so they refetch immediately.
@@ -248,7 +256,7 @@ export default function UsersPage() {
 
   // Anything that changes which rows match — tab, search, sort, filters —
   // means page 2 of the old result set is not a meaningful place to be.
-  useEffect(() => { setPage(1); }, [tab, q, sort, filters, showHidden]);
+  useEffect(() => { setPage(1); }, [tab, q, sort, filters, showHidden, showCards]);
 
   function handleStartupChanged(userId, enabled) {
     setRows((rs) => rs.map((r) => (r.user_id === userId ? { ...r, startup_programme: enabled } : r)));
@@ -485,15 +493,15 @@ export default function UsersPage() {
 
       {showCards ? (
         loading ? (
-          <div style={CARD_GRID}>
-            {Array.from({ length: 8 }, (_, i) => <CreatorCardSkeleton key={i} />)}
-          </div>
+          <CardGrid>
+            {Array.from({ length: 12 }, (_, i) => <CreatorCardSkeleton key={i} />)}
+          </CardGrid>
         ) : statusMessage ? (
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12 }}>
             {statusMessage}
           </div>
         ) : (
-          <div style={CARD_GRID}>
+          <CardGrid>
             {rows.map((row) => (
               <CreatorCard
                 key={row.user_id}
@@ -505,7 +513,7 @@ export default function UsersPage() {
                 onDisqualify={() => handleDisqualify(row)}
               />
             ))}
-          </div>
+          </CardGrid>
         )
       ) : (
       <div style={{
@@ -642,10 +650,11 @@ export default function UsersPage() {
         rows[0]?.total_count != null ? (
           <Pagination
             page={page}
-            pageSize={pageSize}
+            pageSize={limit}
             total={Number(rows[0].total_count)}
             onPageChange={setPage}
-            onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+            onPageSizeChange={(n) => { (showCards ? setCardPageSize : setPageSize)(n); setPage(1); }}
+            sizes={showCards ? CARD_PAGE_SIZES : undefined}
           />
         ) : (
           <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted, textAlign: "right" }}>
@@ -836,6 +845,30 @@ function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBu
       {orderedColumns.map((col) => (
         <Fragment key={col.key}>{renderUserCell(col.key, row, ctx)}</Fragment>
       ))}
+    </div>
+  );
+}
+
+// As many columns as fit at CARD_MIN_WIDTH, stepped down to one that divides
+// the card page sizes (see CARD_COLUMN_COUNTS).
+function CardGrid({ children }) {
+  const ref = useRef(null);
+  const [cols, setCols] = useState(4);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const fit = () => {
+      const fits = Math.floor((el.clientWidth + CARD_GAP) / (CARD_MIN_WIDTH + CARD_GAP));
+      setCols(CARD_COLUMN_COUNTS.find((n) => n <= fits) || 1);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: CARD_GAP }}>
+      {children}
     </div>
   );
 }
