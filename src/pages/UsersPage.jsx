@@ -18,7 +18,7 @@ import { isCardPlan, cardPlanName, cardStatusLabel } from "../lib/cardPlans";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import {
   useColumnWidths, gridTemplate, ResizeHandle, SortLabel, nextSort, ColumnFilter,
-  useColumnOrder, DragHandle,
+  useColumnOrder, DragHandle, describeFilter,
 } from "../components/table/tableTools";
 
 const TABS = [["brands", "Brands"], ["creators", "Creators"], ["deleted", "Deleted"]];
@@ -474,12 +474,42 @@ export default function UsersPage() {
             style={{ width: 200 }}
           />
         )}
-        {showCards && hasFilters && (
-          <Btn size="sm" variant="outline" onClick={() => setFilters({})} title="Filters set in the table view still apply here">
-            Clear filters ({Object.keys(filters).length})
-          </Btn>
-        )}
       </div>
+
+      {/* Cards have no header, so the table's column filters sit here as
+          chips — the same filters, shared with the table view. */}
+      {showCards && (
+        <div style={{ marginTop: -6, marginBottom: 16, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {CREATOR_COLUMNS.filter((c) => c.filter).map((col) => {
+            const value = filters[col.key] || "";
+            return (
+              <div key={col.key} style={{
+                display: "inline-flex", alignItems: "center", gap: 4, height: 30, padding: "0 6px 0 12px",
+                borderRadius: 999, fontSize: 12, whiteSpace: "nowrap",
+                border: `1px solid ${value ? theme.text : theme.border}`,
+                background: value ? theme.accentLight : theme.surface,
+                color: value ? theme.text : theme.textMid, fontWeight: value ? 600 : 500,
+              }}>
+                {col.label}{value ? `: ${describeFilter(col.filter.type, value, col.filter.options)}` : ""}
+                <ColumnFilter
+                  theme={theme}
+                  label={col.label}
+                  type={col.filter.type}
+                  options={col.filter.options}
+                  placeholder={col.filter.placeholder}
+                  value={value}
+                  onCommit={(v) => handleFilter(col.key, v)}
+                />
+              </div>
+            );
+          })}
+          {hasFilters && (
+            <Btn size="sm" variant="outline" onClick={() => setFilters({})}>
+              Clear filters
+            </Btn>
+          )}
+        </div>
+      )}
 
       {actionError && (
         <div style={{
