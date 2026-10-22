@@ -12,7 +12,9 @@
 // the public half from SERVICE_PUBLIC_KEYS ("ops=<base64 PEM>") and accepts
 // such a token only for the payments-admin RPCs (HoldCreatorPayouts,
 // ReleaseCreatorPayouts, ListPayoutHolds, ListPayoutReports,
-// ResolvePayoutReport), and only if exp is at most 15 minutes after iat.
+// ResolvePayoutReport) and the pitch review queue (ListPitchReviews,
+// ApprovePitchReview, RejectPitchReview), and only if exp is at most 15
+// minutes after iat.
 //
 // NEVER put the main app's own private key (client/src/lib/server/private.key)
 // here: it signs user tokens and would give ops full access to every RPC.
@@ -112,6 +114,69 @@ export function decodeStrings(buf) {
       [, pos] = readVarint(buf, pos);
     } else if (wire === 1) {
       pos += 8;
+    } else if (wire === 5) {
+      pos += 4;
+    } else {
+      throw new Error(`unsupported protobuf wire type ${wire}`);
+    }
+  }
+  return out;
+}
+
+// Encodes { fieldNumber: value } where a value is a string (wire type 2) or a
+// non-negative integer (varint); proto3 skips "" and 0.
+export function encodeFields(fields) {
+  const parts = [];
+  for (const [num, value] of Object.entries(fields)) {
+    if (value == null || value === "" || value === 0) continue;
+    if (typeof value === "number") {
+      if (!Number.isInteger(value) || value < 0) throw new Error(`field ${num}: only non-negative integers`);
+      parts.push(varint(Number(num) << 3), varint(value));
+      continue;
+    }
+    const bytes = Buffer.from(String(value), "utf8");
+    parts.push(varint((Number(num) << 3) | 2), varint(bytes.length), bytes);
+  }
+  return Buffer.concat(parts);
+}
+
+// Decodes a message by a schema { fieldNumber: [name, type] }, type one of
+// "string", "int" (varint, int32/int64 as a Number), "bool", "double", an
+// array ["string"] for a repeated string, or { repeated?: true, schema } for
+// a nested message. Fields not in the schema are skipped; missing ones get
+// their proto3 default.
+export function decodeMessage(buf, schema) {
+  const out = {};
+  for (const [, [name, type]] of Object.entries(schema)) {
+    if (Array.isArray(type)) out[name] = [];
+    else if (type && typeof type === "object") out[name] = type.repeated ? [] : null;
+    else out[name] = type === "string" ? "" : type === "bool" ? false : 0;
+  }
+  let pos = 0;
+  while (pos < buf.length) {
+    let key;
+    [key, pos] = readVarint(buf, pos);
+    const field = Math.floor(key / 8), wire = key & 7;
+    const [name, type] = schema[field] || [];
+    if (wire === 0) {
+      let v;
+      [v, pos] = readVarint(buf, pos);
+      if (type === "bool") out[name] = v !== 0;
+      else if (type === "int") out[name] = v;
+    } else if (wire === 1) {
+      if (type === "double") out[name] = buf.readDoubleLE(pos);
+      pos += 8;
+    } else if (wire === 2) {
+      let len;
+      [len, pos] = readVarint(buf, pos);
+      const bytes = buf.subarray(pos, pos + len);
+      pos += len;
+      if (type === "string") out[name] = bytes.toString("utf8");
+      else if (Array.isArray(type)) out[name].push(bytes.toString("utf8"));
+      else if (type && typeof type === "object") {
+        const msg = decodeMessage(bytes, type.schema);
+        if (type.repeated) out[name].push(msg); else out[name] = msg;
+      }
     } else if (wire === 5) {
       pos += 4;
     } else {

@@ -6,6 +6,7 @@
 // admin opens Pitch with.
 export const PITCH_TABS = [
   { to: "/ops/pitch", label: "Pitches", match: (p) => p === "/ops/pitch" },
+  { to: "/ops/pitch/review", label: "In review", match: (p) => p.startsWith("/ops/pitch/review") },
   { to: "/ops/pitch/creators", label: "Creators", match: (p) => p.startsWith("/ops/pitch/creators") },
   { to: "/ops/pitch/brands", label: "Brands", match: (p) => p.startsWith("/ops/pitch/brands") },
 ];
@@ -13,6 +14,7 @@ export const PITCH_TABS = [
 // pitches.status, as an admin says it.
 const STATUS = {
   ready: { label: "Draft", color: "#737C9A" },
+  in_review: { label: "In review", color: "#B45309" },
   scheduled: { label: "Sending", color: "#2563EB" },
   sent: { label: "Sent", color: "#0D9488" },
   viewed: { label: "Viewed", color: "#7C3AED" },
@@ -24,6 +26,7 @@ const STATUS = {
 };
 
 export const STATUS_OPTIONS = [
+  { value: "in_review", label: "In review" },
   { value: "scheduled", label: "Sending" },
   { value: "sent", label: "Sent" },
   { value: "viewed", label: "Viewed" },

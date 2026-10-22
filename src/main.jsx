@@ -20,6 +20,7 @@ const CampaignsOpsPage = lazy(() => import("./pages/CampaignsOpsPage"));
 const AutopilotPage = lazy(() => import("./pages/AutopilotPage"));
 const PitchesPage = lazy(() => import("./pages/pitch/PitchesPage"));
 const PitchCreatorsPage = lazy(() => import("./pages/pitch/PitchCreatorsPage"));
+const PitchReviewPage = lazy(() => import("./pages/pitch/PitchReviewPage"));
 const PitchBrandsPage = lazy(() => import("./pages/pitch/PitchBrandsPage"));
 const PitchSection = lazy(() => import("./components/pitch/PitchParts.jsx").then(m => ({ default: m.PitchSection })));
 const CostsPage = lazy(() => import("./pages/CostsPage"));
@@ -68,6 +69,7 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/ops/autopilot" element={<AutopilotPage />} />
                     <Route element={<PitchSection />}>
                       <Route path="/ops/pitch" element={<PitchesPage />} />
+                      <Route path="/ops/pitch/review" element={<PitchReviewPage />} />
                       <Route path="/ops/pitch/creators" element={<PitchCreatorsPage />} />
                       <Route path="/ops/pitch/brands" element={<PitchBrandsPage />} />
                     </Route>
