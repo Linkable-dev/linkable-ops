@@ -6,7 +6,7 @@ import { CARD_PLAN_SQL, subscriptionLateral } from "../lib/mainAppSql.js";
 import { payoutHoldState, holdCreatorPayouts, releaseCreatorPayouts } from "../lib/payoutHolds.js";
 import {
   parseColumnFilters, orderBySql, filterConditions,
-  textFilter, minNumberFilter, enumFilter, dateFilter,
+  textFilter, minNumberFilter, numberFilter, enumFilter, dateFilter,
 } from "../lib/tableQuery.js";
 
 // Mirrors the main app's role enum (see linkable-new/backend/models/enums.py
@@ -98,6 +98,14 @@ export function adminUsersRoutes() {
       const signed = await signedUrls(rows.map((r) => r.profile_pic_name || storageKey(r.instagram_profile_image)));
       rows.forEach((r, i) => { r.signed_profile_pic = signed[i]; });
       res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/creators/facets", async (_req, res) => {
+    try {
+      res.json(await creatorFacets());
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -808,6 +816,24 @@ const CREATOR_FOLLOWERS_SQL =
 const CREATOR_NAME_SQL =
   `COALESCE(NULLIF(TRIM(COALESCE(i.first_name, '') || ' ' || COALESCE(i.last_name, '')), ''), i.instagram_name, '')`;
 
+// location_country is free text — "United Kingdom", but also "London, United
+// Kingdom" or "New York City, New York, United States" — so the country is
+// the part after the last comma.
+const CREATOR_COUNTRY_SQL =
+  `NULLIF(TRIM(REGEXP_REPLACE(COALESCE(i.location_country, ''), '^.*,', '')), '')`;
+// Engagement rate is text too ("6.771"); anything that is not a plain number
+// counts as unknown rather than failing the cast.
+const CREATOR_ER_SQL =
+  `CASE WHEN i.instagram_engagement_rate ~ '^\\s*[0-9]+(\\.[0-9]+)?\\s*$' THEN TRIM(i.instagram_engagement_rate)::numeric END`;
+// The same sources the avatar is drawn from (see /creators below).
+const CREATOR_HAS_PHOTO_SQL =
+  `COALESCE(COALESCE(i.profile_pic_name, '') <> '' OR i.instagram_profile_image LIKE 'influencer/profile/image/%' OR i.instagram_profile_image ~ '^https?://', false)`;
+// influencers.niche holds one or more keys, " | "-separated, mostly upper case.
+const CREATOR_NICHES_SQL =
+  `string_to_array(UPPER(REPLACE(COALESCE(i.niche, ''), ' ', '')), '|')`;
+// Read through to_jsonb: the column is not on every database (see listCreators).
+const CREATOR_RULED_OUT_SQL = `(to_jsonb(i) ->> 'disqualified_at') IS NOT NULL`;
+
 const CREATOR_SORTS = {
   creator_name:              `LOWER(${CREATOR_NAME_SQL})`,
   email:                     `LOWER(u.email)`,
@@ -824,7 +850,44 @@ const CREATOR_FILTERS = {
   instagram_followers_count: minNumberFilter(CREATOR_FOLLOWERS_SQL),
   last_sign_in:              dateFilter("sig.last_sign_in"),
   user_created:              dateFilter("u.created"),
+  // "none" = no country / no niche on file; anything else is one value from
+  // /creators/facets.
+  country: (params, raw) => {
+    if (raw === "none") return `${CREATOR_COUNTRY_SQL} IS NULL`;
+    params.push(raw);
+    return `LOWER(${CREATOR_COUNTRY_SQL}) = LOWER($${params.length})`;
+  },
+  niche: (params, raw) => {
+    if (raw === "none") return `COALESCE(TRIM(i.niche), '') = ''`;
+    params.push(String(raw).toUpperCase());
+    return `$${params.length} = ANY(${CREATOR_NICHES_SQL})`;
+  },
+  engagement_rate: numberFilter(CREATOR_ER_SQL),
+  photo:  enumFilter({ yes: CREATOR_HAS_PHOTO_SQL, no: `NOT ${CREATOR_HAS_PHOTO_SQL}` }),
+  status: enumFilter({ ruled_out: CREATOR_RULED_OUT_SQL, active: `NOT ${CREATOR_RULED_OUT_SQL}` }),
 };
+
+// The choices the creator Country and Niche filters offer: every value on
+// file, with how many active creators carry it, most common first.
+async function creatorFacets() {
+  const from = `FROM users u
+       LEFT JOIN influencers i ON i.user_id = u.id AND i.deleted = ${ENTITY_ACTIVE}`;
+  const active = `u.role = ${ROLE_INFLUENCER} AND u.deleted = ${USER_ACTIVE}`;
+  const [countries, niches] = await Promise.all([
+    cloudSqlQuery(
+      `SELECT ${CREATOR_COUNTRY_SQL} AS value, COUNT(*)::int AS count ${from}
+        WHERE ${active}
+        GROUP BY 1 ORDER BY 2 DESC, 1`,
+    ),
+    cloudSqlQuery(
+      `SELECT n AS value, COUNT(DISTINCT u.id)::int AS count ${from}
+        CROSS JOIN LATERAL unnest(${CREATOR_NICHES_SQL}) AS n
+        WHERE ${active} AND n <> ''
+        GROUP BY 1 ORDER BY 2 DESC, 1`,
+    ),
+  ]);
+  return { countries: countries.rows, niches: niches.rows };
+}
 
 async function listCreators(query) {
   const { q = "", limit = "50", offset = "0" } = query;

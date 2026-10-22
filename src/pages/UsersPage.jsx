@@ -116,6 +116,40 @@ const CARD_SORTS = [
   ["instagram_username:asc", "IG handle, A–Z"],
   ["email:asc", "Email, A–Z"],
 ];
+// The creator filter row: plain dropdowns with ready-made choices, written to
+// the same filter[...] params as the table's column funnels (see
+// server/lib/tableQuery.js for the value forms). Country and niche options
+// come from /creators/facets. Option labels read as a whole phrase, so a
+// chosen one says what it filters on its own.
+const CREATOR_FILTER_BAR = [
+  { key: "country", label: "Country", any: "Any country", width: 170 },
+  { key: "niche", label: "Niche", any: "Any niche", width: 190 },
+  { key: "instagram_followers_count", label: "Followers", any: "Any followers", type: "number", options: [
+    ["<1000", "Under 1K followers"], ["1000..9999", "1K to 10K followers"], ["10000..49999", "10K to 50K followers"],
+    ["50000..99999", "50K to 100K followers"], ["100000..499999", "100K to 500K followers"], [">=500000", "500K+ followers"],
+  ] },
+  { key: "engagement_rate", label: "Engagement", any: "Any engagement", type: "number", options: [
+    [">=1", "ER 1% or more"], [">=2", "ER 2% or more"], [">=3", "ER 3% or more"], [">=5", "ER 5% or more"],
+  ] },
+  { key: "user_created", label: "Joined", any: "Joined any time", type: "date", options: [
+    ["last:1", "Joined in the last day"], ["last:7", "Joined in the last 7 days"], ["last:30", "Joined in the last 30 days"],
+    ["last:90", "Joined in the last 90 days"], ["before:90", "Joined over 90 days ago"],
+  ] },
+  { key: "last_sign_in", label: "Signed in", any: "Signed in any time", type: "date", options: [
+    ["last:7", "Signed in this week"], ["last:30", "Signed in this month"], ["before:30", "Not signed in for 30 days"], ["empty", "Never signed in"],
+  ] },
+  { key: "photo", label: "Photo", any: "Photo or not", width: 140, options: [["yes", "Has a photo"], ["no", "No photo"]] },
+  { key: "status", label: "Status", any: "Any status", width: 140, options: [["active", "Active"], ["ruled_out", "Ruled out"]] },
+];
+
+const creatorCount = (n) => `${friendlyNumber(n)} creator${Number(n) === 1 ? "" : "s"}`;
+
+// FASHION_ACCESSORIES -> "Fashion & accessories".
+function nicheLabel(key) {
+  const s = String(key || "").toLowerCase().split("_").filter(Boolean).join(" & ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // Card pages are multiples of 24 and the grid only ever uses a column count
 // that divides 24, so a full page always fills its last row (50 cards in 7
 // columns left one card alone on a row).
@@ -174,6 +208,7 @@ export default function UsersPage() {
   });
   const showCards = tab === "creators" && creatorView === "cards";
   const [cardPageSize, setCardPageSize] = useState(48);
+  const [facets, setFacets] = useState({ countries: [], niches: [] });
   const limit = showCards ? cardPageSize : pageSize;
 
   function pickCreatorView(v) {
@@ -257,6 +292,40 @@ export default function UsersPage() {
   // Anything that changes which rows match — tab, search, sort, filters —
   // means page 2 of the old result set is not a meaningful place to be.
   useEffect(() => { setPage(1); }, [tab, q, sort, filters, showHidden, showCards]);
+
+  // Country/niche choices for the creator filters, per database.
+  useEffect(() => {
+    if (tab !== "creators") return undefined;
+    let live = true;
+    api.creatorFacets()
+      .then((f) => { if (live) setFacets({ countries: f.countries || [], niches: f.niches || [] }); })
+      .catch(() => { if (live) setFacets({ countries: [], niches: [] }); });
+    return () => { live = false; };
+  }, [tab, target]);
+
+  // Options per filter-row entry. A value set some other way (a column
+  // funnel in the table, a custom range) is listed too, so the dropdown can
+  // show and clear it.
+  function filterBarOptions(f) {
+    let opts;
+    if (f.key === "country") {
+      opts = facets.countries.map((c) => (c.value == null
+        ? { value: "none", label: "No country", hint: creatorCount(c.count) }
+        : { value: c.value, label: c.value, hint: creatorCount(c.count) }));
+    } else if (f.key === "niche") {
+      opts = [
+        ...facets.niches.map((n) => ({ value: n.value, label: nicheLabel(n.value), hint: creatorCount(n.count) })),
+        { value: "none", label: "No niche" },
+      ];
+    } else {
+      opts = f.options.map(([value, label]) => ({ value, label }));
+    }
+    const current = filters[f.key];
+    if (current && !opts.some((o) => String(o.value) === String(current))) {
+      opts.unshift({ value: current, label: `${f.label}: ${describeFilter(f.type || "text", current) || current}` });
+    }
+    return [{ value: "", label: f.any }, ...opts];
+  }
 
   function handleStartupChanged(userId, enabled) {
     setRows((rs) => rs.map((r) => (r.user_id === userId ? { ...r, startup_programme: enabled } : r)));
@@ -476,36 +545,33 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* Cards have no header, so the table's column filters sit here as
-          chips — the same filters, shared with the table view. */}
-      {showCards && (
+      {/* Creator filters, in both views. Name, email and handle are the
+          search box's job, so they are not repeated here. */}
+      {tab === "creators" && (
         <div style={{ marginTop: -6, marginBottom: 16, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {CREATOR_COLUMNS.filter((c) => c.filter).map((col) => {
-            const value = filters[col.key] || "";
+          {CREATOR_FILTER_BAR.map((f) => {
+            const on = !!filters[f.key];
             return (
-              <div key={col.key} style={{
-                display: "inline-flex", alignItems: "center", gap: 4, height: 30, padding: "0 6px 0 12px",
-                borderRadius: 999, fontSize: 12, whiteSpace: "nowrap",
-                border: `1px solid ${value ? theme.text : theme.border}`,
-                background: value ? theme.accentLight : theme.surface,
-                color: value ? theme.text : theme.textMid, fontWeight: value ? 600 : 500,
-              }}>
-                {col.label}{value ? `: ${describeFilter(col.filter.type, value, col.filter.options)}` : ""}
-                <ColumnFilter
-                  theme={theme}
-                  label={col.label}
-                  type={col.filter.type}
-                  options={col.filter.options}
-                  placeholder={col.filter.placeholder}
-                  value={value}
-                  onCommit={(v) => handleFilter(col.key, v)}
-                />
-              </div>
+              <Select
+                key={f.key}
+                size="sm"
+                value={filters[f.key] || ""}
+                onChange={(v) => handleFilter(f.key, v)}
+                options={filterBarOptions(f)}
+                ariaLabel={`Filter by ${f.label.toLowerCase()}`}
+                searchPlaceholder={`Find a ${f.label.toLowerCase()}…`}
+                style={{
+                  width: f.width || 200, borderRadius: 999,
+                  border: `1px solid ${on ? theme.text : theme.border}`,
+                  background: on ? theme.accentLight : theme.surface,
+                  color: on ? theme.text : theme.textMid, fontWeight: on ? 600 : 400,
+                }}
+              />
             );
           })}
           {hasFilters && (
             <Btn size="sm" variant="outline" onClick={() => setFilters({})}>
-              Clear filters
+              Clear filters ({Object.keys(filters).length})
             </Btn>
           )}
         </div>

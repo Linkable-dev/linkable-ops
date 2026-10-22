@@ -438,6 +438,8 @@ export const api = {
     request(`/admin-users/brands?${buildQs({ q, limit, offset, sortBy, sortDir, filters })}`),
   listAdminCreators: ({ q, limit, offset, sortBy, sortDir, filters } = {}) =>
     request(`/admin-users/creators?${buildQs({ q, limit, offset, sortBy, sortDir, filters })}`),
+  // Country and niche values on file, with counts, for the creator filters.
+  creatorFacets: () => request(`/admin-users/creators/facets`),
   // Soft-deleted brands still within the 30-day recovery window.
   listDeletedBrands: ({ q, limit, offset } = {}) =>
     request(`/admin-users/deleted-brands?${buildQs({ q, limit, offset })}`),
