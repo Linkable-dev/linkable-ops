@@ -5,7 +5,8 @@ import { api, friendlyDate, friendlyNumber } from "../lib/api";
 import { TabBar } from "../components/ui/TabBar";
 import { Input } from "../components/ui/Input";
 import { Btn } from "../components/ui/Button";
-import { SkeletonGridRows } from "../components/ui/Skeleton";
+import { Skeleton, SkeletonGridRows } from "../components/ui/Skeleton";
+import { Select } from "../components/ui/Select";
 import { Pagination } from "../components/ui/Pagination";
 import { useNow } from "../lib/useNow";
 import { useSearchParams } from "react-router-dom";
@@ -92,16 +93,35 @@ const CREATOR_COLUMNS = [
     filter: { type: "text", placeholder: "@handle…" } },
   { key: "instagram_followers_count", label: "Followers",    width: 100, sortable: true, defaultDir: "desc",
     filter: { type: "number" } },
+  { key: "user_created",              label: "Joined",       width: 100, sortable: true, defaultDir: "desc",
+    filter: { type: "date" } },
   { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
     filter: { type: "date" } },
   // Room for Rule out + Hold payouts + View.
   { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 80, resizable: false },
 ];
 
+// The Creators tab can also be read as a grid of photo cards, like Discover in
+// the main app — faces are how an operator recognises a creator. The choice is
+// remembered per browser. Cards have no header row, so sorting moves into a
+// picker; column filters set in the table still apply and can be cleared.
+const CREATOR_VIEW_KEY = "lk-impersonation-creator-view";
+const CARD_SORTS = [
+  ["last_sign_in:desc", "Last sign in, newest"],
+  ["user_created:desc", "Joined, newest"],
+  ["user_created:asc", "Joined, oldest"],
+  ["instagram_followers_count:desc", "Followers, most"],
+  ["instagram_followers_count:asc", "Followers, fewest"],
+  ["creator_name:asc", "Name, A–Z"],
+  ["instagram_username:asc", "IG handle, A–Z"],
+  ["email:asc", "Email, A–Z"],
+];
+const CARD_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 };
+
 function avatarFor(row, kind) {
   // Backend pre-signs GCS URLs into signed_logo_pic / signed_profile_pic so
-  // the <img> tag can load them directly. For creators we also fall back to
-  // the live Instagram CDN URL when GCS has no profile pic.
+  // the <img> tag can load them directly. For a creator that is their upload,
+  // else their stored Instagram picture; a live CDN URL is the last resort.
   if (kind === "brand") return row.signed_logo_pic || null;
   if (row.signed_profile_pic) return row.signed_profile_pic;
   if (row.instagram_profile_image && /^https?:\/\//.test(row.instagram_profile_image)) {
@@ -143,6 +163,15 @@ export default function UsersPage() {
   const { ask, dialog: confirmDialog } = useConfirm();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [creatorView, setCreatorView] = useState(() => {
+    try { return localStorage.getItem(CREATOR_VIEW_KEY) === "cards" ? "cards" : "table"; } catch { return "table"; }
+  });
+  const showCards = tab === "creators" && creatorView === "cards";
+
+  function pickCreatorView(v) {
+    setCreatorView(v);
+    try { localStorage.setItem(CREATOR_VIEW_KEY, v); } catch { /* ignore */ }
+  }
 
   const columns = tab === "brands" ? BRAND_COLUMNS
     : tab === "creators" ? CREATOR_COLUMNS
@@ -345,6 +374,19 @@ export default function UsersPage() {
     }
   }
 
+  // What fills the list instead of rows — the same in the table and the cards.
+  const statusMessage = error ? (
+    <div style={{ padding: 24, textAlign: "center", color: "#EF4444", fontSize: 13 }}>
+      {error}
+    </div>
+  ) : rows.length === 0 ? (
+    <div style={{ padding: 32, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+      {tab === "deleted"
+        ? <>No brands pending deletion{q ? ` matching "${q}"` : ""}.</>
+        : <>No {tabLabel} found{q ? ` matching "${q}"` : ""}{hasFilters ? " with the current column filters" : ""}.</>}
+    </div>
+  ) : null;
+
   return (
     <div>
       {/* Header */}
@@ -403,6 +445,32 @@ export default function UsersPage() {
             Show Hidden
           </Btn>
         )}
+        {tab === "creators" && (
+          <div style={{ display: "flex", gap: 2, padding: 2, borderRadius: 999, background: theme.surfaceAlt }}>
+            {[["table", "Table"], ["cards", "Cards"]].map(([v, l]) => (
+              <button key={v} onClick={() => pickCreatorView(v)} style={{
+                height: 26, padding: "0 12px", borderRadius: 999, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", border: "none",
+                background: creatorView === v ? theme.surface : "transparent", color: creatorView === v ? theme.text : theme.textMuted, boxShadow: creatorView === v ? theme.shadow : "none",
+              }}>{l}</button>
+            ))}
+          </div>
+        )}
+        {showCards && (
+          <Select
+            size="sm"
+            value={`${sort.sortBy}:${sort.sortDir}`}
+            onChange={(v) => { const [sortBy, sortDir] = String(v).split(":"); setSort({ sortBy, sortDir }); }}
+            options={CARD_SORTS}
+            placeholder="Sort by…"
+            ariaLabel="Sort creators"
+            style={{ width: 200 }}
+          />
+        )}
+        {showCards && hasFilters && (
+          <Btn size="sm" variant="outline" onClick={() => setFilters({})} title="Filters set in the table view still apply here">
+            Clear filters ({Object.keys(filters).length})
+          </Btn>
+        )}
       </div>
 
       {actionError && (
@@ -415,7 +483,31 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Table */}
+      {showCards ? (
+        loading ? (
+          <div style={CARD_GRID}>
+            {Array.from({ length: 8 }, (_, i) => <CreatorCardSkeleton key={i} />)}
+          </div>
+        ) : statusMessage ? (
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12 }}>
+            {statusMessage}
+          </div>
+        ) : (
+          <div style={CARD_GRID}>
+            {rows.map((row) => (
+              <CreatorCard
+                key={row.user_id}
+                row={row}
+                theme={theme}
+                busy={impersonating === row.user_id}
+                disqualifyBusy={disqualifying === row.user_id}
+                onImpersonate={() => handleImpersonate(row)}
+                onDisqualify={() => handleDisqualify(row)}
+              />
+            ))}
+          </div>
+        )
+      ) : (
       <div style={{
         background: theme.surface,
         border: `1px solid ${theme.border}`,
@@ -491,16 +583,8 @@ export default function UsersPage() {
             columns={orderedColumns.map((col) => ({ key: col.key, kind: SKELETON_KIND[col.key] || "text" }))}
             rows={8}
           />
-        ) : error ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#EF4444", fontSize: 13 }}>
-            {error}
-          </div>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: 32, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
-            {tab === "deleted"
-              ? <>No brands pending deletion{q ? ` matching "${q}"` : ""}.</>
-              : <>No {tabLabel} found{q ? ` matching "${q}"` : ""}{hasFilters ? " with the current column filters" : ""}.</>}
-          </div>
+        ) : statusMessage ? (
+          statusMessage
         ) : tab === "deleted" ? (
           rows.map((row) => (
             <DeletedBrandRow
@@ -535,6 +619,7 @@ export default function UsersPage() {
        </div>
        </div>
       </div>
+      )}
 
       <ManageBrandModal
         row={manageRow}
@@ -751,6 +836,109 @@ function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBu
       {orderedColumns.map((col) => (
         <Fragment key={col.key}>{renderUserCell(col.key, row, ctx)}</Fragment>
       ))}
+    </div>
+  );
+}
+
+// One creator as a Discover-style card: the square photo first, then name and
+// engagement rate, audience, location, and the same two actions as the table
+// row. Followers can arrive as the string "undefined" on old rows (see the
+// table cell), and engagement rate is already a percentage.
+function CreatorCard({ row, theme, busy, disqualifyBusy, onImpersonate, onDisqualify }) {
+  const avatar = avatarFor(row, "creator");
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImg = avatar && !imgFailed;
+  const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || row.instagram_name || "";
+  const handle = row.instagram_username ? `@${row.instagram_username.replace(/^@+/, "")}` : "";
+  const hasFollowers = row.instagram_followers_count && row.instagram_followers_count !== "undefined";
+  const er = parseFloat(row.instagram_engagement_rate);
+  const location = [row.location_city, row.location_country].filter(Boolean).join(", ");
+  const line = { fontSize: 12, color: theme.textMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{
+      background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14,
+      padding: 10, display: "flex", flexDirection: "column", gap: 10, minWidth: 0,
+    }}>
+      <div style={{
+        position: "relative", aspectRatio: "1 / 1", borderRadius: 10, overflow: "hidden",
+        background: theme.surfaceAlt, color: theme.textMuted,
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, fontWeight: 700,
+      }}>
+        {showImg
+          ? <img src={avatar} alt="" draggable="false" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
+          : initialsFor(row, "creator")}
+        {row.disqualified_at && (
+          <span
+            title={row.disqualified_reason || "no reason recorded"}
+            style={{
+              position: "absolute", left: 8, top: 8, padding: "2px 8px", borderRadius: 999,
+              fontSize: 11, fontWeight: 600, color: "#fff", background: "#DC2626",
+            }}
+          >
+            Ruled out
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, padding: "0 2px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}
+            title={name || handle}>
+            {name || handle || <span style={{ color: theme.textMuted, fontStyle: "italic", fontWeight: 500 }}>(unnamed)</span>}
+          </span>
+          {er > 0 && (
+            <span style={{ fontSize: 12, fontWeight: 600, color: theme.text, flexShrink: 0 }}>{er.toFixed(2)}% ER</span>
+          )}
+        </div>
+        <div style={line}>
+          {[handle && name ? handle : "", hasFollowers ? `${friendlyNumber(row.instagram_followers_count)} audience` : "no audience data"]
+            .filter(Boolean).join(" · ")}
+        </div>
+        {location && <div style={line}>{location}</div>}
+        <div style={{ ...line, color: theme.textMuted }} title={row.email}>
+          Joined {friendlyDate(row.user_created)} · {row.last_sign_in ? `seen ${friendlyDate(row.last_sign_in)}` : "never signed in"}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: "auto" }}>
+        <Btn
+          size="sm"
+          variant={row.disqualified_at ? "solid" : "outline"}
+          color={row.disqualified_at ? "#DC2626" : undefined}
+          onClick={onDisqualify}
+          loading={disqualifyBusy}
+          title={row.disqualified_at
+            ? `Ruled out: ${row.disqualified_reason || "no reason recorded"} — click to lift`
+            : "Stop this creator applying to campaigns"}
+        >
+          {row.disqualified_at ? "Ruled out" : "Rule out"}
+        </Btn>
+        <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
+          View ↗
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+function CreatorCardSkeleton() {
+  const { theme } = useTheme();
+  return (
+    <div style={{
+      background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 14,
+      padding: 10, display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <Skeleton height="auto" radius={10} style={{ display: "block", aspectRatio: "1 / 1" }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 2px" }}>
+        <Skeleton width="65%" height={14} />
+        <Skeleton width="50%" height={11} />
+        <Skeleton width="70%" height={11} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+        <Skeleton width={78} height={30} radius={999} />
+        <Skeleton width={70} height={30} radius={999} />
+      </div>
     </div>
   );
 }

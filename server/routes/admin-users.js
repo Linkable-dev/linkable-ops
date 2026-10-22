@@ -66,6 +66,14 @@ async function appSubscriptionsAvailable() {
   return ok;
 }
 
+// The bucket object name in an influencers.instagram_profile_image, or "" when
+// it holds anything else (a live CDN URL — UsersPage uses that as-is — or the
+// literal "undefined" some old rows carry).
+function storageKey(value) {
+  const v = String(value || "");
+  return v.startsWith("influencer/profile/image/") ? v : "";
+}
+
 export function adminUsersRoutes() {
   const router = express.Router();
 
@@ -83,7 +91,11 @@ export function adminUsersRoutes() {
   router.get("/creators", async (req, res) => {
     try {
       const { rows } = await listCreators(req.query);
-      const signed = await signedUrls(rows.map((r) => r.profile_pic_name || ""));
+      // Same order the main app uses: the creator's own upload, then the
+      // Instagram picture. Most creators only have the second, and it is stored
+      // as a bucket object name (influencer/profile/image/external_ic_…), not a
+      // URL, so it has to be signed too — left unsigned, the row shows initials.
+      const signed = await signedUrls(rows.map((r) => r.profile_pic_name || storageKey(r.instagram_profile_image)));
       rows.forEach((r, i) => { r.signed_profile_pic = signed[i]; });
       res.json(rows);
     } catch (err) {
