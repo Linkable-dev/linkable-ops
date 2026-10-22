@@ -23,7 +23,8 @@ const PAGE = 10;
 
 const HELP = [
   ["Who is here", "Every creator's first three pitches. After three are approved, hers go out without review. A bounce or a brand reporting her puts her back here."],
-  ["Checks", "Every pitch is checked on its own first: a brand contact we can stand behind, a real looking name, an idea and a product, and no more than two other creators pitching the brand at once. A failed check is shown in red; Approve runs the checks again."],
+  ["Checks", "Every pitch is checked on its own first: a brand contact we can stand behind, a real looking name, an idea and a product, the brand still taking pitches, and no more than two other creators pitching the brand at once. A failed check is shown in red and stops Approve; Approve runs the checks again."],
+  ["Flags", "In amber: something to look at, like a name in capitals. A flagged pitch comes here even from a creator past her first three, and you can approve it."],
   ["Contact", "Where the pitch goes. Change it before you approve to send it somewhere else; the address becomes the brand's contact for later pitches too. A brand on Linkable gets the pitch in its Messages, so there is nothing to change."],
   ["Approve", "Sends the pitch now: Messages for a brand on Linkable, otherwise the Lemlist queue like every other pitch, follow ups included."],
   ["Reject", "Asks for the reason. The creator reads it on her pitch and in an email, edits the pitch and sends it again, and it comes back here."],
@@ -55,9 +56,12 @@ function Line({ label, children }) {
   );
 }
 
-function ReviewCard({ r, onDone }) {
+function ReviewCard({ r, onDone, onFailed }) {
   const { theme: t } = useTheme();
   const [contact, setContact] = useState(r.contact_email || "");
+  // After a failed Approve the list is reloaded: the field shows the brand's
+  // contact as the server has it, not what was typed.
+  useEffect(() => { setContact(r.contact_email || ""); }, [r.contact_email]);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState("");
@@ -70,7 +74,11 @@ function ReviewCard({ r, onDone }) {
       const changed = !r.brand_on_linkable && contact.trim().toLowerCase() !== (r.contact_email || "").toLowerCase();
       const res = await api.approvePitchReview(r.pitch_id, changed ? contact.trim() : "");
       onDone(`${r.creator_name || "The creator"}’s pitch to ${r.brand_name} is approved and ${res.status === "scheduled" ? "going out through Lemlist" : "sent"}.`);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      setError(e.message);
+      setContact(r.contact_email || "");
+      onFailed();
+    }
     finally { setBusy(""); }
   };
 
@@ -99,6 +107,11 @@ function ReviewCard({ r, onDone }) {
       {r.problems.length > 0 && (
         <Banner tone="error">
           {r.problems.length === 1 ? r.problems[0] : r.problems.map((p) => <div key={p}>{p}</div>)}
+        </Banner>
+      )}
+      {(r.flags || []).length > 0 && (
+        <Banner tone="warning">
+          {r.flags.map((f) => <div key={f}>{f} You can still approve it.</div>)}
         </Banner>
       )}
 
@@ -203,7 +216,9 @@ export default function PitchReviewPage() {
 
   const done = (message) => {
     setNotice(message);
-    load();
+    // The last card of the last page: step back a page (that reloads).
+    if (rows.length === 1 && offset > 0) setOffset(Math.max(0, offset - PAGE));
+    else load();
   };
 
   const pageStart = total === 0 ? 0 : offset + 1;
@@ -232,7 +247,7 @@ export default function PitchReviewPage() {
       {!loading && available && rows.length === 0 && (
         <Card style={{ padding: 20, color: t.textMuted, fontSize: 13 }}>Nothing waiting. New first pitches show up here as creators send them.</Card>
       )}
-      {rows.map((r) => <ReviewCard key={r.pitch_id} r={r} onDone={done} />)}
+      {rows.map((r) => <ReviewCard key={r.pitch_id} r={r} onDone={done} onFailed={load} />)}
 
       {total > PAGE && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>

@@ -33,6 +33,7 @@ const REVIEW = {
   19: ["idea", "string"], 20: ["idea_description", "string"], 21: ["product_title", "string"],
   22: ["product_url", "string"], 23: ["product_image", "string"], 24: ["offers", "string"],
   25: ["asks", "string"], 26: ["problems", ["string"]], 27: ["creator_pitches_sent", "int"],
+  28: ["flags", ["string"]],
 };
 const REVIEW_LIST = { 1: ["reviews", { repeated: true, schema: REVIEW }], 2: ["total", "int"] };
 const DECISION_RESPONSE = { 1: ["status", "string"] };
