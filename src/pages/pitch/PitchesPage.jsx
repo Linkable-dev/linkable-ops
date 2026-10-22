@@ -57,6 +57,7 @@ const SKELETON_COLS = COLUMNS.map((c) => ({ kind: SKELETON_KIND[c.key] || "text"
 
 const HELP = [
   ["What this is", "Every pitch a creator sent to a brand through Pitch, newest first. Drafts are the pitches Linkable wrote that nobody has sent yet."],
+  ["In review", "A creator's first three pitches wait for the team in the In review tab before they go out."],
   ["Sent", "The creator pressed Send. To a brand off Linkable it goes out through Lemlist from influencer@ (Sending, until Lemlist sends the first email); to a brand on Linkable it is delivered in Messages."],
   ["Views", "Times the brand opened the proposal page. Link previews and mail scanners are not counted. Email opens are not counted at all: Lemlist sends without tracking."],
   ["Paying per 100 sent", "Brands that paid, per 100 pitches sent in the period. It is the number Pitch is judged on."],
@@ -221,7 +222,7 @@ export default function PitchesPage() {
       </div>
       <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>
         {summaryLoading ? <Skeleton width={460} height={12} /> : summary && <>
-          Right now {now.sending} sending · {now.drafts} {now.drafts === 1 ? "draft" : "drafts"} waiting for their creator
+          Right now {now.in_review > 0 && <>{now.in_review} in review · </>}{now.sending} sending · {now.drafts} {now.drafts === 1 ? "draft" : "drafts"} waiting for their creator
           {now.no_contact > 0 && <> · <span style={{ color: t.danger }}>{now.no_contact} with no contact found</span></>}
           {" "}· {now.weekly_creators} {now.weekly_creators === 1 ? "creator" : "creators"} on weekly picks
         </>}

@@ -2,12 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import { pitchRoutes } from "../routes/pitch.js";
+import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
+import { approvePitchReview, rejectPitchReview, listPitchReviews } from "../lib/pitchReviews.js";
 
-async function serve(t, query, sign = async (keys) => keys.map(() => null)) {
+async function serve(t, query, sign = async (keys) => keys.map(() => null), reviews) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { req.admin = { email: "pitch-test@example.com" }; req.dbTarget = "dev"; next(); });
-  app.use(pitchRoutes({ query, sign }));
+  app.use(pitchRoutes({ query, sign, ...(reviews ? { reviews } : {}) }));
   const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
   t.after(() => new Promise((resolve) => server.close(resolve)));
   return async (path, method = "GET", body) => {
@@ -155,4 +157,74 @@ test("the creator list says when each opened Pitch, and how big each view is", a
   assert.deepEqual(list.params, [7, 25, 0]);
   // The pills count every creator, whatever the list is filtered by.
   assert.deepEqual(seen.find((q) => /AS "all"/.test(q.sql)).params, undefined);
+});
+
+// The In review queue (main app QA 112): ops only relays to the main app,
+// which sends. Approve and Reject carry who decided and what they typed.
+test("the review queue relays the list, Approve and Reject to the main app", async (t) => {
+  const calls = [];
+  const reviews = {
+    list: async (page, target) => { calls.push(["list", page, target]); return { available: true, items: [{ pitch_id: ID }], total: 1 }; },
+    approve: async (id, opts, target) => { calls.push(["approve", id, opts.contactEmail, opts.admin.email, target]); return { status: "scheduled" }; },
+    reject: async (id, opts, target) => {
+      calls.push(["reject", id, opts.reason, target]);
+      const e = new Error("Write the reason the creator will read."); e.status = 400;
+      if (!opts.reason) throw e;
+      return { status: "ready" };
+    },
+  };
+  const request = await serve(t, async () => ({ rows: [] }), undefined, reviews);
+  const list = await request("/reviews?limit=500&offset=-3");
+  assert.equal(list.status, 200);
+  assert.equal(list.body.total, 1);
+  assert.deepEqual(calls[0], ["list", { limit: 100, offset: 0 }, "dev"]);
+  const ok = await request(`/reviews/${ID}/approve`, "POST", { contact_email: "sophie@kora.com" });
+  assert.deepEqual(ok.body, { status: "scheduled" });
+  assert.deepEqual(calls[1], ["approve", ID, "sophie@kora.com", "pitch-test@example.com", "dev"]);
+  const bad = await request(`/reviews/${ID}/reject`, "POST", {});
+  assert.equal(bad.status, 400);
+  plain(bad.body.error);
+  const rejected = await request(`/reviews/${ID}/reject`, "POST", { reason: "Name the product" });
+  assert.deepEqual(rejected.body, { status: "ready" });
+});
+
+test("without the service key the queue says so instead of failing", async () => {
+  const before = process.env.MAIN_APP_SERVICE_KEY;
+  delete process.env.MAIN_APP_SERVICE_KEY;
+  try {
+    const r = await listPitchReviews({ limit: 10, offset: 0 }, "dev");
+    assert.equal(r.available, false);
+    plain(r.reason.replace("(MAIN_APP_SERVICE_KEY)", ""));
+    await assert.rejects(approvePitchReview(ID, {}, "dev"), (e) => e.status === 503);
+    await assert.rejects(rejectPitchReview(ID, { reason: " " }, "dev"), (e) => e.status === 400);
+    await assert.rejects(approvePitchReview("nope", {}, "dev"), (e) => e.status === 404);
+    await assert.rejects(approvePitchReview(ID, { contactEmail: "not an email" }, "dev"), (e) => e.status === 400);
+  } finally {
+    if (before !== undefined) process.env.MAIN_APP_SERVICE_KEY = before;
+  }
+});
+
+// Bytes the main app's Go marshaller wrote for a PitchReviewList: the hand
+// decoder reads every field type it uses (nested, repeated, int64, double, bool).
+test("a PitchReviewList from the main app decodes field by field", () => {
+  const bytes = Buffer.from("0a450a027031220c4d61796120436f6c6c696e7338b8aa02413333333333330b40580172054bc58c5241800101900101c201073120766964656fd20102412ed20102422ed801040a040a0270321002", "hex");
+  const REVIEW = {
+    1: ["pitch_id", "string"], 4: ["creator_name", "string"], 7: ["creator_followers", "int"], 8: ["creator_engagement", "double"],
+    11: ["creator_reviews_passed", "int"], 14: ["brand_name", "string"], 16: ["brand_on_linkable", "bool"],
+    18: ["contact_verified", "bool"], 24: ["offers", "string"], 26: ["problems", ["string"]], 27: ["creator_pitches_sent", "int"],
+  };
+  const list = decodeMessage(bytes, { 1: ["reviews", { repeated: true, schema: REVIEW }], 2: ["total", "int"] });
+  assert.equal(list.total, 2);
+  assert.equal(list.reviews.length, 2);
+  assert.deepEqual(list.reviews[0], {
+    pitch_id: "p1", creator_name: "Maya Collins", creator_followers: 38200, creator_engagement: 3.4,
+    creator_reviews_passed: 1, brand_name: "KŌRA", brand_on_linkable: true, contact_verified: true,
+    offers: "1 video", problems: ["A.", "B."], creator_pitches_sent: 4,
+  });
+  assert.equal(list.reviews[1].pitch_id, "p2");
+  assert.equal(list.reviews[1].brand_on_linkable, false);
+  assert.deepEqual(list.reviews[1].problems, []);
+  // ListPitchReviewsRequest { limit: 25, offset: 50 }; zero is left out.
+  assert.equal(encodeFields({ 1: 25, 2: 50 }).toString("hex"), "08191032");
+  assert.equal(encodeFields({ 1: 25, 2: 0 }).toString("hex"), "0819");
 });

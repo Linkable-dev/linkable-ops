@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
+import { pitchReviewsClient } from "../lib/pitchReviews.js";
 import {
   parseColumnFilters, filterConditions, orderBySql,
   textFilter, numberFilter, dateFilter, enumFilter, boolFilter,
@@ -10,10 +11,12 @@ import {
 // what came of it; the creators who pitch; the switch that has Linkable write
 // a creator's pitches ahead every Monday. The brands are in pitch-brands.js.
 //
-// Read-only on pitches by design. Nothing here opens the brand's proposal
-// link (/p/<token>): service-grpc counts any browser visit there as the brand
-// viewing it, moves the pitch to "viewed" and emails the creator. The detail
-// shows what the proposal says instead.
+// Read-only on pitches by design, but for the In review queue (QA 112): a
+// creator's first pitches wait for the team, and Approve / Reject go through
+// the main app (lib/pitchReviews.js), which sends. Nothing here opens the
+// brand's proposal link (/p/<token>): service-grpc counts any browser visit
+// there as the brand viewing it, moves the pitch to "viewed" and emails the
+// creator. The detail shows what the proposal says instead.
 //
 // A database without Pitch answers available:false, never a 500.
 
@@ -87,7 +90,7 @@ const VIEWS = {
   all: null,
 };
 
-const STATUSES = ["ready", "scheduled", "sent", "viewed", "accepted", "changes_requested", "declined", "expired", "skipped"];
+const STATUSES = ["ready", "in_review", "scheduled", "sent", "viewed", "accepted", "changes_requested", "declined", "expired", "skipped"];
 const byId = (col) => (params, raw) => {
   if (!isUuid(raw)) return null;
   params.push(raw);
@@ -193,8 +196,34 @@ const pageOf = (q, def = 25) => ({
   offset: Math.max(parseInt(q.offset) || 0, 0),
 });
 
-export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls } = {}) {
+export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews = pitchReviewsClient } = {}) {
   const router = Router();
+
+  // The In review queue (QA 112). Errors from the main app are its own
+  // sentences (a failed automatic check says what to fix).
+  const reviewError = (res, e) => res.status(e.status || 500).json({ error: e.message });
+
+  // GET /api/pitch/reviews?limit=&offset= — oldest first.
+  router.get("/reviews", async (req, res) => {
+    const { limit, offset } = pageOf(req.query);
+    try {
+      res.json(await reviews.list({ limit, offset }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/reviews/:id/approve { contact_email? } — sends it now.
+  router.post("/reviews/:id/approve", async (req, res) => {
+    try {
+      res.json(await reviews.approve(req.params.id, { contactEmail: req.body?.contact_email, admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/reviews/:id/reject { reason } — the creator reads the reason.
+  router.post("/reviews/:id/reject", async (req, res) => {
+    try {
+      res.json(await reviews.reject(req.params.id, { reason: req.body?.reason, admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
 
   // GET /api/pitch/summary?days=30 — the funnel, counted on when each pitch
   // was sent. "paying per 100 sent" is the number Pitch is judged on.
@@ -219,6 +248,7 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls } = {}) {
         // Right now, whatever the period.
         query(
           `SELECT count(*) FILTER (WHERE status = 'scheduled')::int AS sending,
+                  count(*) FILTER (WHERE status = 'in_review')::int AS in_review,
                   count(*) FILTER (WHERE status = 'ready')::int AS drafts,
                   count(*) FILTER (WHERE status = 'ready' AND lemlist_state = 'failed')::int AS no_contact,
                   (SELECT count(*)::int FROM pitch_creators WHERE enabled) AS weekly_creators

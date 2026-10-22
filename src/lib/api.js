@@ -203,6 +203,13 @@ export const api = {
   setPitchCreatorWeekly: (userId, weekly) =>
     request(`/pitch/creators/${userId}`, { method: "PATCH", body: JSON.stringify({ weekly }) }),
   addPitchCreator: (email) => request("/pitch/creators", { method: "POST", body: JSON.stringify({ email }) }),
+  // The In review queue: a creator's first pitches wait for the team. Approve
+  // sends it at once; Reject's reason is what the creator reads.
+  getPitchReviews: ({ limit = 25, offset = 0 } = {}) => request(`/pitch/reviews?${buildQs({ limit, offset })}`),
+  approvePitchReview: (id, contactEmail) =>
+    request(`/pitch/reviews/${id}/approve`, { method: "POST", body: JSON.stringify({ contact_email: contactEmail || "" }) }),
+  rejectPitchReview: (id, reason) =>
+    request(`/pitch/reviews/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>
