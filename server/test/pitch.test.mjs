@@ -252,4 +252,10 @@ test("a PitchReview's main account decodes and the card shows that account only"
   assert.deepEqual(reviewAccount({ creator_handle: "", main_platform: "", creator_followers: 0, creator_engagement: 0 }), { handle: "", line: "No stats yet" });
   assert.deepEqual(reviewAccount({ creator_handle: "mayacollins", creator_followers: 38200, creator_engagement: 3.4 }),
     { handle: "mayacollins", line: "Instagram · 38.2K followers · 3.4% engagement" });
+  // Neither account, or an old main app, with numbers left on her row but no
+  // Instagram handle: not shown as Instagram's.
+  assert.deepEqual(reviewAccount({ creator_handle: "", main_platform: "", creator_followers: 38200, creator_engagement: 3.4 }),
+    { handle: "", line: "No stats yet" });
+  assert.deepEqual(reviewAccount({ creator_handle: "mayacollins", creator_followers: 0, creator_engagement: 0 }),
+    { handle: "mayacollins", line: "Instagram · No stats yet" });
 });
