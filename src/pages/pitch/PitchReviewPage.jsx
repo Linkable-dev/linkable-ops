@@ -8,7 +8,7 @@ import { Tag } from "../../components/ui/Tag";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { HelpList, HelpTip } from "../../components/gtm/QueueParts";
 import { Avatar, Logo, Who, Banner } from "../../components/pitch/PitchParts";
-import { count } from "../../components/pitch/pitchLabels";
+import { reviewAccount } from "../../components/pitch/pitchLabels";
 
 // The In review queue (main app QA 112): a creator's first three pitches wait
 // here before they go out. Each shows the creator, the pitch as the brand will
@@ -31,10 +31,6 @@ const HELP = [
 ];
 
 const RESET = { bounce: "Back in review: one of her pitches bounced", complaint: "Back in review: a brand reported her" };
-
-function followers(n) {
-  return n ? `${count(n)} followers` : "";
-}
 
 function Section({ title, children }) {
   const { theme: t } = useTheme();
@@ -94,11 +90,12 @@ function ReviewCard({ r, onDone, onFailed }) {
   };
 
   const mediaKit = r.creator_media_kit;
+  const account = reviewAccount(r);
   return (
     <Card style={{ padding: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <Who picture={<Avatar name={r.creator_name} />} title={r.creator_name || r.creator_email}
-             sub={[r.creator_handle && `@${r.creator_handle}`, r.creator_email].filter(Boolean).join(" · ")} />
+             sub={[account.handle && `@${account.handle}`, r.creator_email].filter(Boolean).join(" · ")} />
         <span style={{ color: t.textMuted }}>→</span>
         <Who picture={<Logo name={r.brand_name} />} title={r.brand_name} sub={r.brand_domain} />
         <span style={{ marginLeft: "auto", fontSize: 12, color: t.textMuted }}>Sent for review {friendlyDate(r.submitted_at)}</span>
@@ -118,7 +115,7 @@ function ReviewCard({ r, onDone, onFailed }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
         <Section title="Creator">
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-            {[followers(r.creator_followers), r.creator_engagement ? `${r.creator_engagement}% engagement` : ""].filter(Boolean).join(" · ") || "No Instagram stats"}
+            {account.line}
           </div>
           <Line label="Approved so far">{`${r.creator_reviews_passed} of 3`}</Line>
           <Line label="Pitches sent before">{String(r.creator_pitches_sent)}</Line>

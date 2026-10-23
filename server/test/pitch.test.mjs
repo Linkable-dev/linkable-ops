@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import express from "express";
 import { pitchRoutes } from "../routes/pitch.js";
 import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
-import { approvePitchReview, rejectPitchReview, listPitchReviews } from "../lib/pitchReviews.js";
+import { approvePitchReview, rejectPitchReview, listPitchReviews, REVIEW } from "../lib/pitchReviews.js";
+import { reviewAccount } from "../../src/components/pitch/pitchLabels.js";
 
 async function serve(t, query, sign = async (keys) => keys.map(() => null), reviews) {
   const app = express();
@@ -227,4 +228,34 @@ test("a PitchReviewList from the main app decodes field by field", () => {
   // ListPitchReviewsRequest { limit: 25, offset: 50 }; zero is left out.
   assert.equal(encodeFields({ 1: 25, 2: 50 }).toString("hex"), "08191032");
   assert.equal(encodeFields({ 1: 25, 2: 0 }).toString("hex"), "0819");
+});
+
+// Bytes the main app's Go marshaller wrote for two reviews with their main
+// account (fields 29-32), read with the decoder's own schema: Moon's TikTok
+// (her Instagram's 7 and 8 stay apart), and Maya's Instagram.
+test("a PitchReview's main account decodes and the card shows that account only", () => {
+  const bytes = Buffer.from("0a3f0a027033220a4d6f6f6e205261686d61387841000000000000f83fea010674696b746f6bf2010a796f7279616d6f6f6e31f801cc3e8102cdcccccccccc18400a470a0270342a0b6d617961636f6c6c696e7338b8aa02413333333333330b40ea0109696e7374616772616df2010b6d617961636f6c6c696e73f801b8aa0281023333333333330b401002", "hex");
+  const list = decodeMessage(bytes, { 1: ["reviews", { repeated: true, schema: REVIEW }], 2: ["total", "int"] });
+  const [moon, maya] = list.reviews;
+  assert.equal(moon.main_platform, "tiktok");
+  assert.equal(moon.main_handle, "yoryamoon1");
+  assert.equal(moon.main_followers, 8012);
+  assert.equal(moon.main_engagement, 6.2);
+  assert.equal(moon.creator_followers, 120);
+  assert.equal(moon.creator_engagement, 1.5);
+  assert.deepEqual(reviewAccount(moon), { handle: "yoryamoon1", line: "TikTok · 8K followers · 6.2% engagement on views" });
+  assert.equal(maya.main_platform, "instagram");
+  assert.deepEqual(reviewAccount(maya), { handle: "mayacollins", line: "Instagram · 38.2K followers · 3.4% engagement" });
+
+  // Her TikTok not read yet; no account at all; a main app from before 29-32.
+  assert.deepEqual(reviewAccount({ ...moon, main_followers: 0, main_engagement: 0 }), { handle: "yoryamoon1", line: "TikTok · No stats yet" });
+  assert.deepEqual(reviewAccount({ creator_handle: "", main_platform: "", creator_followers: 0, creator_engagement: 0 }), { handle: "", line: "No stats yet" });
+  assert.deepEqual(reviewAccount({ creator_handle: "mayacollins", creator_followers: 38200, creator_engagement: 3.4 }),
+    { handle: "mayacollins", line: "Instagram · 38.2K followers · 3.4% engagement" });
+  // Neither account, or an old main app, with numbers left on her row but no
+  // Instagram handle: not shown as Instagram's.
+  assert.deepEqual(reviewAccount({ creator_handle: "", main_platform: "", creator_followers: 38200, creator_engagement: 3.4 }),
+    { handle: "", line: "No stats yet" });
+  assert.deepEqual(reviewAccount({ creator_handle: "mayacollins", creator_followers: 0, creator_engagement: 0 }),
+    { handle: "mayacollins", line: "Instagram · No stats yet" });
 });

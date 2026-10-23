@@ -144,6 +144,30 @@ export function count(n) {
   return String(v);
 }
 
+const PLATFORM = { instagram: "Instagram", tiktok: "TikTok" };
+
+// The In review card's account line: her main account (Instagram when she
+// has one, else TikTok) and that account's own numbers, never Instagram and
+// TikTok added up. "TikTok · 8K followers · 6.2% engagement on views". A main
+// app from before main_platform sends Instagram's numbers only, and they are
+// hers only when she has an Instagram handle (else they are left over).
+export function reviewAccount(r) {
+  const legacy = !r.main_platform;
+  const platform = legacy ? (r.creator_handle ? "instagram" : "") : r.main_platform;
+  if (!PLATFORM[platform]) return { handle: "", line: "No stats yet" };
+  const handle = (legacy ? r.creator_handle : r.main_handle) || "";
+  const n = legacy ? r.creator_followers : r.main_followers;
+  const rate = legacy ? r.creator_engagement : r.main_engagement;
+  const stats = [
+    count(n) && `${count(n)} followers`,
+    rate ? `${rate}% engagement${platform === "tiktok" ? " on views" : ""}` : "",
+  ].filter(Boolean);
+  return {
+    handle: handle || r.creator_handle || "",
+    line: [PLATFORM[platform], ...(stats.length ? stats : ["No stats yet"])].join(" · "),
+  };
+}
+
 // "5 Oct, 16:15" — the timeline wants the moment, not "2h ago".
 export function when(v) {
   if (!v) return "";
