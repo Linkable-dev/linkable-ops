@@ -24,7 +24,7 @@ const HELP = [
   ["Reject", "Asks for the reason. She reads it by email and on her Pitch Partners page, and can apply again."],
   ["Videos", "Open the link and check the video is live and pitches a brand with Linkable. Live adds 2 more months of Pitch Pro, 3 in all. Not found sends it back with your reason; she can paste another link."],
   ["Paid Pitch Pro", "A partner already paying for Pitch Pro keeps her plan: its next payment moves to the end of the free months. A Founding Creator keeps Founding."],
-  ["Payouts", "Her first payout, one larger than usual and one after many sign ups in a week wait in Payouts to approve. Check her creators look real, then Approve payout: the next hourly run pays it."],
+  ["Payouts", "Her first payout, one larger than usual and one after many sign ups in a week wait in Payouts to approve. Check her creators look real, then Approve: the next hourly run pays up to that amount, in that currency, within 7 days. More than that waits here again."],
   ["Blocked", "A creator who pays with a card the partner has used, or signs up with her company email domain, earns her nothing. Those payments are counted on her card."],
   ["Remove", "Ends the partnership: her link opens brand sign up again and new payments earn her nothing. What she earned before is still paid."],
 ];
@@ -110,7 +110,9 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
       )}
       {isPayout && (
         <div style={{ fontSize: 13, marginTop: 16 }}>
-          Waiting since {friendlyDate(r.payout_review_since)}: {PAYOUT_REVIEW[r.payout_review_reason] || r.payout_review_reason}
+          {r.payout_review_amount && <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{r.payout_review_amount}</div>}
+          Waiting since {friendlyDate(r.payout_review_since)}: {PAYOUT_REVIEW[r.payout_review_reason] || r.payout_review_reason}.
+          {" "}Approve payout covers this amount for 7 days; anything more waits here again.
         </div>
       )}
       {(r.status === "rejected" || r.status === "removed") && r.reject_reason && (
@@ -123,7 +125,9 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
 
       {isPayout && (
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-          <Btn onClick={() => act("approve_payout")} loading={busy === "approve_payout"}>Approve payout</Btn>
+          <Btn onClick={() => act("approve_payout")} loading={busy === "approve_payout"}>
+            {r.payout_review_amount ? `Approve ${r.payout_review_amount}` : "Approve payout"}
+          </Btn>
         </div>
       )}
       {queue === "approved" && (

@@ -30,7 +30,7 @@ export const APPLICATION = {
   15: ["reject_reason", "string"], 16: ["video_url", "string"], 17: ["video_status", "string"],
   18: ["video_submitted_at", "string"], 19: ["pro_until", "string"], 20: ["signups", "int"], 21: ["on_pro", "int"],
   22: ["video_note", "string"], 23: ["blocked_earnings", "int"], 24: ["blocked_reason", "string"],
-  25: ["payout_review_reason", "string"], 26: ["payout_review_since", "string"],
+  25: ["payout_review_reason", "string"], 26: ["payout_review_since", "string"], 27: ["payout_review_amount", "string"],
 };
 const LIST = { 1: ["partners", { repeated: true, schema: APPLICATION }], 2: ["total", "int"] };
 const DECISION_RESPONSE = { 1: ["status", "string"], 2: ["video_status", "string"], 3: ["pro_until", "string"] };

@@ -117,11 +117,12 @@ test("payouts, removals and blocked earnings: the new decisions and fields", asy
   }
   // PitchPartnerApplication { blocked_earnings: 2, blocked_reason: "same_card",
   // payout_review_reason: "first_payout", payout_review_since: "2026-11-25T10:00:00Z" }
-  const bytes = encodeFields({ 23: 2, 24: "same_card", 25: "first_payout", 26: "2026-11-25T10:00:00Z" });
+  const bytes = encodeFields({ 23: 2, 24: "same_card", 25: "first_payout", 26: "2026-11-25T10:00:00Z", 27: "£2,509.50" });
   const row = decodeMessage(bytes, APPLICATION);
   assert.equal(row.blocked_earnings, 2);
   assert.equal(row.blocked_reason, "same_card");
   assert.equal(row.payout_review_reason, "first_payout");
   assert.equal(row.payout_review_since, "2026-11-25T10:00:00Z");
+  assert.equal(row.payout_review_amount, "£2,509.50");
   assert.deepEqual(PARTNER_QUEUES.map((q) => q.value), ["applications", "videos", "payouts", "approved", "rejected", "removed"]);
 });
