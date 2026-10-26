@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
 import { Card } from "../../components/ui/Card";
@@ -8,7 +8,8 @@ import { Tag } from "../../components/ui/Tag";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { HelpList, HelpTip } from "../../components/gtm/QueueParts";
 import { Avatar, Logo, Who, Banner } from "../../components/pitch/PitchParts";
-import { reviewAccount } from "../../components/pitch/pitchLabels";
+import { reviewAccount, reviewProfiles } from "../../components/pitch/pitchLabels";
+import { SocialIcon } from "../../components/ui/SocialIcon";
 
 // The In review queue (main app QA 112): a creator's first three pitches wait
 // here before they go out. Each shows the creator, the pitch as the brand will
@@ -17,7 +18,16 @@ import { reviewAccount } from "../../components/pitch/pitchLabels";
 // pitch and by email, and she can edit it and send it again.
 //
 // Never a link to the brand's proposal (/p/<token>): opening it counts as the
-// brand viewing it and emails the creator. Everything it says is shown here.
+// brand viewing it and emails the creator. View as brand (QA 122) opens the
+// main app's read-only copy of that page instead, by a link the main app
+// signed for an hour when it listed the queue (brand_view_url). The links
+// stay fresh: the list is read again once it is STALE_MS old (checked every
+// few minutes and when the tab comes back), and a click on a link older than
+// that reads the list first and opens the new one.
+
+// The View as brand links work for an hour; past this, read the queue again.
+const STALE_MS = 45 * 60 * 1000;
+const STALE_CHECK_MS = 5 * 60 * 1000;
 
 const PAGE = 10;
 
@@ -26,6 +36,7 @@ const HELP = [
   ["Checks", "Every pitch is checked on its own first: a brand contact we can stand behind, a real looking name, an idea and a product, the brand still taking pitches, and no more than two other creators pitching the brand at once. A failed check is shown in red and stops Approve; Approve runs the checks again."],
   ["Flags", "In amber: something to look at, like a name in capitals. A flagged pitch comes here even from a creator past her first three, and you can approve it."],
   ["Contact", "Where the pitch goes. Change it before you approve to send it somewhere else; the address becomes the brand's contact for later pitches too. A brand on Linkable gets the pitch in its Messages, so there is nothing to change."],
+  ["View as brand", "Opens the page the brand will get from this pitch, in a new tab, as it will look. Reply is off, and nothing is counted or sent. The link works for an hour; the list reads itself again before its links run out."],
   ["Approve", "Sends the pitch now: Messages for a brand on Linkable, otherwise the Lemlist queue like every other pitch, follow ups included."],
   ["Reject", "Asks for the reason. The creator reads it on her pitch and in an email, edits the pitch and sends it again, and it comes back here."],
 ];
@@ -52,7 +63,7 @@ function Line({ label, children }) {
   );
 }
 
-function ReviewCard({ r, onDone, onFailed }) {
+function ReviewCard({ r, onDone, onFailed, isStale, freshViewUrl }) {
   const { theme: t } = useTheme();
   const [contact, setContact] = useState(r.contact_email || "");
   // After a failed Approve the list is reloaded: the field shows the brand's
@@ -89,13 +100,30 @@ function ReviewCard({ r, onDone, onFailed }) {
     finally { setBusy(""); }
   };
 
+  // A link from a list read too long ago may have expired: open the tab now
+  // (a tab opened after the wait is a blocked pop-up), read the list, then
+  // send the tab to the new link. A fresh one opens as the plain link it is.
+  const viewAsBrand = async (e) => {
+    if (!isStale()) return;
+    e.preventDefault();
+    const tab = window.open("", "_blank");
+    const url = await freshViewUrl(r.pitch_id);
+    if (!tab) return;
+    if (url) {
+      tab.opener = null;
+      tab.location.href = url;
+      return;
+    }
+    tab.close();
+  };
+
   const mediaKit = r.creator_media_kit;
   const account = reviewAccount(r);
+  const profiles = reviewProfiles(r);
   return (
     <Card style={{ padding: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <Who picture={<Avatar name={r.creator_name} />} title={r.creator_name || r.creator_email}
-             sub={[account.handle && `@${account.handle}`, r.creator_email].filter(Boolean).join(" · ")} />
+        <Who picture={<Avatar name={r.creator_name} />} title={r.creator_name || r.creator_email} sub={r.creator_email} />
         <span style={{ color: t.textMuted }}>→</span>
         <Who picture={<Logo name={r.brand_name} />} title={r.brand_name} sub={r.brand_domain} />
         <span style={{ marginLeft: "auto", fontSize: 12, color: t.textMuted }}>Sent for review {friendlyDate(r.submitted_at)}</span>
@@ -114,6 +142,23 @@ function ReviewCard({ r, onDone, onFailed }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
         <Section title="Creator">
+          {profiles.accounts.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, minWidth: 0 }}>
+              {profiles.main && (
+                <a href={profiles.main.url} target="_blank" rel="noopener noreferrer" title={`Her ${profiles.main.label}`}
+                   style={{ fontSize: 13, fontWeight: 600, color: t.text, textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  @{profiles.main.handle}
+                </a>
+              )}
+              {profiles.accounts.map((a) => (
+                <a key={a.platform} href={a.url} target="_blank" rel="noopener noreferrer"
+                   title={`@${a.handle} on ${a.label}`} aria-label={`@${a.handle} on ${a.label}`}
+                   style={{ color: t.text, display: "inline-flex" }}>
+                  <SocialIcon platform={a.platform} size={16} />
+                </a>
+              ))}
+            </div>
+          )}
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
             {account.line}
           </div>
@@ -173,7 +218,11 @@ function ReviewCard({ r, onDone, onFailed }) {
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+        {/* The proposal page the brand will open, read only (QA 122). */}
+        <Btn variant="secondary" href={r.brand_view_url || undefined} target="_blank" disabled={!r.brand_view_url} onClick={viewAsBrand}
+             title={r.brand_view_url ? "Opens the page the brand will get, in a new tab. Nothing is counted or sent." : "Arrives with the main app's next deploy."}
+             style={{ marginRight: "auto" }}>View as brand</Btn>
         {rejecting ? <>
           <Btn variant="secondary" onClick={() => { setRejecting(false); setReason(""); setError(null); }} disabled={!!busy}>Cancel</Btn>
           <Btn variant="danger" onClick={reject} loading={busy === "reject"}>Reject with this reason</Btn>
@@ -197,6 +246,8 @@ export default function PitchReviewPage() {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
 
+  const loadedAt = useRef(0);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -206,10 +257,39 @@ export default function PitchReviewPage() {
       setRows(r.items || []);
       setTotal(r.total || 0);
       setError(null);
-    } catch (e) { setError(e.message); }
+      loadedAt.current = Date.now();
+      return r.items || [];
+    } catch (e) { setError(e.message); return null; }
     finally { setLoading(false); }
   }, [offset]);
   useEffect(() => { load(); }, [load]);
+
+  // View as brand's links expire an hour after the list was read.
+  const isStale = useCallback(() => !!loadedAt.current && Date.now() - loadedAt.current > STALE_MS, []);
+  const freshViewUrl = useCallback(async (pitchId) => {
+    const items = await load();
+    // Not read: its error shows above the list.
+    if (!items) return "";
+    const url = items.find((x) => x.pitch_id === pitchId)?.brand_view_url || "";
+    // Said here: the card itself is gone once it left the queue.
+    if (!url) setNotice("That pitch is no longer waiting for review. The list is up to date.");
+    return url;
+  }, [load]);
+
+  // Read the list again once it is stale: on the tab coming back, and every
+  // few minutes while it is shown, so a middle-click or cmd-click (which skip
+  // the click check) also gets a live link.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "visible" && isStale()) load();
+    };
+    document.addEventListener("visibilitychange", check);
+    const timer = setInterval(check, STALE_CHECK_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", check);
+      clearInterval(timer);
+    };
+  }, [load, isStale]);
 
   const done = (message) => {
     setNotice(message);
@@ -244,7 +324,7 @@ export default function PitchReviewPage() {
       {!loading && available && rows.length === 0 && (
         <Card style={{ padding: 20, color: t.textMuted, fontSize: 13 }}>Nothing waiting. New first pitches show up here as creators send them.</Card>
       )}
-      {rows.map((r) => <ReviewCard key={r.pitch_id} r={r} onDone={done} onFailed={load} />)}
+      {rows.map((r) => <ReviewCard key={r.pitch_id} r={r} onDone={done} onFailed={load} isStale={isStale} freshViewUrl={freshViewUrl} />)}
 
       {total > PAGE && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
