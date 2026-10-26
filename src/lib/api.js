@@ -210,6 +210,13 @@ export const api = {
     request(`/pitch/reviews/${id}/approve`, { method: "POST", body: JSON.stringify({ contact_email: contactEmail || "" }) }),
   rejectPitchReview: (id, reason) =>
     request(`/pitch/reviews/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+  // Pitch Partners: applications (approve gives 30 days of Pitch Pro, reject's
+  // reason is what she reads) and videos to check are live.
+  getPitchPartners: ({ queue, limit = 25, offset = 0 } = {}) => request(`/pitch/partners?${buildQs({ queue, limit, offset })}`),
+  decidePitchPartner: (userId, decision, reason) =>
+    request(`/pitch/partners/${userId}/decide`, { method: "POST", body: JSON.stringify({ decision, reason: reason || "" }) }),
+  verifyPitchPartnerVideo: (userId, decision, reason) =>
+    request(`/pitch/partners/${userId}/video`, { method: "POST", body: JSON.stringify({ decision, reason: reason || "" }) }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>

@@ -7,6 +7,7 @@
 export const PITCH_TABS = [
   { to: "/ops/pitch", label: "Pitches", match: (p) => p === "/ops/pitch" },
   { to: "/ops/pitch/review", label: "In review", match: (p) => p.startsWith("/ops/pitch/review") },
+  { to: "/ops/pitch/partners", label: "Partners", match: (p) => p.startsWith("/ops/pitch/partners") },
   { to: "/ops/pitch/creators", label: "Creators", match: (p) => p.startsWith("/ops/pitch/creators") },
   { to: "/ops/pitch/brands", label: "Brands", match: (p) => p.startsWith("/ops/pitch/brands") },
 ];
@@ -174,4 +175,31 @@ export function when(v) {
   const d = new Date(v);
   if (isNaN(d)) return String(v);
   return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// Pitch Partners (main app QA 132): the queue's tabs, as an admin says them.
+export const PARTNER_QUEUES = [
+  { value: "applications", label: "Applications", empty: "No applications waiting. New ones show up here as creators apply on linkable.link/partners.",
+    count: (n) => `${n} ${n === 1 ? "application" : "applications"} waiting` },
+  { value: "videos", label: "Videos to check", empty: "No videos waiting. A partner's video shows up here once she pastes its link.",
+    count: (n) => `${n} ${n === 1 ? "video" : "videos"} to check` },
+  { value: "approved", label: "Partners", empty: "No Pitch Partners yet.",
+    count: (n) => `${n} Pitch ${n === 1 ? "Partner" : "Partners"}` },
+  { value: "rejected", label: "Rejected", empty: "Nobody rejected.",
+    count: (n) => `${n} rejected` },
+];
+
+// A partner's main account (as she applied: Instagram when she has one, else
+// TikTok) and a button to each account she has. "Instagram · @mel · 33.3K
+// followers".
+export function partnerAccount(r) {
+  const handle = String(r.main_handle || "").replace(/^@/, "");
+  const name = PLATFORM[r.main_platform];
+  const line = name ? [name, handle && `@${handle}`, count(r.main_followers) && `${count(r.main_followers)} followers`].filter(Boolean).join(" · ") : "";
+  const links = [];
+  const ig = String(r.instagram_handle || "").replace(/^@/, "").trim();
+  const tt = String(r.tiktok_handle || "").replace(/^@/, "").trim();
+  if (/^[A-Za-z0-9._]{1,30}$/.test(ig)) links.push({ label: "Instagram", href: `https://www.instagram.com/${ig}/` });
+  if (/^[A-Za-z0-9._]{1,30}$/.test(tt)) links.push({ label: "TikTok", href: `https://www.tiktok.com/@${tt}` });
+  return { line, links };
 }
