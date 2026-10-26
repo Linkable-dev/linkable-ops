@@ -1,9 +1,11 @@
 // Pitch Partners (main app QA 132, 26 Oct): creators apply to promote Pitch.
 // The main app owns the programme, so ops asks it: ListPitchPartners (the
-// queue: applications, videos to check, approved, rejected),
-// DecidePitchPartner (approve gives her 30 days of Pitch Pro; reject's reason
-// is what she reads) and VerifyPitchPartnerVideo (live: Pitch Pro to 3 months
-// in all; not found: back to her with the reason). Each is signed with ops'
+// queue: applications, videos to check, payouts waiting for the team,
+// partners, rejected, removed), DecidePitchPartner (approve gives her 30
+// days of Pitch Pro; reject's reason is what she reads; approve_payout lets
+// her first or an unusual payout go; remove ends the partnership) and
+// VerifyPitchPartnerVideo (live: Pitch Pro to 3 months in all; not found:
+// back to her with the reason). Each is signed with ops'
 // own service key (lib/mainAppGrpc.js), which the gRPC server accepts for
 // these RPCs, the pitch review queue and the payments admin only.
 //
@@ -27,12 +29,16 @@ export const APPLICATION = {
   12: ["applied_at", "string"], 13: ["decided_at", "string"], 14: ["decided_by", "string"],
   15: ["reject_reason", "string"], 16: ["video_url", "string"], 17: ["video_status", "string"],
   18: ["video_submitted_at", "string"], 19: ["pro_until", "string"], 20: ["signups", "int"], 21: ["on_pro", "int"],
-  22: ["video_note", "string"],
+  22: ["video_note", "string"], 23: ["blocked_earnings", "int"], 24: ["blocked_reason", "string"],
+  25: ["payout_review_reason", "string"], 26: ["payout_review_since", "string"],
 };
 const LIST = { 1: ["partners", { repeated: true, schema: APPLICATION }], 2: ["total", "int"] };
 const DECISION_RESPONSE = { 1: ["status", "string"], 2: ["video_status", "string"], 3: ["pro_until", "string"] };
 
-export const QUEUES = ["applications", "videos", "approved", "rejected"];
+export const QUEUES = ["applications", "videos", "payouts", "approved", "rejected", "removed"];
+// What a decision can be: an application (approve, reject), a payout that
+// waits for the team (approve_payout), a partner (remove, with a reason).
+export const DECISIONS = ["approve", "reject", "approve_payout", "remove"];
 
 const HTTP_FOR_GRPC = {
   [GRPC.INVALID_ARGUMENT]: 400, [GRPC.NOT_FOUND]: 404, [GRPC.FAILED_PRECONDITION]: 409, [GRPC.UNAVAILABLE]: 503,
@@ -69,17 +75,19 @@ export async function listPitchPartners({ queue = "applications", limit = 25, of
 
 function reasonOf(decision, reason) {
   const why = String(reason || "").trim();
-  if (decision !== "reject") return "";
+  if (decision !== "reject" && decision !== "remove") return "";
   if (!why) throw fail(400, "Write the reason the creator will read.");
   if ([...why].length > 500) throw fail(400, "Keep the reason under 500 characters.");
   return why;
 }
 
 // Approve (30 days of Pitch Pro) or reject (with the reason she reads) an
-// application.
+// application; approve a payout waiting for the team; remove a partner (no
+// new earnings, her ledger is kept; the reason is emailed nowhere, it is
+// what her page says).
 export async function decidePitchPartner(userId, { decision, reason = "", admin } = {}, target) {
   if (!UUID.test(String(userId || ""))) throw fail(404, "That application doesn't exist.");
-  if (decision !== "approve" && decision !== "reject") throw fail(400, "Choose approve or reject.");
+  if (!DECISIONS.includes(decision)) throw fail(400, "Choose approve or reject.");
   const why = reasonOf(decision, reason);
   // PitchPartnerDecision: user_id 1, decision 2, reason 3, actor 4.
   const bytes = await call("DecidePitchPartner", encodeFields({ 1: userId, 2: decision, 3: why, 4: admin?.email || "" }), target);

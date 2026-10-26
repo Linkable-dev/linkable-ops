@@ -8,7 +8,7 @@ import { Tag } from "../../components/ui/Tag";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { HelpList, HelpTip } from "../../components/gtm/QueueParts";
 import { Avatar, Who, Banner } from "../../components/pitch/PitchParts";
-import { partnerAccount, PARTNER_QUEUES } from "../../components/pitch/pitchLabels";
+import { partnerAccount, PARTNER_QUEUES, PAYOUT_REVIEW, BLOCKED } from "../../components/pitch/pitchLabels";
 
 // Pitch Partners (main app QA 132): creators who promote Pitch. They apply
 // with their main account and what they would post; Approve gives them 30
@@ -24,6 +24,9 @@ const HELP = [
   ["Reject", "Asks for the reason. She reads it by email and on her Pitch Partners page, and can apply again."],
   ["Videos", "Open the link and check the video is live and pitches a brand with Linkable. Live adds 2 more months of Pitch Pro, 3 in all. Not found sends it back with your reason; she can paste another link."],
   ["Paid Pitch Pro", "A partner already paying for Pitch Pro keeps her plan: its next payment moves to the end of the free months. A Founding Creator keeps Founding."],
+  ["Payouts", "Her first payout, one larger than usual and one after many sign ups in a week wait in Payouts to approve. Check her creators look real, then Approve payout: the next hourly run pays it."],
+  ["Blocked", "A creator who pays with a card the partner has used, or signs up with her company email domain, earns her nothing. Those payments are counted on her card."],
+  ["Remove", "Ends the partnership: her link opens brand sign up again and new payments earn her nothing. What she earned before is still paid."],
 ];
 
 function ApplicationCard({ r, queue, onDone, onFailed }) {
@@ -34,9 +37,11 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
   const [error, setError] = useState(null);
   const account = partnerAccount(r);
   const isVideo = queue === "videos";
+  const isPayout = queue === "payouts";
+  const [removing, setRemoving] = useState(false);
 
   const act = async (decision) => {
-    if (decision === "reject" && !reason.trim()) { setError("Write the reason the creator will read."); return; }
+    if ((decision === "reject" || decision === "remove") && !reason.trim()) { setError("Write the reason the creator will read."); return; }
     setBusy(decision);
     setError(null);
     try {
@@ -46,9 +51,11 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
       const name = r.name || r.email;
       const until = res.pro_until ? ` Pitch Pro until ${friendlyDate(res.pro_until)}.` : "";
       onDone(
-        decision === "reject"
-          ? `${name} has your reason${isVideo ? " and can paste another link" : " and can apply again"}.`
-          : isVideo ? `${name}’s video is live.${until}` : `${name} is a Pitch Partner.${until}`,
+        decision === "approve_payout" ? `${name}’s payout goes with the next hourly run.`
+          : decision === "remove" ? `${name} is no longer a Pitch Partner. What she earned before is still paid.`
+          : decision === "reject"
+            ? `${name} has your reason${isVideo ? " and can paste another link" : " and can apply again"}.`
+            : isVideo ? `${name}’s video is live.${until}` : `${name} is a Pitch Partner.${until}`,
       );
     } catch (e) { setError(e.message); onFailed(); }
     finally { setBusy(""); }
@@ -94,14 +101,47 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
         )}
       </div>
 
-      {r.status === "rejected" && r.reject_reason && (
+      {r.blocked_earnings > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Banner tone="warning">
+            {`${r.blocked_earnings} ${r.blocked_earnings === 1 ? "payment" : "payments"} earned her nothing: ${BLOCKED[r.blocked_reason] || r.blocked_reason}.`}
+          </Banner>
+        </div>
+      )}
+      {isPayout && (
+        <div style={{ fontSize: 13, marginTop: 16 }}>
+          Waiting since {friendlyDate(r.payout_review_since)}: {PAYOUT_REVIEW[r.payout_review_reason] || r.payout_review_reason}
+        </div>
+      )}
+      {(r.status === "rejected" || r.status === "removed") && r.reject_reason && (
         <div style={{ fontSize: 13, marginTop: 16, color: t.textMuted }}>
-          Rejected {friendlyDate(r.decided_at)}{r.decided_by ? ` by ${r.decided_by}` : ""}: {r.reject_reason}
+          {r.status === "removed" ? "Removed" : "Rejected"} {friendlyDate(r.decided_at)}{r.decided_by ? ` by ${r.decided_by}` : ""}: {r.reject_reason}
         </div>
       )}
 
       {error && <div style={{ marginTop: 16 }}><Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner></div>}
 
+      {isPayout && (
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <Btn onClick={() => act("approve_payout")} loading={busy === "approve_payout"}>Approve payout</Btn>
+        </div>
+      )}
+      {queue === "approved" && (
+        <>
+          {removing && (
+            <div style={{ marginTop: 16 }}>
+              <Input multiline rows={3} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500}
+                     placeholder="Why the partnership ends. Her Pitch Partners page shows this." aria-label="Reason" />
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            {removing ? <>
+              <Btn variant="secondary" onClick={() => { setRemoving(false); setReason(""); setError(null); }} disabled={!!busy}>Cancel</Btn>
+              <Btn variant="danger" onClick={() => act("remove")} loading={busy === "remove"}>Remove with this reason</Btn>
+            </> : <Btn variant="secondary" onClick={() => setRemoving(true)}>Remove partner</Btn>}
+          </div>
+        </>
+      )}
       {(queue === "applications" || isVideo) && (
         <>
           {rejecting && (

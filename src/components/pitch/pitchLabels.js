@@ -183,11 +183,26 @@ export const PARTNER_QUEUES = [
     count: (n) => `${n} ${n === 1 ? "application" : "applications"} waiting` },
   { value: "videos", label: "Videos to check", empty: "No videos waiting. A partner's video shows up here once she pastes its link.",
     count: (n) => `${n} ${n === 1 ? "video" : "videos"} to check` },
+  { value: "payouts", label: "Payouts to approve", empty: "No payouts waiting. A partner's first payout and unusual ones wait here.",
+    count: (n) => `${n} ${n === 1 ? "payout" : "payouts"} waiting for you` },
   { value: "approved", label: "Partners", empty: "No Pitch Partners yet.",
     count: (n) => `${n} Pitch ${n === 1 ? "Partner" : "Partners"}` },
   { value: "rejected", label: "Rejected", empty: "Nobody rejected.",
     count: (n) => `${n} rejected` },
+  { value: "removed", label: "Removed", empty: "Nobody removed.",
+    count: (n) => `${n} removed` },
 ];
+
+// Why a payout waits for the team, and why an earning was blocked.
+export const PAYOUT_REVIEW = {
+  first_payout: "Her first payout",
+  large_payout: "Larger than usual (PITCH_PARTNER_PAYOUT_REVIEW_MINOR)",
+  many_signups: "Many sign ups with her link this week (PITCH_PARTNER_REVIEW_SIGNUPS)",
+};
+export const BLOCKED = {
+  same_card: "a creator paid with a card she has used",
+  same_domain: "a creator signed up with her company email domain",
+};
 
 // A partner's main account (as she applied: Instagram when she has one, else
 // TikTok) and a button to each account she has. "Instagram · @mel · 33.3K

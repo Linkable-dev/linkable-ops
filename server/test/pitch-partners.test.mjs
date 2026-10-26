@@ -100,5 +100,28 @@ test("a PitchPartnerList from the main app decodes field by field", () => {
     ],
   });
   assert.deepEqual(partnerAccount({ main_platform: "", instagram_handle: "bad handle!" }), { line: "", links: [] });
-  assert.deepEqual(PARTNER_QUEUES.map((q) => q.value), ["applications", "videos", "approved", "rejected"]);
+});
+
+test("payouts, removals and blocked earnings: the new decisions and fields", async () => {
+  const before = process.env.MAIN_APP_SERVICE_KEY;
+  delete process.env.MAIN_APP_SERVICE_KEY;
+  try {
+    // A removal needs the reason; approve_payout doesn't; both reach the main app (503 without the key).
+    await assert.rejects(decidePitchPartner(ID, { decision: "remove", reason: " " }, "dev"), (e) => e.status === 400);
+    await assert.rejects(decidePitchPartner(ID, { decision: "remove", reason: "Misleading claims" }, "dev"), (e) => e.status === 503);
+    await assert.rejects(decidePitchPartner(ID, { decision: "approve_payout" }, "dev"), (e) => e.status === 503);
+    const r = await listPitchPartners({ queue: "payouts" }, "dev");
+    assert.equal(r.queue, "payouts");
+  } finally {
+    if (before !== undefined) process.env.MAIN_APP_SERVICE_KEY = before;
+  }
+  // PitchPartnerApplication { blocked_earnings: 2, blocked_reason: "same_card",
+  // payout_review_reason: "first_payout", payout_review_since: "2026-11-25T10:00:00Z" }
+  const bytes = encodeFields({ 23: 2, 24: "same_card", 25: "first_payout", 26: "2026-11-25T10:00:00Z" });
+  const row = decodeMessage(bytes, APPLICATION);
+  assert.equal(row.blocked_earnings, 2);
+  assert.equal(row.blocked_reason, "same_card");
+  assert.equal(row.payout_review_reason, "first_payout");
+  assert.equal(row.payout_review_since, "2026-11-25T10:00:00Z");
+  assert.deepEqual(PARTNER_QUEUES.map((q) => q.value), ["applications", "videos", "payouts", "approved", "rejected", "removed"]);
 });
