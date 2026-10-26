@@ -4,7 +4,7 @@ import express from "express";
 import { pitchRoutes } from "../routes/pitch.js";
 import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
 import { approvePitchReview, rejectPitchReview, listPitchReviews, REVIEW } from "../lib/pitchReviews.js";
-import { reviewAccount } from "../../src/components/pitch/pitchLabels.js";
+import { reviewAccount, reviewProfiles } from "../../src/components/pitch/pitchLabels.js";
 
 async function serve(t, query, sign = async (keys) => keys.map(() => null), reviews) {
   const app = express();
@@ -258,4 +258,35 @@ test("a PitchReview's main account decodes and the card shows that account only"
     { handle: "", line: "No stats yet" });
   assert.deepEqual(reviewAccount({ creator_handle: "mayacollins", creator_followers: 0, creator_engagement: 0 }),
     { handle: "mayacollins", line: "Instagram · No stats yet" });
+});
+
+// QA 122 and 123, bytes the main app's Go marshaller wrote: View as brand's
+// signed link (33) and her TikTok handle (34), and the links the Creator
+// column draws from them: her main account's handle, then an icon for every
+// account she has, each opening her profile.
+test("a PitchReview's View as brand link and her accounts decode, and the card links each account", () => {
+  const bytes = Buffer.from("0a750a0270352a0b6d617961636f6c6c696e73ea0109696e7374616772616df2010b6d617961636f6c6c696e738a023a68747470733a2f2f6170702e6c696e6b61626c652e6c696e6b2f702f707265766965772f70353f653d31373930303030303030266b3d6162313292020a6d6179612e6d616b65730a270a027036ea010674696b746f6bf2010a796f7279616d6f6f6e3192020a796f7279616d6f6f6e311002", "hex");
+  const [maya, moon] = decodeMessage(bytes, { 1: ["reviews", { repeated: true, schema: REVIEW }], 2: ["total", "int"] }).reviews;
+  assert.equal(maya.brand_view_url, "https://app.linkable.link/p/preview/p5?e=1790000000&k=ab12");
+  assert.equal(maya.tiktok_handle, "maya.makes");
+  assert.equal(moon.brand_view_url, "");
+
+  // Instagram main, TikTok too: the handle opens her Instagram; both icons.
+  assert.deepEqual(reviewProfiles(maya), {
+    main: { platform: "instagram", label: "Instagram", handle: "mayacollins", url: "https://www.instagram.com/mayacollins/" },
+    accounts: [
+      { platform: "instagram", label: "Instagram", handle: "mayacollins", url: "https://www.instagram.com/mayacollins/" },
+      { platform: "tiktok", label: "TikTok", handle: "maya.makes", url: "https://www.tiktok.com/@maya.makes" },
+    ],
+  });
+  // TikTok only: the handle opens her TikTok, one icon.
+  const p = reviewProfiles(moon);
+  assert.equal(p.main.url, "https://www.tiktok.com/@yoryamoon1");
+  assert.deepEqual(p.accounts.map((a) => a.platform), ["tiktok"]);
+  // A main app from before 34: her TikTok when it is her main account.
+  assert.deepEqual(reviewProfiles({ ...moon, tiktok_handle: "" }).accounts.map((a) => a.url), ["https://www.tiktok.com/@yoryamoon1"]);
+  // And before 29-32: her Instagram from creator_handle.
+  assert.equal(reviewProfiles({ creator_handle: "mayacollins" }).main.url, "https://www.instagram.com/mayacollins/");
+  // No account: nothing to link.
+  assert.deepEqual(reviewProfiles({ creator_handle: "", main_platform: "" }), { main: null, accounts: [] });
 });

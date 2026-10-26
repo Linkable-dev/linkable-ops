@@ -119,3 +119,40 @@ test("removing a brand marks who removed it and closes its unsent drafts", async
   assert.deepEqual(soft.params, [ID, "pitch-test@example.com"]);
   assert.ok(seen.some((q) => /status = 'expired'/.test(q.sql) && /status = 'ready'/.test(q.sql)));
 });
+
+test("a category an admin sets is a person's pick (QA 119)", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, params) => {
+    seen.push({ sql, params });
+    if (/SELECT linkable_brand_user_id/.test(sql)) return { rows: [{ on_linkable: false }] };
+    return { rows: [{ id: ID }] };
+  });
+  assert.equal((await request(`/${ID}`, "PATCH", { category: "FOOD_BEVERAGE" })).status, 200);
+  const update = seen.find((q) => /UPDATE pitch_brands/.test(q.sql));
+  assert.deepEqual(update.params, [ID, "FOOD_BEVERAGE"]);
+  assert.match(update.sql, /category_source = 'team'/);
+  // Clearing it is a pick too: no category, and the store does not set one.
+  seen.length = 0;
+  assert.equal((await request(`/${ID}`, "PATCH", { category: "" })).status, 200);
+  assert.match(seen.find((q) => /UPDATE pitch_brands/.test(q.sql)).sql, /category_source = 'team'/);
+  // Other edits leave it alone.
+  seen.length = 0;
+  assert.equal((await request(`/${ID}`, "PATCH", { name: "OLIPOP" })).status, 200);
+  assert.doesNotMatch(seen.find((q) => /UPDATE pitch_brands/.test(q.sql)).sql, /category_source/);
+});
+
+test("a database without category_source still takes the edit", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, params) => {
+    seen.push({ sql, params });
+    if (/SELECT linkable_brand_user_id/.test(sql)) return { rows: [{ on_linkable: false }] };
+    if (/category_source/.test(sql)) throw Object.assign(new Error('column "category_source" of relation "pitch_brands" does not exist'), { code: "42703" });
+    return { rows: [{ id: ID }] };
+  });
+  const r = await request(`/${ID}`, "PATCH", { category: "PETS" });
+  assert.equal(r.status, 200);
+  const updates = seen.filter((q) => /UPDATE pitch_brands/.test(q.sql));
+  assert.equal(updates.length, 2);
+  assert.doesNotMatch(updates[1].sql, /category_source/);
+  assert.match(updates[1].sql, /category = \$2/);
+});
