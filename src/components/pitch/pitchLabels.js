@@ -146,6 +146,12 @@ export function count(n) {
 
 const PLATFORM = { instagram: "Instagram", tiktok: "TikTok" };
 
+// Her main account's platform: main_platform, or from a main app before it,
+// Instagram when she has a handle.
+function mainPlatform(r) {
+  return !r.main_platform ? (r.creator_handle ? "instagram" : "") : r.main_platform;
+}
+
 // The In review card's account line: her main account (Instagram when she
 // has one, else TikTok) and that account's own numbers, never Instagram and
 // TikTok added up. "TikTok · 8K followers · 6.2% engagement on views". A main
@@ -153,7 +159,7 @@ const PLATFORM = { instagram: "Instagram", tiktok: "TikTok" };
 // hers only when she has an Instagram handle (else they are left over).
 export function reviewAccount(r) {
   const legacy = !r.main_platform;
-  const platform = legacy ? (r.creator_handle ? "instagram" : "") : r.main_platform;
+  const platform = mainPlatform(r);
   if (!PLATFORM[platform]) return { handle: "", line: "No stats yet" };
   const handle = (legacy ? r.creator_handle : r.main_handle) || "";
   const n = legacy ? r.creator_followers : r.main_followers;
@@ -166,6 +172,28 @@ export function reviewAccount(r) {
     handle: handle || r.creator_handle || "",
     line: [PLATFORM[platform], ...(stats.length ? stats : ["No stats yet"])].join(" · "),
   };
+}
+
+function profileUrl(platform, handle) {
+  const h = encodeURIComponent(String(handle).trim().replace(/^@+/, ""));
+  return platform === "tiktok" ? `https://www.tiktok.com/@${h}` : `https://www.instagram.com/${h}/`;
+}
+
+// The In review card's links to her (QA 123): her main account (the handle,
+// as reviewAccount picks it) and every account she has connected, Instagram
+// first. An Instagram is always her main one (TikTok is main only without
+// one), so a TikTok main means no Instagram. A main app from before
+// tiktok_handle sends her TikTok only when it is her main account.
+export function reviewProfiles(r) {
+  const platform = mainPlatform(r);
+  const { handle } = reviewAccount(r);
+  const accounts = [];
+  if (platform === "instagram" && handle) accounts.push({ platform: "instagram", label: "Instagram", handle });
+  const tiktok = r.tiktok_handle || (platform === "tiktok" ? handle : "");
+  if (tiktok) accounts.push({ platform: "tiktok", label: "TikTok", handle: tiktok });
+  for (const a of accounts) a.url = profileUrl(a.platform, a.handle);
+  const main = accounts.find((a) => a.platform === platform) || null;
+  return { main, accounts };
 }
 
 // "5 Oct, 16:15" — the timeline wants the moment, not "2h ago".

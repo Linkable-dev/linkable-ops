@@ -10,7 +10,10 @@
 // the main app may do. Without the key the tab says so.
 //
 // Never link to the brand's proposal (/p/<token>): the main app counts any
-// browser visit there as the brand viewing it and emails the creator.
+// browser visit there as the brand viewing it and emails the creator. View as
+// brand (QA 122) is the main app's own read-only copy of that page,
+// /p/preview/<pitch id>, behind a link it signs for an hour when it lists the
+// queue (brand_view_url): no view counted, nothing written.
 import { mainAppGrpcConfigured, unaryCall, encodeFields, decodeMessage, GrpcError, GRPC } from "./mainAppGrpc.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,7 +27,8 @@ function fail(status, message) {
 
 // PitchReview (proto/pitch.proto) field numbers. 7 and 8 are her
 // Instagram's numbers; 29-32 her main account's (Instagram when she has one,
-// else TikTok, whose engagement is on views), which the card shows.
+// else TikTok, whose engagement is on views), which the card shows. 33 is
+// View as brand's signed link, 34 her TikTok handle whichever is her main.
 export const REVIEW = {
   1: ["pitch_id", "string"], 2: ["submitted_at", "string"], 3: ["creator_user_id", "string"],
   4: ["creator_name", "string"], 5: ["creator_handle", "string"], 6: ["creator_email", "string"],
@@ -37,6 +41,7 @@ export const REVIEW = {
   25: ["asks", "string"], 26: ["problems", ["string"]], 27: ["creator_pitches_sent", "int"],
   28: ["flags", ["string"]], 29: ["main_platform", "string"], 30: ["main_handle", "string"],
   31: ["main_followers", "int"], 32: ["main_engagement", "double"],
+  33: ["brand_view_url", "string"], 34: ["tiktok_handle", "string"],
 };
 const REVIEW_LIST = { 1: ["reviews", { repeated: true, schema: REVIEW }], 2: ["total", "int"] };
 const DECISION_RESPONSE = { 1: ["status", "string"] };

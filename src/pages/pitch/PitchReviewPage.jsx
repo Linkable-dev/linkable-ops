@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
 import { Card } from "../../components/ui/Card";
@@ -8,7 +8,8 @@ import { Tag } from "../../components/ui/Tag";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { HelpList, HelpTip } from "../../components/gtm/QueueParts";
 import { Avatar, Logo, Who, Banner } from "../../components/pitch/PitchParts";
-import { reviewAccount } from "../../components/pitch/pitchLabels";
+import { reviewAccount, reviewProfiles } from "../../components/pitch/pitchLabels";
+import { SocialIcon } from "../../components/ui/SocialIcon";
 
 // The In review queue (main app QA 112): a creator's first three pitches wait
 // here before they go out. Each shows the creator, the pitch as the brand will
@@ -17,7 +18,14 @@ import { reviewAccount } from "../../components/pitch/pitchLabels";
 // pitch and by email, and she can edit it and send it again.
 //
 // Never a link to the brand's proposal (/p/<token>): opening it counts as the
-// brand viewing it and emails the creator. Everything it says is shown here.
+// brand viewing it and emails the creator. View as brand (QA 122) opens the
+// main app's read-only copy of that page instead, by a link the main app
+// signed for an hour when it listed the queue (brand_view_url). The list is
+// read again when the tab comes back after a while, so the links stay fresh.
+
+// Older than this when the tab comes back: read the queue again (the View as
+// brand links work for an hour).
+const STALE_MS = 45 * 60 * 1000;
 
 const PAGE = 10;
 
@@ -26,6 +34,7 @@ const HELP = [
   ["Checks", "Every pitch is checked on its own first: a brand contact we can stand behind, a real looking name, an idea and a product, the brand still taking pitches, and no more than two other creators pitching the brand at once. A failed check is shown in red and stops Approve; Approve runs the checks again."],
   ["Flags", "In amber: something to look at, like a name in capitals. A flagged pitch comes here even from a creator past her first three, and you can approve it."],
   ["Contact", "Where the pitch goes. Change it before you approve to send it somewhere else; the address becomes the brand's contact for later pitches too. A brand on Linkable gets the pitch in its Messages, so there is nothing to change."],
+  ["View as brand", "Opens the page the brand will get from this pitch, in a new tab, as it will look. Reply is off, and nothing is counted or sent. The link works for an hour; the list reloads when you come back to it after a while."],
   ["Approve", "Sends the pitch now: Messages for a brand on Linkable, otherwise the Lemlist queue like every other pitch, follow ups included."],
   ["Reject", "Asks for the reason. The creator reads it on her pitch and in an email, edits the pitch and sends it again, and it comes back here."],
 ];
@@ -91,11 +100,11 @@ function ReviewCard({ r, onDone, onFailed }) {
 
   const mediaKit = r.creator_media_kit;
   const account = reviewAccount(r);
+  const profiles = reviewProfiles(r);
   return (
     <Card style={{ padding: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <Who picture={<Avatar name={r.creator_name} />} title={r.creator_name || r.creator_email}
-             sub={[account.handle && `@${account.handle}`, r.creator_email].filter(Boolean).join(" · ")} />
+        <Who picture={<Avatar name={r.creator_name} />} title={r.creator_name || r.creator_email} sub={r.creator_email} />
         <span style={{ color: t.textMuted }}>→</span>
         <Who picture={<Logo name={r.brand_name} />} title={r.brand_name} sub={r.brand_domain} />
         <span style={{ marginLeft: "auto", fontSize: 12, color: t.textMuted }}>Sent for review {friendlyDate(r.submitted_at)}</span>
@@ -114,6 +123,23 @@ function ReviewCard({ r, onDone, onFailed }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
         <Section title="Creator">
+          {profiles.accounts.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, minWidth: 0 }}>
+              {profiles.main && (
+                <a href={profiles.main.url} target="_blank" rel="noopener noreferrer" title={`Her ${profiles.main.label}`}
+                   style={{ fontSize: 13, fontWeight: 600, color: t.text, textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  @{profiles.main.handle}
+                </a>
+              )}
+              {profiles.accounts.map((a) => (
+                <a key={a.platform} href={a.url} target="_blank" rel="noopener noreferrer"
+                   title={`@${a.handle} on ${a.label}`} aria-label={`@${a.handle} on ${a.label}`}
+                   style={{ color: t.text, display: "inline-flex" }}>
+                  <SocialIcon platform={a.platform} size={16} />
+                </a>
+              ))}
+            </div>
+          )}
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
             {account.line}
           </div>
@@ -173,7 +199,11 @@ function ReviewCard({ r, onDone, onFailed }) {
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+        {/* The proposal page the brand will open, read only (QA 122). */}
+        <Btn variant="secondary" href={r.brand_view_url || undefined} target="_blank" disabled={!r.brand_view_url}
+             title={r.brand_view_url ? "Opens the page the brand will get, in a new tab. Nothing is counted or sent." : "Arrives with the main app's next deploy."}
+             style={{ marginRight: "auto" }}>View as brand</Btn>
         {rejecting ? <>
           <Btn variant="secondary" onClick={() => { setRejecting(false); setReason(""); setError(null); }} disabled={!!busy}>Cancel</Btn>
           <Btn variant="danger" onClick={reject} loading={busy === "reject"}>Reject with this reason</Btn>
@@ -197,6 +227,8 @@ export default function PitchReviewPage() {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
 
+  const loadedAt = useRef(0);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -206,10 +238,20 @@ export default function PitchReviewPage() {
       setRows(r.items || []);
       setTotal(r.total || 0);
       setError(null);
+      loadedAt.current = Date.now();
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [offset]);
   useEffect(() => { load(); }, [load]);
+
+  // Back on the tab after a while: View as brand's links may have expired.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && loadedAt.current && Date.now() - loadedAt.current > STALE_MS) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [load]);
 
   const done = (message) => {
     setNotice(message);
