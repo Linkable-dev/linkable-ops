@@ -12,9 +12,10 @@
 // the public half from SERVICE_PUBLIC_KEYS ("ops=<base64 PEM>") and accepts
 // such a token only for the payments-admin RPCs (HoldCreatorPayouts,
 // ReleaseCreatorPayouts, ListPayoutHolds, ListPayoutReports,
-// ResolvePayoutReport) and the pitch review queue (ListPitchReviews,
-// ApprovePitchReview, RejectPitchReview), and only if exp is at most 15
-// minutes after iat.
+// ResolvePayoutReport), the pitch review queue (ListPitchReviews,
+// ApprovePitchReview, RejectPitchReview) and the Pitch Partners queue
+// (ListPitchPartners, DecidePitchPartner, VerifyPitchPartnerVideo), and only
+// if exp is at most 15 minutes after iat.
 //
 // NEVER put the main app's own private key (client/src/lib/server/private.key)
 // here: it signs user tokens and would give ops full access to every RPC.

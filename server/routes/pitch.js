@@ -2,6 +2,7 @@ import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
 import { pitchReviewsClient } from "../lib/pitchReviews.js";
+import { pitchPartnersClient } from "../lib/pitchPartners.js";
 import {
   parseColumnFilters, filterConditions, orderBySql,
   textFilter, numberFilter, dateFilter, enumFilter, boolFilter,
@@ -196,7 +197,7 @@ const pageOf = (q, def = 25) => ({
   offset: Math.max(parseInt(q.offset) || 0, 0),
 });
 
-export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews = pitchReviewsClient } = {}) {
+export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews = pitchReviewsClient, partners = pitchPartnersClient } = {}) {
   const router = Router();
 
   // The In review queue (QA 112). Errors from the main app are its own
@@ -222,6 +223,33 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
   router.post("/reviews/:id/reject", async (req, res) => {
     try {
       res.json(await reviews.reject(req.params.id, { reason: req.body?.reason, admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // Pitch Partners (main app QA 132): applications to approve or reject, and
+  // videos to check are live. All through the main app (lib/pitchPartners.js).
+  // GET /api/pitch/partners?queue=applications|videos|approved|rejected&limit=&offset=
+  router.get("/partners", async (req, res) => {
+    const { limit, offset } = pageOf(req.query);
+    try {
+      res.json(await partners.list({ queue: String(req.query.queue || "applications"), limit, offset }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/partners/:userId/decide { decision: approve|reject, reason? }
+  router.post("/partners/:userId/decide", async (req, res) => {
+    try {
+      res.json(await partners.decide(req.params.userId, {
+        decision: req.body?.decision, reason: req.body?.reason,
+        currency: req.body?.currency, amountMinor: req.body?.amount_minor, admin: req.admin,
+      }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/partners/:userId/video { decision: verify|reject, reason? }
+  router.post("/partners/:userId/video", async (req, res) => {
+    try {
+      res.json(await partners.video(req.params.userId, { decision: req.body?.decision, reason: req.body?.reason, admin: req.admin }, req.dbTarget));
     } catch (e) { reviewError(res, e); }
   });
 
