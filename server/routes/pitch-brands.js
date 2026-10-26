@@ -187,6 +187,9 @@ export function pitchBrandsRoutes({ query = cloudSqlQuery } = {}) {
       const category = String(body.category).trim();
       if (category && !CATEGORIES[category]) return res.status(400).json({ error: "Pick a category from the list." });
       set("category", category);
+      // A person's pick: service-grpc never replaces it with the category it
+      // reads from the store's products (QA 119, services/pitch_category.go).
+      sets.push("category_source = 'team'");
     }
     if (body.country !== undefined) {
       const country = String(body.country).trim().toUpperCase().replace(/^UK$/, "GB");
@@ -205,11 +208,20 @@ export function pitchBrandsRoutes({ query = cloudSqlQuery } = {}) {
       if (cur.rows[0].on_linkable) return res.status(409).json({ error: LINKABLE_READ_ONLY });
       // instagram's CASEs compare against the old value, so they run before
       // instagram itself changes: Postgres evaluates every SET on the old row.
-      const { rows } = await query(
-        `UPDATE pitch_brands b SET ${sets.join(", ")}, updated = current_timestamp
+      const update = (list) => query(
+        `UPDATE pitch_brands b SET ${list.join(", ")}, updated = current_timestamp
           WHERE id = $1 AND ${ND} RETURNING ${BRAND_COLUMNS}`,
         params,
       );
+      let rows;
+      try {
+        ({ rows } = await update(sets));
+      } catch (e) {
+        // A database from before QA 119 has no category_source yet: the edit
+        // still goes through (nothing there replaces categories).
+        if (e?.code !== "42703" || !String(e.message).includes("category_source")) throw e;
+        ({ rows } = await update(sets.filter((s) => !s.startsWith("category_source"))));
+      }
       console.log(`[pitch-brand] edit admin=${req.admin?.email} db=${req.dbTarget} id=${req.params.id} fields=${Object.keys(body).join(",")}`);
       res.json({ brand: rows[0] });
     } catch (e) {
