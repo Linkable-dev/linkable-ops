@@ -62,7 +62,9 @@ const ago = (iso) => {
 };
 
 const LANGUAGE_LABEL = { en: "English", it: "Italiano" };
-const dmLink = (handle) => `https://ig.me/m/${encodeURIComponent(handle)}`;
+// Straight to the chat on instagram.com: ig.me only redirects there, and it
+// rate-limits (HTTP 429) after a run of DMs from one browser.
+const dmLink = (handle) => `https://www.instagram.com/m/${encodeURIComponent(handle)}`;
 const nameOf = (lead) => lead.brand_name || lead.ig_full_name || lead.handle;
 const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
