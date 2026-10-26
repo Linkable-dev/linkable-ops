@@ -109,7 +109,9 @@ test("payouts, removals and blocked earnings: the new decisions and fields", asy
     // A removal needs the reason; approve_payout doesn't; both reach the main app (503 without the key).
     await assert.rejects(decidePitchPartner(ID, { decision: "remove", reason: " " }, "dev"), (e) => e.status === 400);
     await assert.rejects(decidePitchPartner(ID, { decision: "remove", reason: "Misleading claims" }, "dev"), (e) => e.status === 503);
-    await assert.rejects(decidePitchPartner(ID, { decision: "approve_payout" }, "dev"), (e) => e.status === 503);
+    // approve_payout needs the amount the card showed; with it, it reaches the main app.
+    await assert.rejects(decidePitchPartner(ID, { decision: "approve_payout" }, "dev"), (e) => e.status === 400);
+    await assert.rejects(decidePitchPartner(ID, { decision: "approve_payout", currency: "GBP", amountMinor: 250950 }, "dev"), (e) => e.status === 503);
     const r = await listPitchPartners({ queue: "payouts" }, "dev");
     assert.equal(r.queue, "payouts");
   } finally {
@@ -117,12 +119,25 @@ test("payouts, removals and blocked earnings: the new decisions and fields", asy
   }
   // PitchPartnerApplication { blocked_earnings: 2, blocked_reason: "same_card",
   // payout_review_reason: "first_payout", payout_review_since: "2026-11-25T10:00:00Z" }
-  const bytes = encodeFields({ 23: 2, 24: "same_card", 25: "first_payout", 26: "2026-11-25T10:00:00Z", 27: "£2,509.50" });
+  const bytes = encodeFields({ 23: 2, 24: "same_card", 25: "first_payout", 26: "2026-11-25T10:00:00Z", 27: "£2,509.50", 28: "GBP", 29: 250950 });
   const row = decodeMessage(bytes, APPLICATION);
   assert.equal(row.blocked_earnings, 2);
   assert.equal(row.blocked_reason, "same_card");
   assert.equal(row.payout_review_reason, "first_payout");
   assert.equal(row.payout_review_since, "2026-11-25T10:00:00Z");
   assert.equal(row.payout_review_amount, "£2,509.50");
+  assert.equal(row.payout_review_currency, "GBP");
+  assert.equal(row.payout_review_minor, 250950);
   assert.deepEqual(PARTNER_QUEUES.map((q) => q.value), ["applications", "videos", "payouts", "approved", "rejected", "removed"]);
+});
+
+test("Approve payout passes the currency and amount the card showed", async (t) => {
+  const calls = [];
+  const request = await serve(t, {
+    list: async () => ({ available: true, items: [], total: 0 }),
+    decide: async (id, o) => { calls.push([id, o.decision, o.currency, o.amountMinor]); return { status: "approved" }; },
+    video: async () => ({}),
+  });
+  await request(`/partners/${ID}/decide`, "POST", { decision: "approve_payout", currency: "USD", amount_minor: 1200 });
+  assert.deepEqual(calls[0], [ID, "approve_payout", "USD", 1200]);
 });

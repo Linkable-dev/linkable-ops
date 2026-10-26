@@ -239,7 +239,10 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
   // POST /api/pitch/partners/:userId/decide { decision: approve|reject, reason? }
   router.post("/partners/:userId/decide", async (req, res) => {
     try {
-      res.json(await partners.decide(req.params.userId, { decision: req.body?.decision, reason: req.body?.reason, admin: req.admin }, req.dbTarget));
+      res.json(await partners.decide(req.params.userId, {
+        decision: req.body?.decision, reason: req.body?.reason,
+        currency: req.body?.currency, amountMinor: req.body?.amount_minor, admin: req.admin,
+      }, req.dbTarget));
     } catch (e) { reviewError(res, e); }
   });
 

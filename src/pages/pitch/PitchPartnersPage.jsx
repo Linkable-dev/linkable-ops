@@ -47,7 +47,8 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
     try {
       const res = isVideo
         ? await api.verifyPitchPartnerVideo(r.user_id, decision, reason.trim())
-        : await api.decidePitchPartner(r.user_id, decision, reason.trim());
+        : await api.decidePitchPartner(r.user_id, decision, reason.trim(),
+            decision === "approve_payout" ? { currency: r.payout_review_currency, amount_minor: r.payout_review_minor } : {});
       const name = r.name || r.email;
       const until = res.pro_until ? ` Pitch Pro until ${friendlyDate(res.pro_until)}.` : "";
       onDone(
@@ -238,7 +239,8 @@ export default function PitchPartnersPage() {
       {!loading && available && rows.length === 0 && (
         <Card style={{ padding: 20, color: t.textMuted, fontSize: 13 }}>{current.empty}</Card>
       )}
-      {rows.map((r) => <ApplicationCard key={r.user_id} r={r} queue={queue} onDone={done} onFailed={load} />)}
+      {/* Payouts: one card per partner and currency waiting. */}
+      {rows.map((r) => <ApplicationCard key={`${r.user_id}:${r.payout_review_currency || ""}`} r={r} queue={queue} onDone={done} onFailed={load} />)}
 
       {total > PAGE && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>

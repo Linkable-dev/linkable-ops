@@ -31,6 +31,7 @@ export const APPLICATION = {
   18: ["video_submitted_at", "string"], 19: ["pro_until", "string"], 20: ["signups", "int"], 21: ["on_pro", "int"],
   22: ["video_note", "string"], 23: ["blocked_earnings", "int"], 24: ["blocked_reason", "string"],
   25: ["payout_review_reason", "string"], 26: ["payout_review_since", "string"], 27: ["payout_review_amount", "string"],
+  28: ["payout_review_currency", "string"], 29: ["payout_review_minor", "int"],
 };
 const LIST = { 1: ["partners", { repeated: true, schema: APPLICATION }], 2: ["total", "int"] };
 const DECISION_RESPONSE = { 1: ["status", "string"], 2: ["video_status", "string"], 3: ["pro_until", "string"] };
@@ -85,12 +86,23 @@ function reasonOf(decision, reason) {
 // application; approve a payout waiting for the team; remove a partner (no
 // new earnings, her ledger is kept; the reason is emailed nowhere, it is
 // what her page says).
-export async function decidePitchPartner(userId, { decision, reason = "", admin } = {}, target) {
+//
+// approve_payout sends the payout as the admin saw it (currency and amount in
+// minor units, one per currency waiting); the main app refuses it when the
+// amount waiting has changed since.
+export async function decidePitchPartner(userId, { decision, reason = "", currency = "", amountMinor = 0, admin } = {}, target) {
   if (!UUID.test(String(userId || ""))) throw fail(404, "That application doesn't exist.");
   if (!DECISIONS.includes(decision)) throw fail(400, "Choose approve or reject.");
   const why = reasonOf(decision, reason);
-  // PitchPartnerDecision: user_id 1, decision 2, reason 3, actor 4.
-  const bytes = await call("DecidePitchPartner", encodeFields({ 1: userId, 2: decision, 3: why, 4: admin?.email || "" }), target);
+  const cur = String(currency || "").trim().toLowerCase();
+  const amount = Number(amountMinor);
+  if (decision === "approve_payout" && (!/^[a-z]{3}$/.test(cur) || !Number.isInteger(amount) || amount <= 0)) {
+    throw fail(400, "Reload the queue: this payout's amount is missing.");
+  }
+  // PitchPartnerDecision: user_id 1, decision 2, reason 3, actor 4, currency 5, amount_minor 6.
+  const fields = { 1: userId, 2: decision, 3: why, 4: admin?.email || "" };
+  if (decision === "approve_payout") Object.assign(fields, { 5: cur, 6: amount });
+  const bytes = await call("DecidePitchPartner", encodeFields(fields), target);
   const res = decodeMessage(bytes, DECISION_RESPONSE);
   console.log(`[pitch-partners] ${decision} target=${target} admin=${admin?.email} user=${userId} status=${res.status}`);
   return res;
