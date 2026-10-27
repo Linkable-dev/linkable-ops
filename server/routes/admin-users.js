@@ -221,6 +221,16 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Take a creator off this page, or put them back. Ops-only: nothing changes
+  // for the creator in the main app.
+  router.post("/:userId/hide-creator", async (req, res) => {
+    try {
+      res.json(await setCreatorOpsHidden(req.params.userId, req.body?.hidden !== false, req.admin, req.dbTarget || "prod"));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   // Hold / release a creator's payouts (main app payments part 2). Through the
   // main app's RPCs when ops has its service key, else the same rows the RPCs
   // write (lib/payoutHolds.js). A production tool, like restore; refused with
@@ -301,6 +311,24 @@ async function setCreatorDisqualified(userId, disqualified, reason, admin, dbTar
     admin: admin?.email, userId, disqualified, dbTarget,
   });
   return rows[0];
+}
+
+async function setCreatorOpsHidden(userId, hidden, admin, dbTarget) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  await cloudSqlQuery(
+    hidden
+      ? `INSERT INTO ops_hidden_users (user_id, hidden_by) VALUES ($1::uuid, $2)
+         ON CONFLICT (user_id) DO NOTHING`
+      : `DELETE FROM ops_hidden_users WHERE user_id = $1::uuid`,
+    hidden ? [userId, admin?.email || ""] : [userId],
+    dbTarget,
+  );
+  console.info("[ops] creator hidden from Impersonation", {
+    admin: admin?.email, userId, hidden, dbTarget,
+  });
+  return { user_id: userId, hidden };
 }
 
 // DEV-ONLY hard delete of a brand + everything hanging off it, in one
@@ -833,6 +861,8 @@ const CREATOR_NICHES_SQL =
   `string_to_array(UPPER(REPLACE(COALESCE(i.niche, ''), ' ', '')), '|')`;
 // Read through to_jsonb: the column is not on every database (see listCreators).
 const CREATOR_RULED_OUT_SQL = `(to_jsonb(i) ->> 'disqualified_at') IS NOT NULL`;
+// Taken off this page by an operator (sql/ops_hidden_users.sql).
+const CREATOR_OPS_HIDDEN_SQL = `EXISTS (SELECT 1 FROM ops_hidden_users oh WHERE oh.user_id = u.id)`;
 
 const CREATOR_SORTS = {
   creator_name:              `LOWER(${CREATOR_NAME_SQL})`,
@@ -865,6 +895,8 @@ const CREATOR_FILTERS = {
   engagement_rate: numberFilter(CREATOR_ER_SQL),
   photo:  enumFilter({ yes: CREATOR_HAS_PHOTO_SQL, no: `NOT ${CREATOR_HAS_PHOTO_SQL}` }),
   status: enumFilter({ ruled_out: CREATOR_RULED_OUT_SQL, active: `NOT ${CREATOR_RULED_OUT_SQL}` }),
+  // Sent by the page unless Show Hidden is on, like brands.visibility.
+  visibility: enumFilter({ visible: `NOT ${CREATOR_OPS_HIDDEN_SQL}`, hidden: CREATOR_OPS_HIDDEN_SQL }),
 };
 
 // The choices the creator Country and Niche filters offer: every value on
@@ -943,6 +975,7 @@ async function listCreators(query) {
             -- on prod to show a dev-only field is a bad trade.
             to_jsonb(i) ->> 'disqualified_at'     AS disqualified_at,
             COALESCE(to_jsonb(i) ->> 'disqualified_reason', '') AS disqualified_reason,
+            ${CREATOR_OPS_HIDDEN_SQL} AS ops_hidden,
             ${holdCols}
             sig.last_sign_in,
             COALESCE(part.n, 0)::int    AS active_partnerships,

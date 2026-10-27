@@ -97,8 +97,8 @@ const CREATOR_COLUMNS = [
     filter: { type: "date" } },
   { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
     filter: { type: "date" } },
-  // Room for Rule out + Hold payouts + View.
-  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 80, resizable: false },
+  // Room for Hide + Rule out + Hold payouts + View.
+  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 150, resizable: false },
 ];
 
 // The Creators tab can also be read as a grid of photo cards, like Discover in
@@ -192,11 +192,13 @@ export default function UsersPage() {
   const [restoring, setRestoring] = useState(null); // user_id being restored
   const [disqualifying, setDisqualifying] = useState(null); // user_id being ruled out
   const [holding, setHolding] = useState(null); // user_id whose payouts are being held/released
+  const [hiding, setHiding] = useState(null); // user_id being taken off / put back on this page
   const [actionError, setActionError] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [filters, setFilters] = useState({});
   // Brands tab: hidden (brands.hidden) rows are excluded by default so the list
-  // reads as the live marketplace; "Show Hidden" folds them back in.
+  // reads as the live marketplace; "Show Hidden" folds them back in. Creators
+  // tab: the same for creators an operator hid from this page.
   const [showHidden, setShowHidden] = useState(false);
   const [manageRow, setManageRow] = useState(null); // null = closed
   const [trialModalRow, setTrialModalRow] = useState(null); // null = closed
@@ -267,7 +269,7 @@ export default function UsersPage() {
         data = await api.listDeletedBrands({ q, limit, offset });
       } else {
         const fn = tab === "brands" ? api.listAdminBrands : api.listAdminCreators;
-        const effective = tab === "brands" && !showHidden
+        const effective = !showHidden
           ? { ...filters, visibility: "visible" }
           : filters;
         data = await fn({ q, limit, offset, sortBy: sort.sortBy, sortDir: sort.sortDir, filters: effective });
@@ -430,6 +432,24 @@ export default function UsersPage() {
     }
   }
 
+  // Hiding only tidies this page (test accounts, brands signed up as
+  // creators), so it asks nothing; Show Hidden is the way back.
+  async function handleHide(row) {
+    const hidden = !row.ops_hidden;
+    setActionError("");
+    setHiding(row.user_id);
+    try {
+      await api.setCreatorHidden(row.user_id, hidden);
+      setRows((rs) => (hidden && !showHidden
+        ? rs.filter((r) => r.user_id !== row.user_id)
+        : rs.map((r) => (r.user_id === row.user_id ? { ...r, ops_hidden: hidden } : r))));
+    } catch (err) {
+      setActionError(`${row.email}: ${err.message}`);
+    } finally {
+      setHiding(null);
+    }
+  }
+
   async function handleRestore(row) {
     const label = row.store_name || row.email || "this brand";
     const ok = await ask({
@@ -506,18 +526,23 @@ export default function UsersPage() {
             }
           />
         </div>
-        {/* Marketplace visibility (brands.hidden). A plain toggle beside the
-            search rather than a filter-row control because it isn't a column:
-            the HIDDEN pill sits inside the Store cell. Off (default) sends
-            visibility=visible; on drops the filter so hidden rows show too. */}
-        {tab === "brands" && (
+        {/* Marketplace visibility (brands.hidden), or creators hidden from
+            this page. A plain toggle beside the search rather than a
+            filter-row control because it isn't a column: the HIDDEN pill sits
+            inside the row. Off (default) sends visibility=visible; on drops
+            the filter so hidden rows show too. */}
+        {tab !== "deleted" && (
           <Btn
             size="sm"
             variant={showHidden ? "solid" : "outline"}
             onClick={() => setShowHidden((v) => !v)}
-            title={showHidden
-              ? "Hidden brands are included — click to hide them again"
-              : "Hidden brands (Manage → Marketplace visibility) are excluded — click to include them"}
+            title={tab === "creators"
+              ? (showHidden
+                ? "Hidden creators are included — click to leave them out again"
+                : "Creators hidden from this page are left out — click to include them")
+              : (showHidden
+                ? "Hidden brands are included — click to hide them again"
+                : "Hidden brands (Manage → Marketplace visibility) are excluded — click to include them")}
           >
             Show Hidden
           </Btn>
@@ -605,8 +630,10 @@ export default function UsersPage() {
                 theme={theme}
                 busy={impersonating === row.user_id}
                 disqualifyBusy={disqualifying === row.user_id}
+                hideBusy={hiding === row.user_id}
                 onImpersonate={() => handleImpersonate(row)}
                 onDisqualify={() => handleDisqualify(row)}
+                onHide={() => handleHide(row)}
               />
             ))}
           </CardGrid>
@@ -713,10 +740,12 @@ export default function UsersPage() {
               busy={impersonating === row.user_id}
               disqualifyBusy={disqualifying === row.user_id}
               holdBusy={holding === row.user_id}
+              hideBusy={hiding === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
               onManage={() => setManageRow(row)}
               onDisqualify={() => handleDisqualify(row)}
               onPayoutHold={() => handlePayoutHold(row)}
+              onHide={() => handleHide(row)}
             />
           ))
         )}
@@ -771,7 +800,7 @@ export default function UsersPage() {
 function renderUserCell(key, row, ctx) {
   const {
     tab, theme, avatar, initials, showImg, onImgError,
-    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold,
+    busy, disqualifyBusy, holdBusy, hideBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide,
   } = ctx;
   switch (key) {
     case "avatar":
@@ -824,9 +853,14 @@ function renderUserCell(key, row, ctx) {
     case "creator_name":
       return (
         <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {[row.first_name, row.last_name].filter(Boolean).join(" ")
-            || row.instagram_name
-            || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {[row.first_name, row.last_name].filter(Boolean).join(" ")
+                || row.instagram_name
+                || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
+            </span>
+            {row.ops_hidden && <HiddenPill title="Hidden from this page only — nothing changes for the creator. Unhide puts them back." />}
+          </span>
           {(row.location_country || row.location_city) && (
             <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {[row.location_city, row.location_country].filter(Boolean).join(", ")}
@@ -866,6 +900,17 @@ function renderUserCell(key, row, ctx) {
     case "actions":
       return (
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
+          {tab === "creators" && (
+            <Btn
+              size="sm"
+              variant="secondary"
+              onClick={onHide}
+              loading={hideBusy}
+              title={row.ops_hidden ? "Hidden from this page — click to put back" : "Take off this page (nothing changes for the creator)"}
+            >
+              {row.ops_hidden ? "Unhide" : "Hide"}
+            </Btn>
+          )}
           {tab === "creators" && (
             <Btn
               size="sm"
@@ -916,7 +961,7 @@ function renderUserCell(key, row, ctx) {
   }
 }
 
-function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold }) {
+function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, hideBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -926,7 +971,7 @@ function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBu
   const ctx = {
     tab, theme, avatar, initials, showImg,
     onImgError: () => setImgFailed(true),
-    busy, disqualifyBusy, holdBusy, onImpersonate, onManage, onDisqualify, onPayoutHold,
+    busy, disqualifyBusy, holdBusy, hideBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide,
   };
 
   return (
@@ -973,7 +1018,7 @@ function CardGrid({ children }) {
 // engagement rate, audience, location, and the same two actions as the table
 // row. Followers can arrive as the string "undefined" on old rows (see the
 // table cell), and engagement rate is already a percentage.
-function CreatorCard({ row, theme, busy, disqualifyBusy, onImpersonate, onDisqualify }) {
+function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate, onDisqualify, onHide }) {
   const avatar = avatarFor(row, "creator");
   const [imgFailed, setImgFailed] = useState(false);
   const showImg = avatar && !imgFailed;
@@ -1008,6 +1053,16 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, onImpersonate, onDisqua
             Ruled out
           </span>
         )}
+        <Btn
+          size="sm"
+          variant="secondary"
+          onClick={onHide}
+          loading={hideBusy}
+          title={row.ops_hidden ? "Hidden from this page — click to put back" : "Take off this page (nothing changes for the creator)"}
+          style={{ position: "absolute", right: 8, top: 8, padding: "4px 11px", fontSize: 11 }}
+        >
+          {row.ops_hidden ? "Unhide" : "Hide"}
+        </Btn>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, padding: "0 2px" }}>
@@ -1230,11 +1285,11 @@ function hexToRgba(hex, a) {
 // Marketplace-visibility marker for a brand with brands.hidden = true. Amber,
 // same as the modal's pill: it is a deliberate ops state, not an error, and not
 // a delete (the account still works; only the shop window is affected).
-function HiddenPill() {
+function HiddenPill({ title = "Hidden from the marketplace (Discover, campaign feed, public campaign list). Not deleted — change under Manage → Marketplace visibility." }) {
   const color = "#B45309";
   return (
     <span
-      title="Hidden from the marketplace (Discover, campaign feed, public campaign list). Not deleted — change under Manage → Marketplace visibility."
+      title={title}
       style={{
         display: "inline-flex", alignItems: "center", flexShrink: 0,
         padding: "1px 6px", borderRadius: 999,
