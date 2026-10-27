@@ -473,6 +473,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ disqualified, reason }),
     }),
+  // Take a creator off the Impersonation page, or put them back (ops-only).
+  setCreatorHidden: (userId, hidden) =>
+    request(`/admin-users/${userId}/hide-creator`, {
+      method: "POST",
+      body: JSON.stringify({ hidden }),
+    }),
   // Hold a creator's payouts while something is looked into, and release them
   // (main app payments part 2). A reason is required to hold.
   getPayoutHold: (userId) =>
