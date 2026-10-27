@@ -907,7 +907,7 @@ function renderUserCell(key, row, ctx) {
               variant="secondary"
               onClick={onHide}
               loading={hideBusy}
-              title={row.ops_hidden ? "Hidden from this page and Discover — click to put back" : "Take off this page and out of Discover"}
+              title={row.ops_hidden ? "Show again here and in Discover" : "Hide from this page and from Discover"}
             >
               {row.ops_hidden ? "Unhide" : "Hide"}
             </Btn>
@@ -1015,8 +1015,13 @@ function CardGrid({ children }) {
   );
 }
 
+// Three actions share a card as narrow as CARD_MIN_WIDTH, so Hide is an icon
+// and the other two run a little tighter than the table's.
+const cardBtn = { padding: "6px 12px" };
+const cardBadge = { padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#fff" };
+
 // One creator as a Discover-style card: the square photo first, then name and
-// engagement rate, audience, location, and the same two actions as the table
+// engagement rate, audience, location, Hide, and the same actions as the table
 // row. Followers can arrive as the string "undefined" on old rows (see the
 // table cell), and engagement rate is already a percentage.
 function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate, onDisqualify, onHide }) {
@@ -1043,27 +1048,20 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
         {showImg
           ? <img src={avatar} alt="" draggable="false" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
           : initialsFor(row, "creator")}
-        {row.disqualified_at && (
-          <span
-            title={row.disqualified_reason || "no reason recorded"}
-            style={{
-              position: "absolute", left: 8, top: 8, padding: "2px 8px", borderRadius: 999,
-              fontSize: 11, fontWeight: 600, color: "#fff", background: "#DC2626",
-            }}
-          >
-            Ruled out
-          </span>
+        {(row.disqualified_at || row.ops_hidden) && (
+          <div style={{ position: "absolute", left: 8, top: 8, display: "flex", gap: 4 }}>
+            {row.disqualified_at && (
+              <span title={row.disqualified_reason || "no reason recorded"} style={{ ...cardBadge, background: "#DC2626" }}>
+                Ruled out
+              </span>
+            )}
+            {row.ops_hidden && (
+              <span title="Hidden from this page and from Discover" style={{ ...cardBadge, background: "#B45309" }}>
+                Hidden
+              </span>
+            )}
+          </div>
         )}
-        <Btn
-          size="sm"
-          variant="secondary"
-          onClick={onHide}
-          loading={hideBusy}
-          title={row.ops_hidden ? "Hidden from this page and Discover — click to put back" : "Take off this page and out of Discover"}
-          style={{ position: "absolute", right: 8, top: 8, padding: "4px 11px", fontSize: 11 }}
-        >
-          {row.ops_hidden ? "Unhide" : "Hide"}
-        </Btn>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, padding: "0 2px" }}>
@@ -1086,7 +1084,19 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: "auto" }}>
+        <Btn
+          size="sm"
+          variant="secondary"
+          onClick={onHide}
+          loading={hideBusy}
+          title={row.ops_hidden ? "Unhide: show again here and in Discover" : "Hide from this page and from Discover"}
+          aria-label={row.ops_hidden ? "Unhide" : "Hide"}
+          style={{ width: 30, height: 30, padding: 0, justifyContent: "center" }}
+        >
+          {!hideBusy && <EyeIcon off={!row.ops_hidden} />}
+        </Btn>
+        <span style={{ flex: 1 }} />
         <Btn
           size="sm"
           variant={row.disqualified_at ? "solid" : "outline"}
@@ -1096,14 +1106,26 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
           title={row.disqualified_at
             ? `Ruled out: ${row.disqualified_reason || "no reason recorded"} — click to lift`
             : "Stop this creator applying to campaigns"}
+          style={cardBtn}
         >
           {row.disqualified_at ? "Ruled out" : "Rule out"}
         </Btn>
-        <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy}>
+        <Btn size="sm" variant="outline" onClick={onImpersonate} loading={busy} style={cardBtn}>
           View ↗
         </Btn>
       </div>
     </div>
+  );
+}
+
+// Eye with a slash for Hide, open for Unhide.
+function EyeIcon({ off }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+      {off && <path d="M3 3l18 18" />}
+    </svg>
   );
 }
 
@@ -1120,9 +1142,11 @@ function CreatorCardSkeleton() {
         <Skeleton width="50%" height={11} />
         <Skeleton width="70%" height={11} />
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-        <Skeleton width={78} height={30} radius={999} />
-        <Skeleton width={70} height={30} radius={999} />
+      <div style={{ display: "flex", gap: 6 }}>
+        <Skeleton width={30} height={30} radius={999} />
+        <span style={{ flex: 1 }} />
+        <Skeleton width={74} height={28} radius={999} />
+        <Skeleton width={66} height={28} radius={999} />
       </div>
     </div>
   );
