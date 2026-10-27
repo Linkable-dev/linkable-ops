@@ -218,6 +218,11 @@ export const api = {
     request(`/pitch/partners/${userId}/decide`, { method: "POST", body: JSON.stringify({ decision, reason: reason || "", ...payout }) }),
   verifyPitchPartnerVideo: (userId, decision, reason) =>
     request(`/pitch/partners/${userId}/video`, { method: "POST", body: JSON.stringify({ decision, reason: reason || "" }) }),
+  // Stuck payouts: listed oldest first; Reconcile asks Stripe now.
+  getStuckPitchPartnerPayouts: ({ limit = 10, offset = 0 } = {}) =>
+    request(`/pitch/partners/stuck-payouts?${buildQs({ limit, offset })}`),
+  reconcilePitchPartnerPayout: (batch) =>
+    request(`/pitch/partners/stuck-payouts/${batch}/reconcile`, { method: "POST", body: "{}" }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>

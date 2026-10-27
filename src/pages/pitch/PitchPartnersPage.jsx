@@ -8,7 +8,7 @@ import { Tag } from "../../components/ui/Tag";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { HelpList, HelpTip } from "../../components/gtm/QueueParts";
 import { Avatar, Who, Banner } from "../../components/pitch/PitchParts";
-import { partnerAccount, PARTNER_QUEUES, PAYOUT_REVIEW, BLOCKED } from "../../components/pitch/pitchLabels";
+import { partnerAccount, stuckAge, PARTNER_QUEUES, PAYOUT_REVIEW, BLOCKED } from "../../components/pitch/pitchLabels";
 
 // Pitch Partners (main app QA 132): creators who promote Pitch. They apply
 // with their main account and what they would post; Approve gives them 30
@@ -25,6 +25,7 @@ const HELP = [
   ["Videos", "Open the link and check the video is live and pitches a brand with Linkable. Live adds 2 more months of Pitch Pro, 3 in all. Not found sends it back with your reason; she can paste another link."],
   ["Paid Pitch Pro", "A partner already paying for Pitch Pro keeps her plan: its next payment moves to the end of the free months. A Founding Creator keeps Founding."],
   ["Payouts", "Her first payout, one larger than usual and one after many sign ups in a week wait in Payouts to approve. Check her creators look real, then Approve: the next hourly run pays up to that amount, in that currency, within 7 days. More than that waits here again."],
+  ["Stuck payouts", "Shown above Payouts to approve: a payout started over an hour ago but never recorded. Linkable checks them against Stripe every 15 minutes; Reconcile checks one now."],
   ["Blocked", "A creator who pays with a card the partner has used, or signs up with her company email domain, earns her nothing. Those payments are counted on her card."],
   ["Remove", "Ends the partnership: her link opens brand sign up again and new payments earn her nothing. What she earned before is still paid."],
 ];
@@ -175,6 +176,95 @@ function ApplicationCard({ r, queue, onDone, onFailed }) {
   );
 }
 
+const STUCK_PAGE = 10;
+
+// Stuck payouts: a payout the hourly run started over an hour ago but never
+// recorded (the run stopped, or Stripe's answer was unclear). The main app
+// checks them against Stripe every 15 minutes; Reconcile does it now.
+function StuckPayouts({ onNotice }) {
+  const { theme: t } = useTheme();
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [available, setAvailable] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.getStuckPitchPartnerPayouts({ limit: STUCK_PAGE, offset });
+      setAvailable(r.available !== false);
+      setRows(r.items || []);
+      setTotal(r.total || 0);
+      setError(null);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [offset]);
+  useEffect(() => { load(); }, [load]);
+
+  const reconcile = async (row) => {
+    setBusy(row.batch);
+    setError(null);
+    try {
+      const res = await api.reconcilePitchPartnerPayout(row.batch);
+      onNotice(`${row.name || row.email || "Her"} ${row.amount}: ${res.message}`);
+      if (rows.length === 1 && offset > 0 && res.outcome !== "left" && res.outcome !== "busy") setOffset(Math.max(0, offset - STUCK_PAGE));
+      else load();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(""); }
+  };
+
+  if (!available) return null;
+  return (
+    <Card style={{ padding: 20, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>Stuck payouts</div>
+        {total > 0 && <Tag color="#B45309">{total}</Tag>}
+        <HelpTip title="Stuck payouts">
+          <HelpList items={[
+            ["What", "A payout the hourly run started over an hour ago but never finished recording. Her earnings wait until it is sorted."],
+            ["Automatic", "Linkable checks each one against Stripe every 15 minutes."],
+            ["Reconcile", "Checks Stripe now. If the transfer went, the payout is marked paid. If it didn't, it goes out with the next run. If Stripe's answer doesn't match, nothing changes and the reason is shown: check it in Stripe."],
+          ]} />
+        </HelpTip>
+      </div>
+      {error && <div style={{ marginBottom: 12 }}><Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner></div>}
+      {loading && rows.length === 0 && <Skeleton width="100%" height={40} />}
+      {!loading && rows.length === 0 && (
+        <div style={{ fontSize: 13, color: t.textMuted }}>No stuck payouts. Every payout started has been recorded.</div>
+      )}
+      {rows.map((r) => (
+        <div key={r.batch} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: `1px solid ${t.border}`, flexWrap: "wrap" }}>
+          <Who picture={<Avatar name={r.name} />} title={r.name || r.email || "Deleted account"} sub={r.email} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>{r.amount}</div>
+            <div style={{ fontSize: 12, color: t.textMuted }}>
+              {`Started ${stuckAge(r.age_minutes)} ago · ${r.earnings_count} ${r.earnings_count === 1 ? "earning" : "earnings"}`}
+            </div>
+            <div style={{ fontSize: 11, color: t.textMuted, wordBreak: "break-all" }}>{`Batch ${r.batch}`}</div>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", justifyContent: "flex-end" }}>
+            <Btn size="sm" variant="secondary" onClick={() => reconcile(r)} loading={busy === r.batch} disabled={!!busy && busy !== r.batch}>
+              Reconcile
+            </Btn>
+          </div>
+        </div>
+      ))}
+      {total > STUCK_PAGE && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12, color: t.textMuted }}>
+          <span>{`${offset + 1}–${Math.min(offset + STUCK_PAGE, total)} of ${total}`}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Btn size="sm" variant="secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - STUCK_PAGE))}>Previous</Btn>
+            <Btn size="sm" variant="secondary" disabled={offset + STUCK_PAGE >= total} onClick={() => setOffset(offset + STUCK_PAGE)}>Next</Btn>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function PitchPartnersPage() {
   const { theme: t } = useTheme();
   const [queue, setQueue] = useState("applications");
@@ -228,6 +318,9 @@ export default function PitchPartnersPage() {
       {!available && <Banner tone="warning">{reason || "Pitch Partners isn't available on this server."}</Banner>}
       {notice && <Banner onDismiss={() => setNotice(null)}>{notice}</Banner>}
       {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
+
+      {/* Next to Payouts to approve: payouts started but never recorded. */}
+      {queue === "payouts" && available && <StuckPayouts onNotice={setNotice} />}
 
       {!loading && <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 10 }}>{current.count(total)}</div>}
       {loading && rows.length === 0 && [0, 1].map((i) => (

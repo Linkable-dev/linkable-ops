@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import express from "express";
 import { pitchRoutes } from "../routes/pitch.js";
 import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
-import { APPLICATION, decidePitchPartner, listPitchPartners, verifyPitchPartnerVideo } from "../lib/pitchPartners.js";
-import { partnerAccount, PARTNER_QUEUES } from "../../src/components/pitch/pitchLabels.js";
+import {
+  APPLICATION, RECONCILE_RESPONSE, STUCK_PAYOUT, decidePitchPartner, listPitchPartners, listStuckPitchPartnerPayouts,
+  reconcilePitchPartnerPayout, verifyPitchPartnerVideo,
+} from "../lib/pitchPartners.js";
+import { partnerAccount, stuckAge, PARTNER_QUEUES } from "../../src/components/pitch/pitchLabels.js";
 
 // Pitch Partners (main app QA 132): ops' queue, through the main app.
 
@@ -140,4 +143,47 @@ test("Approve payout passes the currency and amount the card showed", async (t) 
   });
   await request(`/partners/${ID}/decide`, "POST", { decision: "approve_payout", currency: "USD", amount_minor: 1200 });
   assert.deepEqual(calls[0], [ID, "approve_payout", "USD", 1200]);
+});
+
+test("stuck payouts: the routes, the bytes, and a bad batch never reaching the main app", async (t) => {
+  const calls = [];
+  const request = await serve(t, {
+    list: async () => ({ available: true, items: [], total: 0 }),
+    decide: async () => ({}),
+    video: async () => ({}),
+    stuck: async (q, target) => { calls.push(["stuck", q, target]); return { available: true, items: [], total: 0 }; },
+    reconcile: async (batch, o, target) => {
+      calls.push(["reconcile", batch, o.admin.email, target]);
+      return { outcome: "released", transfer_id: "", message: "Stripe has no transfer for this payout, so it goes out with the next payout run." };
+    },
+  });
+  const list = await request("/partners/stuck-payouts?limit=5&offset=10");
+  assert.equal(list.status, 200);
+  assert.deepEqual(calls[0], ["stuck", { limit: 5, offset: 10 }, "dev"]);
+  const r = await request(`/partners/stuck-payouts/${ID}/reconcile`, "POST", {});
+  assert.equal(r.body.outcome, "released");
+  plain(r.body.message);
+  assert.deepEqual(calls[1], ["reconcile", ID, "partners-test@example.com", "dev"]);
+
+  const before = process.env.MAIN_APP_SERVICE_KEY;
+  delete process.env.MAIN_APP_SERVICE_KEY;
+  try {
+    const none = await listStuckPitchPartnerPayouts({}, "dev");
+    assert.equal(none.available, false);
+    await assert.rejects(reconcilePitchPartnerPayout("not-a-batch", {}, "dev"), (e) => e.status === 404);
+    await assert.rejects(reconcilePitchPartnerPayout(ID, {}, "dev"), (e) => e.status === 503);
+  } finally {
+    if (before !== undefined) process.env.MAIN_APP_SERVICE_KEY = before;
+  }
+
+  // StuckPitchPartnerPayout and ReconcilePitchPartnerPayoutResponse as the main app writes them.
+  const row = decodeMessage(encodeFields({ 1: ID, 2: "u1", 3: "Mel Jonson", 4: "mel@example.com", 5: "£20.00", 6: 2000, 7: "GBP",
+    8: "2026-10-27T09:00:00Z", 9: 125, 10: 2 }), STUCK_PAYOUT);
+  assert.deepEqual(row, { batch: ID, partner_user_id: "u1", name: "Mel Jonson", email: "mel@example.com", amount: "£20.00",
+    amount_minor: 2000, currency: "GBP", claimed_at: "2026-10-27T09:00:00Z", age_minutes: 125, earnings_count: 2 });
+  const res = decodeMessage(encodeFields({ 1: "paid", 2: "tr_1", 3: "Marked paid." }), RECONCILE_RESPONSE);
+  assert.deepEqual(res, { outcome: "paid", transfer_id: "tr_1", message: "Marked paid." });
+  assert.equal(stuckAge(75), "75 min");
+  assert.equal(stuckAge(300), "5 h");
+  assert.equal(stuckAge(60 * 24 * 3), "3 days");
 });

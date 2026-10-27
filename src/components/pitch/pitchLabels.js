@@ -221,6 +221,14 @@ export const PARTNER_QUEUES = [
     count: (n) => `${n} removed` },
 ];
 
+// How long ago a stuck payout was started: "75 min", "5 h", "3 days".
+export function stuckAge(minutes) {
+  const m = Math.max(0, Math.floor(Number(minutes) || 0));
+  if (m < 120) return `${m} min`;
+  if (m < 48 * 60) return `${Math.floor(m / 60)} h`;
+  return `${Math.floor(m / (24 * 60))} days`;
+}
+
 // Why a payout waits for the team, and why an earning was blocked.
 export const PAYOUT_REVIEW = {
   first_payout: "Her first payout",
