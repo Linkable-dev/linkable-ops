@@ -236,6 +236,22 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
     } catch (e) { reviewError(res, e); }
   });
 
+  // GET /api/pitch/partners/stuck-payouts?limit=&offset= — payouts left
+  // paying for over an hour, oldest first.
+  router.get("/partners/stuck-payouts", async (req, res) => {
+    const { limit, offset } = pageOf(req.query, 10);
+    try {
+      res.json(await partners.stuck({ limit, offset }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/partners/stuck-payouts/:batch/reconcile — asks Stripe now.
+  router.post("/partners/stuck-payouts/:batch/reconcile", async (req, res) => {
+    try {
+      res.json(await partners.reconcile(req.params.batch, { admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
   // POST /api/pitch/partners/:userId/decide { decision: approve|reject, reason? }
   router.post("/partners/:userId/decide", async (req, res) => {
     try {

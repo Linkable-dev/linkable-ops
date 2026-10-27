@@ -5,7 +5,8 @@
 // days of Pitch Pro; reject's reason is what she reads; approve_payout lets
 // her first or an unusual payout go; remove ends the partnership) and
 // VerifyPitchPartnerVideo (live: Pitch Pro to 3 months in all; not found:
-// back to her with the reason). Each is signed with ops'
+// back to her with the reason), and the stuck payouts
+// (ListStuckPitchPartnerPayouts, ReconcilePitchPartnerPayout). Each is signed with ops'
 // own service key (lib/mainAppGrpc.js), which the gRPC server accepts for
 // these RPCs, the pitch review queue and the payments admin only.
 //
@@ -120,4 +121,40 @@ export async function verifyPitchPartnerVideo(userId, { decision, reason = "", a
   return res;
 }
 
-export const pitchPartnersClient = { list: listPitchPartners, decide: decidePitchPartner, video: verifyPitchPartnerVideo };
+// Stuck payouts: a payout the hourly run claimed over an hour ago whose
+// transfer was never recorded (the run stopped, or Stripe's answer was
+// unclear). The main app's lifecycle tick checks them against Stripe every
+// 15 minutes; Reconcile does it now: paid when Stripe has the transfer,
+// back in the next run when it has none, left alone (with why) when in doubt.
+// StuckPitchPartnerPayout (proto/pitch_partners.proto) field numbers.
+export const STUCK_PAYOUT = {
+  1: ["batch", "string"], 2: ["partner_user_id", "string"], 3: ["name", "string"], 4: ["email", "string"],
+  5: ["amount", "string"], 6: ["amount_minor", "int"], 7: ["currency", "string"], 8: ["claimed_at", "string"],
+  9: ["age_minutes", "int"], 10: ["earnings_count", "int"],
+};
+const STUCK_LIST = { 1: ["payouts", { repeated: true, schema: STUCK_PAYOUT }], 2: ["total", "int"] };
+export const RECONCILE_RESPONSE = { 1: ["outcome", "string"], 2: ["transfer_id", "string"], 3: ["message", "string"] };
+
+// Oldest first, server-paged.
+export async function listStuckPitchPartnerPayouts({ limit = 25, offset = 0 } = {}, target) {
+  if (!mainAppGrpcConfigured()) return { available: false, reason: NO_KEY, items: [], total: 0 };
+  // ListStuckPitchPartnerPayoutsRequest: limit 1, offset 2.
+  const bytes = await call("ListStuckPitchPartnerPayouts", encodeFields({ 1: limit, 2: offset }), target);
+  const list = decodeMessage(bytes, STUCK_LIST);
+  return { available: true, items: list.payouts, total: list.total };
+}
+
+// Reconcile one stuck payout now (its batch id, a uuid).
+export async function reconcilePitchPartnerPayout(batch, { admin } = {}, target) {
+  if (!UUID.test(String(batch || ""))) throw fail(404, "That payout doesn’t exist.");
+  // ReconcilePitchPartnerPayoutRequest: batch 1, actor 2.
+  const bytes = await call("ReconcilePitchPartnerPayout", encodeFields({ 1: batch, 2: admin?.email || "" }), target);
+  const res = decodeMessage(bytes, RECONCILE_RESPONSE);
+  console.log(`[pitch-partners] reconcile target=${target} admin=${admin?.email} batch=${batch} outcome=${res.outcome} transfer=${res.transfer_id}`);
+  return res;
+}
+
+export const pitchPartnersClient = {
+  list: listPitchPartners, decide: decidePitchPartner, video: verifyPitchPartnerVideo,
+  stuck: listStuckPitchPartnerPayouts, reconcile: reconcilePitchPartnerPayout,
+};
