@@ -221,8 +221,8 @@ export function adminUsersRoutes() {
     }
   });
 
-  // Take a creator off this page, or put them back. Ops-only: nothing changes
-  // for the creator in the main app.
+  // Take a creator off this page, or put them back. The main app leaves hidden
+  // creators out of Discover too (linkable #542).
   router.post("/:userId/hide-creator", async (req, res) => {
     try {
       res.json(await setCreatorOpsHidden(req.params.userId, req.body?.hidden !== false, req.admin, req.dbTarget || "prod"));
