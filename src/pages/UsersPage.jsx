@@ -432,8 +432,9 @@ export default function UsersPage() {
     }
   }
 
-  // Hiding only tidies this page (test accounts, brands signed up as
-  // creators), so it asks nothing; Show Hidden is the way back.
+  // Hiding takes a creator off this page and out of the brands' Discover
+  // (test accounts, brands signed up as creators). Unhide undoes both, so it
+  // asks nothing; Show Hidden is the way back.
   async function handleHide(row) {
     const hidden = !row.ops_hidden;
     setActionError("");
@@ -859,7 +860,7 @@ function renderUserCell(key, row, ctx) {
                 || row.instagram_name
                 || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
             </span>
-            {row.ops_hidden && <HiddenPill title="Hidden from this page only — nothing changes for the creator. Unhide puts them back." />}
+            {row.ops_hidden && <HiddenPill title="Hidden from this page and from Discover. Unhide puts them back in both." />}
           </span>
           {(row.location_country || row.location_city) && (
             <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -906,7 +907,7 @@ function renderUserCell(key, row, ctx) {
               variant="secondary"
               onClick={onHide}
               loading={hideBusy}
-              title={row.ops_hidden ? "Hidden from this page — click to put back" : "Take off this page (nothing changes for the creator)"}
+              title={row.ops_hidden ? "Hidden from this page and Discover — click to put back" : "Take off this page and out of Discover"}
             >
               {row.ops_hidden ? "Unhide" : "Hide"}
             </Btn>
@@ -1058,7 +1059,7 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
           variant="secondary"
           onClick={onHide}
           loading={hideBusy}
-          title={row.ops_hidden ? "Hidden from this page — click to put back" : "Take off this page (nothing changes for the creator)"}
+          title={row.ops_hidden ? "Hidden from this page and Discover — click to put back" : "Take off this page and out of Discover"}
           style={{ position: "absolute", right: 8, top: 8, padding: "4px 11px", fontSize: 11 }}
         >
           {row.ops_hidden ? "Unhide" : "Hide"}
