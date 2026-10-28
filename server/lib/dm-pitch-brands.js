@@ -67,11 +67,19 @@ const INSERT = `
 // queued (with the request id), already (a request for this lead exists),
 // skipped (nothing to add) or failed (the app's database said no; the DM is
 // still marked sent).
-export async function queueDmBrandForPitch(lead, who, { query = (sql, params) => cloudSqlQuery(sql, params, DM_PITCH_TARGET) } = {}) {
+export async function queueDmBrandForPitch(lead, who, {
+  query = (sql, params) => cloudSqlQuery(sql, params, DM_PITCH_TARGET), timeoutMs = 8000,
+} = {}) {
   const req = dmPitchRequest(lead, who);
   if (req.skip) return { status: "skipped", message: req.skip };
   try {
-    const { rows } = await query(INSERT, req.params);
+    // The DM is saved already; a database that doesn't answer must not hold
+    // the panel (or Meta's webhook) until the function times out.
+    let timer;
+    const { rows } = await Promise.race([
+      query(INSERT, req.params),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("the app database did not answer in time")), timeoutMs); }),
+    ]).finally(() => clearTimeout(timer));
     if (!rows.length) return { status: "already", message: "Already sent to Pitch." };
     console.log(`[dm-pitch] lead=${lead.id} handle=${lead.handle} store=${req.params[1]} request=${rows[0].id}`);
     return { status: "queued", message: "Added to Pitch. Creators can pitch it once Linkable has read the store.", request_id: rows[0].id };

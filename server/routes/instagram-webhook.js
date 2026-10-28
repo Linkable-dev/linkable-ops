@@ -15,6 +15,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { usernameOf } from "../lib/instagram-graph.js";
+import { queueDmBrandForPitch } from "../lib/dm-pitch-brands.js";
 
 const TABLE = "prospector_leads";
 
@@ -109,7 +110,11 @@ export async function recordMessage(m) {
     update = { dm_followup_sent_at: m.at };
   }
   if (update) await supabase.from(TABLE).update(update).eq("handle", lead.handle);
-  return { matched: true, handle: lead.handle, update };
+  // Sent from the app counts as DM sent: the brand goes to Pitch for
+  // creators too (main app QA 145). It never fails the delivery.
+  let pitch;
+  if (update?.dm_state === "sent") pitch = await queueDmBrandForPitch(lead, "instagram");
+  return { matched: true, handle: lead.handle, update, pitch };
 }
 
 export function instagramWebhookRoutes() {

@@ -57,3 +57,8 @@ test("a database that can't take it yet never fails the send", async () => {
     assert.ok(out.message.startsWith("Not added to Pitch") && !out.message.includes(":"), out.message);
   }
 });
+
+test("a database that doesn't answer is given up on, not waited for", async () => {
+  const out = await queueDmBrandForPitch(lead, "Fede", { query: () => new Promise(() => {}), timeoutMs: 20 });
+  assert.equal(out.status, "failed");
+});
