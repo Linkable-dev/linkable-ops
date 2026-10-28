@@ -58,14 +58,14 @@ const TILE_SUB = {
   past_due: "Card failing, Stripe retrying",
   ended: "Cancelled, ran out or not paid",
   refunded: "Money given back",
-  disputed: "Disputed with her bank",
+  disputed: "Payment taken back by her bank",
 };
 
 const HELP = [
   ["Who is here", "Every creator who has had Pitch Pro or Founding Creator, one line each, newest first. Founding Checkouts nobody paid are not plans and are left out."],
   ["Plan", "Pro monthly (£19, $19 or €19 a month) or Pro yearly (190 a year). Founding: 99 once, Pitch Pro for good (sold in launch week only). Partner trial: a Pro monthly or yearly in the free first month a Pitch Partner's link gives; it reads Pro monthly or yearly once she pays. Gift: Pitch Pro given by Pitch Partners (no card), or a paid Pitch Pro waiting for that gift to end."],
   ["Several plans", "When a creator has more than one row (an ended Pitch Pro and a new one, a gift next to a paid plan), the line shows the one that counts, as the app does: Founding, then a Pitch Pro that runs, then a gift, then her newest."],
-  ["Status", "Paying, Trial, Gift running, Cancels on a date (paid or in trial up to then, won't renew), Past due (her card is failing; after 14 days she is back on Free), Ended, Refunded, Disputed."],
+  ["Status", "Paying, Trial, Gift running, Cancels on a date (paid or in trial up to then, won't renew), Past due (her card is failing; after 14 days she is back on Free, at once when it failed right after a free month), Ended, Refunded (or a refund due), Disputed (her bank took a Founding payment back; a Pitch Pro whose payment was taken back reads Ended)."],
   ["Price", "What the plan costs, in the currency she pays in. Amounts are never converted between currencies."],
   ["Paying totals", "Per currency, what the plans in Paying bill: monthly and yearly Pitch Pro that will renew, and Founding paid once. Trials, gifts and plans that cancel are not in them."],
   ["Came via", "Pitch Partner link or Creator referral: whose link she signed up with, as Stripe Checkout recorded it. Is a Pitch Partner: the gift is her own Pitch Pro from the programme. Direct: no link."],
@@ -87,6 +87,7 @@ export default function PitchProPage() {
   const { theme: t } = useTheme();
   const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
+  const [summaryError, setSummaryError] = useState(null);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [stripeBase, setStripeBase] = useState("");
@@ -102,7 +103,7 @@ export default function PitchProPage() {
     let live = true;
     api.getPitchPlanSummary()
       .then((r) => { if (live) setSummary(r); })
-      .catch((e) => { if (live) setError(e.message); });
+      .catch((e) => { if (live) setSummaryError(e.message); });
     return () => { live = false; };
   }, []);
 
@@ -147,7 +148,7 @@ export default function PitchProPage() {
                     sub={r.account_deleted ? "Account deleted" : [r.instagram_username && `@${r.instagram_username}`, r.email].filter(Boolean).join(" · ")} />;
       case "plan":
         return twoLines(PLAN_KIND_LABEL[r.kind] || r.plan,
-          r.plan_rows > 1 ? `${plural(r.plan_rows - 1, "other plan", "other plans")} before` : "",
+          r.plan_rows > 1 ? `+${plural(r.plan_rows - 1, "other plan", "other plans")}` : "",
           r.plan_rows > 1 ? "She has had more than one plan. This line shows the one that counts now." : undefined);
       case "status": {
         const s = planStatus(r);
@@ -228,6 +229,8 @@ export default function PitchProPage() {
         Every creator with Pitch Pro or Founding Creator, one line each: what she is on, where it is, what it costs and who brought her. Click a row to open her in Users.
       </div>
 
+      {summaryError && <Banner tone="error">{summaryError}</Banner>}
+      {!summaryError && <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 10 }}>
         {TILES.filter((s) => s !== "disputed" || counts.disputed > 0).map((s) => (
           <StatTile key={s} loading={!summary} strong={s === "paying"} label={PLAN_STATE_LABEL[s]} value={counts[s] ?? 0} sub={TILE_SUB[s]} />
@@ -242,6 +245,7 @@ export default function PitchProPage() {
             </div>
           ))}
       </div>
+      </>}
 
       {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
 

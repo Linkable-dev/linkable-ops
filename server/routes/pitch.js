@@ -202,21 +202,34 @@ const CREATOR_FILTERS = {
 // (incomplete_expired) are not plans.
 const IS_PLAN = `NOT (c.plan = 'founding' AND c.status IN ('pending', 'expired'))
   AND NOT (c.plan = 'pro' AND c.status = 'incomplete_expired')`;
+// A Pitch Pro past due that no longer counts (pastDueLapsed): past due for
+// over 14 days, or at once when its first payment failed straight out of a
+// trial she never paid for (a partner's free month, a gift).
+const pastDueLapsed = (a) => `(${a}.status = 'past_due' AND ${a}.past_due_since IS NOT NULL AND (
+    now() - ${a}.past_due_since > interval '14 days'
+    OR (${a}.trial_ends_at IS NOT NULL AND ${a}.trial_kind IN ('partner_month', 'repeat_ended', 'gift')
+        AND ${a}.past_due_since - ${a}.trial_ends_at > interval '-1 day'
+        AND ${a}.past_due_since - ${a}.trial_ends_at < interval '7 days')))`;
+// Cancelled and past its end, though Stripe's word that it ended is not in yet.
+const cancelPassed = (a) => `(${a}.cancel_at_period_end AND ${a}.current_period_end IS NOT NULL AND ${a}.current_period_end <= now())`;
 const PLAN_RANK = `CASE WHEN c.plan = 'founding' AND c.status = 'paid' THEN 0
-    WHEN c.plan = 'pro' AND c.stripe_subscription_id IS NOT NULL AND c.status IN ('active', 'trialing', 'past_due') AND NOT c.refund_due THEN 1
+    WHEN c.plan = 'pro' AND c.stripe_subscription_id IS NOT NULL AND c.status IN ('active', 'trialing', 'past_due') AND NOT c.refund_due
+         AND NOT ${pastDueLapsed("c")} AND NOT ${cancelPassed("c")} THEN 1
     WHEN c.plan = 'pro' AND c.status = 'granted' AND c.current_period_end > now() THEN 2
     ELSE 3 END`;
 
 // Where her plan is, in an admin's words (the page labels these):
 // paying, trial, cancels (stops at the end of what she paid or her trial),
-// past_due (Stripe is retrying her card), free (Pitch Pro given by Pitch
-// Partners, running), ended, refunded (or a refund due), disputed (a
-// Founding payment she disputed).
+// past_due (her card failed; unpaid and incomplete too), free (Pitch Pro
+// given by Pitch Partners, running), ended, refunded (or a refund due),
+// disputed (a Founding payment her bank took back: a dispute lost; a Pitch
+// Pro's lost dispute ends it, so it reads ended).
 const PLAN_STATE = `CASE
     WHEN r.refunded_at IS NOT NULL OR r.refund_due OR r.status = 'refunded' THEN 'refunded'
     WHEN r.status = 'disputed' THEN 'disputed'
     WHEN r.plan = 'founding' THEN 'paying'
     WHEN r.status = 'granted' THEN CASE WHEN r.current_period_end > now() THEN 'free' ELSE 'ended' END
+    WHEN r.status IN ('active', 'trialing') AND ${cancelPassed("r")} THEN 'ended'
     WHEN r.status IN ('active', 'trialing') AND r.cancel_at_period_end THEN 'cancels'
     WHEN r.status = 'trialing' THEN 'trial'
     WHEN r.status = 'active' THEN 'paying'
@@ -240,7 +253,7 @@ const PLAN_NEXT = `CASE (${PLAN_STATE})
     WHEN 'trial' THEN COALESCE(r.trial_ends_at, r.current_period_end)
     WHEN 'paying' THEN CASE WHEN r.plan = 'founding' THEN NULL ELSE r.current_period_end END
     WHEN 'ended' THEN COALESCE(r.ended_at, r.current_period_end)
-    WHEN 'refunded' THEN r.refunded_at
+    WHEN 'refunded' THEN CASE WHEN r.refund_due THEN NULL ELSE COALESCE(r.refunded_at, r.updated) END
     WHEN 'disputed' THEN NULL
     ELSE r.current_period_end END`;
 // How she came: Pitch Pro given is the Pitch Partners programme itself; else
@@ -276,7 +289,8 @@ const PLAN_COLUMNS = `
   r.id, r.user_id, r.plan, r.status, r.currency, r.amount_minor::float8 AS amount_minor, r.billing_interval,
   r.stripe_customer_id, COALESCE(r.stripe_subscription_id, '') AS stripe_subscription_id, r.stripe_payment_intent_id,
   r.current_period_end, r.trial_ends_at, r.cancel_at_period_end, r.ended_at, r.paid_at, r.past_due_since,
-  r.refund_due, r.refunded_at, r.refund_reason, r.trial_kind, r.created, r.plan_rows,
+  r.refund_due, r.refunded_at, r.refund_reason, r.refund_gave_up_at, r.trial_kind, r.created, r.plan_rows,
+  ${pastDueLapsed("r")} AS lapsed,
   (${PLAN_STATE}) AS state, (${PLAN_KIND}) AS kind, (${PLAN_NEXT}) AS next_at, ${PLAN_STARTED} AS started_at,
   (${PLAN_SOURCE}) AS source, ru.id AS referrer_user_id, ${REFERRER_NAME} AS referrer_name,
   ri.instagram_username AS referrer_instagram,
@@ -293,7 +307,8 @@ const PLAN_SORTS = {
   status: `array_position(ARRAY[${PLAN_STATES.map((s) => `'${s}'`).join(", ")}], (${PLAN_STATE}))`,
   price: "r.amount_minor",
   started: PLAN_STARTED,
-  next: `(${PLAN_NEXT})`,
+  // Founding never ends: last when soonest first.
+  next: `COALESCE((${PLAN_NEXT}), 'infinity'::timestamptz)`,
   source: `(${PLAN_SOURCE})`,
   country: PLAN_COUNTRY,
 };
@@ -552,7 +567,8 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
       res.json({ available: true, items: await withAvatars(rows, sign), total: count.rows[0]?.n ?? 0, stripe_dashboard: stripe });
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false, items: [], total: 0, stripe_dashboard: stripe });
-      res.status(500).json({ error: e.message });
+      console.error("[pitch-plans] list", e);
+      res.status(500).json({ error: "Couldn't load the Pitch Pro plans. Try again in a moment." });
     }
   });
 
@@ -583,7 +599,8 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
       res.json({ available: true, total, counts, currencies: money.rows });
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false });
-      res.status(500).json({ error: e.message });
+      console.error("[pitch-plans] summary", e);
+      res.status(500).json({ error: "Couldn't load the Pitch Pro counts. Try again in a moment." });
     }
   });
 

@@ -39,7 +39,11 @@ test("the plan list is one line per creator, paged, and binds every filter", asy
   assert.match(list.sql, /= 'pro_yearly'/);
   assert.match(list.sql, /lower\(r\.currency\) = 'gbp'/);
   assert.match(list.sql, /= 'pitch_partner'/);
-  assert.match(list.sql, /ORDER BY \(CASE \(CASE/);
+  // Founding has no next date: last when the soonest come first.
+  assert.match(list.sql, /ORDER BY COALESCE\(\(CASE \(CASE[\s\S]*'infinity'::timestamptz\) ASC/);
+  // A lapsed past due Pitch Pro, or one cancelled past its end, is not the
+  // plan that counts (effectivePitchPlan): a running gift comes first.
+  assert.match(list.sql, /AND NOT \(c\.status = 'past_due'[\s\S]*interval '14 days'[\s\S]*AND NOT \(c\.cancel_at_period_end/);
   assert.deepEqual(list.params, ["%mel%", 30, 10, 20]);
   const count = seen.find((q) => /count\(\*\)::int AS n/.test(q.sql));
   assert.deepEqual(count.params, ["%mel%", 30]);
@@ -59,6 +63,16 @@ test("prod links to live Stripe", async (t) => {
   const r = await request("/plans");
   assert.equal(r.body.stripe_dashboard, "https://dashboard.stripe.com");
   assert.deepEqual(r.body.items, []);
+});
+
+test("a failure is a sentence, not the database's error", async (t) => {
+  const request = await serve(t, async () => { throw new Error('syntax error at or near "SELECT"'); });
+  for (const path of ["/plans", "/plans/summary"]) {
+    const r = await request(path);
+    assert.equal(r.status, 500);
+    assert.doesNotMatch(r.body.error, /syntax|SELECT/);
+    assert.match(r.body.error, /^Couldn't load the Pitch Pro .*\. Try again in a moment\.$/);
+  }
 });
 
 test("a database without Pitch Pro answers available:false, not a 500", async (t) => {
@@ -97,7 +111,6 @@ test("the page's filter options are exactly the server's", () => {
 });
 
 test("statuses read as plain words", () => {
-  const now = Date.parse("2026-10-28T12:00:00Z");
   assert.equal(planStatus({ state: "paying", plan: "pro" }).label, "Paying");
   assert.equal(planStatus({ state: "paying", plan: "founding", paid_at: "2026-10-27T10:00:00Z" }).note, "Paid once, Pitch Pro for good");
   assert.equal(planStatus({ state: "trial", kind: "partner_trial" }).note, "A Pitch Partner's free first month");
@@ -105,10 +118,15 @@ test("statuses read as plain words", () => {
   assert.match(planStatus({ state: "trial", kind: "gift", trial_kind: "deferred" }).note, /moved past her gift/);
   assert.match(planStatus({ state: "cancels", status: "active", current_period_end: "2026-11-26T19:12:30Z" }).label, /^Cancels on .*2026$/);
   assert.match(planStatus({ state: "cancels", status: "trialing", current_period_end: "2026-11-26T19:12:30Z" }).note, /never charged/);
-  assert.match(planStatus({ state: "past_due", status: "past_due", past_due_since: "2026-10-26T00:00:00Z" }, now).note, /^Card failing since/);
-  assert.match(planStatus({ state: "past_due", status: "past_due", past_due_since: "2026-10-01T00:00:00Z" }, now).note, /back on Free/);
+  assert.match(planStatus({ state: "past_due", status: "past_due", past_due_since: "2026-10-26T00:00:00Z", lapsed: false }).note, /^Card failing since/);
+  assert.match(planStatus({ state: "past_due", status: "past_due", past_due_since: "2026-10-01T00:00:00Z", lapsed: true }).note, /back on Free/);
+  assert.match(planStatus({ state: "past_due", status: "unpaid" }).note, /back on Free/);
   assert.equal(planStatus({ state: "refunded", refunded_at: "2026-10-27T10:00:00Z", refund_reason: "sold_out" }).note, "Founding was sold out");
+  // Refunded by hand in Stripe: status refunded, no refunded_at.
+  assert.equal(planStatus({ state: "refunded", status: "refunded", refunded_at: null, refund_due: false }).label, "Refunded");
   assert.equal(planStatus({ state: "refunded", refund_due: true }).label, "Refund due");
+  assert.equal(planStatus({ state: "refunded", refund_due: true, refund_gave_up_at: "2026-10-27T10:00:00Z" }).label, "Refund failed");
+  assert.match(planStatus({ state: "disputed" }).note, /dispute lost/);
   assert.equal(planStatus({ state: "ended", status: "granted" }).note, "Her gift ran out");
 });
 
@@ -127,6 +145,7 @@ test("the next date says what it is, and Founding never ends", () => {
   assert.deepEqual(planNext({ state: "paying", plan: "founding" }), { verb: "Never ends", at: "" });
   assert.deepEqual(planNext({ state: "paying", plan: "pro", next_at: "2026-11-26" }), { verb: "Renews", at: "2026-11-26" });
   assert.equal(planNext({ state: "trial", next_at: "x" }).verb, "First payment");
+  assert.equal(planNext({ state: "trial", trial_kind: "deferred", next_at: "x" }).verb, "Next payment");
   assert.equal(planNext({ state: "cancels", next_at: "x" }).verb, "Ends");
   assert.equal(planNext({ state: "ended", next_at: "x" }).verb, "Ended");
 });

@@ -326,12 +326,10 @@ const REFUND_REASON = {
   sold_out: "Founding was sold out",
 };
 
-// Stripe gives up on a failing card after its retries; the main app stops
-// counting a plan as Pro 14 days after it went past due either way.
-const PAST_DUE_GRACE_MS = 14 * 24 * 3600 * 1000;
-
-// The status tag and the line under it. "Cancels on 26 Nov 2026".
-export function planStatus(r, now = Date.now()) {
+// The status tag and the line under it. "Cancels on 26 Nov 2026". r.lapsed
+// is the server's word that a past due plan no longer counts as Pro (14 days
+// on, or at once when it failed straight out of a trial she never paid for).
+export function planStatus(r) {
   const color = PLAN_STATE_COLOR[r.state] || "#737C9A";
   switch (r.state) {
     case "paying":
@@ -349,19 +347,21 @@ export function planStatus(r, now = Date.now()) {
       return { label: `Cancels on ${day(r.current_period_end) || "period end"}`, color,
                note: r.status === "trialing" ? "Cancelled in her trial: never charged" : "Paid up to then, won't renew" };
     case "past_due": {
-      const since = r.past_due_since ? new Date(r.past_due_since).getTime() : NaN;
-      const lapsed = Number.isFinite(since) && now - since > PAST_DUE_GRACE_MS;
-      const label = r.status === "unpaid" ? "Unpaid" : r.status === "incomplete" ? "First payment incomplete" : "Past due";
-      const note = lapsed ? `Failing since ${day(r.past_due_since)}: back on Free`
-        : r.past_due_since ? `Card failing since ${day(r.past_due_since)}` : "Stripe is retrying her card";
-      return { label, color, note };
+      // Unpaid and incomplete never count as Pro: Stripe stopped trying.
+      if (r.status === "unpaid") return { label: "Unpaid", color, note: "Not paid: back on Free" };
+      if (r.status === "incomplete") return { label: "First payment incomplete", color, note: "Not Pro: back on Free" };
+      const note = r.lapsed ? `Not paid${r.past_due_since ? ` since ${day(r.past_due_since)}` : ""}: back on Free`
+        : r.past_due_since ? `Card failing since ${day(r.past_due_since)}` : "Card failing, Stripe retrying";
+      return { label: "Past due", color, note };
     }
     case "ended":
       return { label: "Ended", color, note: r.status === "granted" ? "Her gift ran out" : "" };
     case "refunded":
-      return { label: r.refunded_at ? "Refunded" : "Refund due", color, note: REFUND_REASON[r.refund_reason] || "" };
+      // Refunded by hand in Stripe: status refunded, no refunded_at.
+      if (r.refund_due && r.refund_gave_up_at) return { label: "Refund failed", color: "#B91C1C", note: "Refund it by hand in Stripe" };
+      return { label: r.refund_due ? "Refund due" : "Refunded", color, note: REFUND_REASON[r.refund_reason] || "" };
     case "disputed":
-      return { label: "Disputed", color, note: "She disputed the payment with her bank" };
+      return { label: "Disputed", color, note: "Her bank took the payment back (dispute lost)" };
     default:
       return { label: r.status || "Unknown", color, note: "" };
   }
@@ -379,6 +379,7 @@ export function planPrice(r) {
 // "Ends", "Ended", "Refunded". Founding never ends.
 export function planNext(r) {
   if (r.state === "paying" && r.plan === "founding") return { verb: "Never ends", at: "" };
+  if (r.state === "trial" && r.trial_kind === "deferred") return { verb: "Next payment", at: r.next_at || "" };
   const verb = {
     paying: "Renews", trial: "First payment", cancels: "Ends", free: "Ends",
     past_due: "Period ends", ended: "Ended", refunded: "Refunded", disputed: "",
