@@ -23,6 +23,7 @@ import { SEARCH_REQUESTED_KEY, searchState, startProspectorRun } from "../lib/pr
 import { refreshConversions } from "../lib/dm-conversions.js";
 import { dmResults } from "../lib/dm-results.js";
 import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-graph.js";
+import { queueDmBrandForPitch } from "../lib/dm-pitch-brands.js";
 import {
   DM_COLUMNS, SETTINGS, readSettings, settingProblem, optionsFrom, countryOf, dmOpen, isDmOpen, todoOrder,
   VERTICALS, NO_VERTICAL, verticalOf, filterVerticals, followupDue, isFollowupDue, FOLLOWUP_DAYS,
@@ -62,7 +63,7 @@ const LIST_COLUMNS = [
   "dm_sent_at",
 ].join(",");
 
-export function prospectingRoutes() {
+export function prospectingRoutes({ queueDmPitch = queueDmBrandForPitch } = {}) {
   const router = express.Router();
 
   // The table may not exist yet — the migration ships with the pipeline, not
@@ -1271,7 +1272,7 @@ export function prospectingRoutes() {
     const handle = String(req.params.handle).toLowerCase();
     const action = String(req.body?.action || "");
     const { data: lead, error } = await supabase
-      .from(TABLE).select(DM_COLUMNS).eq("handle", handle).maybeSingle();
+      .from(TABLE).select(`${DM_COLUMNS},id`).eq("handle", handle).maybeSingle();
     if (error) return dmError(res, error, "loading the lead");
     if (!lead) return res.status(404).json({ error: "no such lead" });
 
@@ -1343,6 +1344,12 @@ export function prospectingRoutes() {
     const { data, error: saveError } = await supabase
       .from(TABLE).update(update).eq("handle", handle).select(DM_COLUMNS).maybeSingle();
     if (saveError) return dmError(res, saveError, "saving the DM");
+    // DM sent also lists the brand for creators to pitch (main app QA 145).
+    // The send is saved whatever happens there; `pitch` says what did.
+    if (action === "sent") {
+      const pitch = await queueDmPitch(lead, who);
+      return res.json({ ...shapeDm(data), pitch });
+    }
     res.json(shapeDm(data));
   });
 

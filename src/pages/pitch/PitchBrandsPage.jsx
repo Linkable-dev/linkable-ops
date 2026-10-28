@@ -60,9 +60,14 @@ const SOURCE_LABEL = { ops: "Ops", instagram_dm: "Instagram DMs", import: "Impor
 
 const STATUS = {
   pending: { label: "Waiting", color: "#737C9A" },
+  // A DM sent's request (QA 145) before the app reads it.
+  dm_pending: { label: "Waiting", color: "#737C9A" },
   working: { label: "Reading the store…", color: "#2563EB" },
   added: { label: "Added", color: "#16A34A" },
   updated: { label: "Already listed, refreshed", color: "#0D9488" },
+  // DM sent on a brand with a Linkable account (QA 145): Discover lists it
+  // from its account, so nothing was added.
+  on_linkable: { label: "Already on Linkable", color: "#0D9488" },
   failed: { label: "Couldn't add", color: "#B91C1C" },
 };
 
@@ -197,7 +202,7 @@ export default function PitchBrandsPage() {
     try {
       const r = await api.getPitchBrandRequests();
       const wasWaiting = waitingRef.current;
-      const waiting = r.requests.some((x) => x.status === "pending" || x.status === "working");
+      const waiting = r.requests.some((x) => ["pending", "dm_pending", "working"].includes(x.status));
       waitingRef.current = waiting;
       setRequests(r.requests);
       // A request just finished: the new brand belongs in the list.
@@ -321,7 +326,7 @@ export default function PitchBrandsPage() {
                           : `Sent by ${r.requested_by || "an admin"} · ${friendlyDate(r.created)}`}
                     </div>
                   </div>
-                  {r.status === "working" || r.status === "pending"
+                  {["working", "pending", "dm_pending"].includes(r.status)
                     ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: s.color, fontSize: 12 }}><span className="spin" style={{ width: 10, height: 10, borderRadius: 5, border: `2px solid ${s.color}`, borderTopColor: "transparent", display: "inline-block", animation: "spin 0.8s linear infinite" }} />{s.label}</span>
                     : <Tag color={s.color}>{s.label}</Tag>}
                 </div>
