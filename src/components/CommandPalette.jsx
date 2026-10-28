@@ -18,6 +18,7 @@ const PAGES = [
   ["Pitch", "/ops/pitch", "pitches proposals sent creators brands lemlist"],
   ["Pitch creators", "/ops/pitch/creators", "weekly picks"],
   ["Pitch brands", "/ops/pitch/brands", "add brand store handle"],
+  ["Pitch Pro", "/ops/pitch/pro", "who pays plan subscription founding trial stripe payers"],
   ["Trials", "/trials"], ["Impersonation", "/users"],
   ["Brands", "/gtm/brands"], ["Creators", "/gtm/creators"],
   // "Replies" pointed at /ai/inbox — the retired system's inbox, holding one
