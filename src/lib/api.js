@@ -200,6 +200,10 @@ export const api = {
   getPitch: (id) => request(`/pitch/pitches/${id}`),
   getPitchCreators: ({ view, limit = 25, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/pitch/creators?${buildQs({ view, limit, offset, filters, sortBy, sortDir })}`),
+  // Pitch Pro: one line per creator with a plan, and the counts above it.
+  getPitchPlans: ({ limit = 25, offset = 0, filters, sortBy, sortDir } = {}) =>
+    request(`/pitch/plans?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
+  getPitchPlanSummary: () => request("/pitch/plans/summary"),
   setPitchCreatorWeekly: (userId, weekly) =>
     request(`/pitch/creators/${userId}`, { method: "PATCH", body: JSON.stringify({ weekly }) }),
   addPitchCreator: (email) => request("/pitch/creators", { method: "POST", body: JSON.stringify({ email }) }),

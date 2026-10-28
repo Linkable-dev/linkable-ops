@@ -9,8 +9,9 @@ import {
 } from "../lib/tableQuery.js";
 
 // Pitch, read from ops: every pitch creators sent, who sent it, to whom, and
-// what came of it; the creators who pitch; the switch that has Linkable write
-// a creator's pitches ahead every Monday. The brands are in pitch-brands.js.
+// what came of it; the creators who pitch; who pays for Pitch Pro; the switch
+// that has Linkable write a creator's pitches ahead every Monday. The brands
+// are in pitch-brands.js.
 //
 // Read-only on pitches by design, but for the In review queue (QA 112): a
 // creator's first pitches wait for the team, and Approve / Reject go through
@@ -30,7 +31,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 // is still one line.
 const INFLUENCER = (userCol) => `LEFT JOIN LATERAL (
     SELECT first_name, last_name, instagram_name, instagram_username, instagram_followers_count,
-           profile_pic_name, instagram_profile_image, about
+           profile_pic_name, instagram_profile_image, about, location_country, country
       FROM influencers WHERE user_id = ${userCol} AND deleted = '-infinity'
      ORDER BY created DESC LIMIT 1
   ) i ON true`;
@@ -186,6 +187,145 @@ const CREATOR_FILTERS = {
   last_sent: dateFilter("s.last_sent_at"),
   opened: dateFilter("COALESCE(pc.created, s.first_pitch_at)"),
 };
+
+// Pitch Pro: who has a plan and what it is (creator_plans, written by the
+// main app from what Stripe returns; services/pitch_plan.go and
+// pitch_partners.go). Read-only; nothing here calls Stripe.
+//
+// A creator can have several rows (a Founding Checkout left unpaid, an
+// ended Pitch Pro and a new one, Pitch Pro given by Pitch Partners next to
+// one she pays for). The list is one line per creator, her row picked the
+// way the main app picks her plan (effectivePitchPlan): Founding paid, then
+// a Pitch Pro subscription that runs, then Pitch Pro given while it runs,
+// then her newest row. A Founding Checkout never paid (pending, expired)
+// and a subscription whose first payment never went through
+// (incomplete_expired) are not plans.
+const IS_PLAN = `NOT (c.plan = 'founding' AND c.status IN ('pending', 'expired'))
+  AND NOT (c.plan = 'pro' AND c.status = 'incomplete_expired')`;
+// A Pitch Pro past due that no longer counts (pastDueLapsed): past due for
+// over 14 days, or at once when its first payment failed straight out of a
+// trial she never paid for (a partner's free month, a gift).
+const pastDueLapsed = (a) => `(${a}.status = 'past_due' AND ${a}.past_due_since IS NOT NULL AND (
+    now() - ${a}.past_due_since > interval '14 days'
+    OR (${a}.trial_ends_at IS NOT NULL AND ${a}.trial_kind IN ('partner_month', 'repeat_ended', 'gift')
+        AND ${a}.past_due_since - ${a}.trial_ends_at > interval '-1 day'
+        AND ${a}.past_due_since - ${a}.trial_ends_at < interval '7 days')))`;
+// Cancelled and past its end, though Stripe's word that it ended is not in yet.
+const cancelPassed = (a) => `(${a}.cancel_at_period_end AND ${a}.current_period_end IS NOT NULL AND ${a}.current_period_end <= now())`;
+const PLAN_RANK = `CASE WHEN c.plan = 'founding' AND c.status = 'paid' THEN 0
+    WHEN c.plan = 'pro' AND c.stripe_subscription_id IS NOT NULL AND c.status IN ('active', 'trialing', 'past_due') AND NOT c.refund_due
+         AND NOT ${pastDueLapsed("c")} AND NOT ${cancelPassed("c")} THEN 1
+    WHEN c.plan = 'pro' AND c.status = 'granted' AND c.current_period_end > now() THEN 2
+    ELSE 3 END`;
+
+// Where her plan is, in an admin's words (the page labels these):
+// paying, trial, cancels (stops at the end of what she paid or her trial),
+// past_due (her card failed; unpaid and incomplete too), free (Pitch Pro
+// given by Pitch Partners, running), ended, refunded (or a refund due),
+// disputed (a Founding payment her bank took back: a dispute lost; a Pitch
+// Pro's lost dispute ends it, so it reads ended).
+const PLAN_STATE = `CASE
+    WHEN r.refunded_at IS NOT NULL OR r.refund_due OR r.status = 'refunded' THEN 'refunded'
+    WHEN r.status = 'disputed' THEN 'disputed'
+    WHEN r.plan = 'founding' THEN 'paying'
+    WHEN r.status = 'granted' THEN CASE WHEN r.current_period_end > now() THEN 'free' ELSE 'ended' END
+    WHEN r.status IN ('active', 'trialing') AND ${cancelPassed("r")} THEN 'ended'
+    WHEN r.status IN ('active', 'trialing') AND r.cancel_at_period_end THEN 'cancels'
+    WHEN r.status = 'trialing' THEN 'trial'
+    WHEN r.status = 'active' THEN 'paying'
+    WHEN r.status IN ('past_due', 'unpaid', 'incomplete') THEN 'past_due'
+    ELSE 'ended' END`;
+// What she is on: Founding; a gift (Pitch Pro given by Pitch Partners, or a
+// paid Pitch Pro whose trial runs to the end of a gift: trial_kind gift or
+// deferred); a Pitch Partner's free first month (while it runs); else Pitch
+// Pro by how often it bills ('' is from before yearly existed: monthly).
+const PLAN_KIND = `CASE
+    WHEN r.plan = 'founding' THEN 'founding'
+    WHEN r.status = 'granted' THEN 'gift'
+    WHEN r.status = 'trialing' AND r.trial_kind IN ('gift', 'deferred') THEN 'gift'
+    WHEN r.status = 'trialing' AND (r.trial_kind = 'partner_month' OR r.partner_free_month) THEN 'partner_trial'
+    WHEN r.billing_interval = 'year' THEN 'pro_yearly'
+    ELSE 'pro_monthly' END`;
+// The date that matters next: her first payment (trial), the renewal
+// (paying), the last day (cancels, gift), the day it ended or was refunded.
+// Founding has none: it is for good.
+const PLAN_NEXT = `CASE (${PLAN_STATE})
+    WHEN 'trial' THEN COALESCE(r.trial_ends_at, r.current_period_end)
+    WHEN 'paying' THEN CASE WHEN r.plan = 'founding' THEN NULL ELSE r.current_period_end END
+    WHEN 'ended' THEN COALESCE(r.ended_at, r.current_period_end)
+    WHEN 'refunded' THEN CASE WHEN r.refund_due THEN NULL ELSE COALESCE(r.refunded_at, r.updated) END
+    WHEN 'disputed' THEN NULL
+    ELSE r.current_period_end END`;
+// How she came: Pitch Pro given is the Pitch Partners programme itself; else
+// who the plan says brought her (written at Checkout), else the Pitch
+// Partner whose link she signed up with (a Founding row records nobody).
+const PLAN_SOURCE = `CASE
+    WHEN r.status = 'granted' THEN 'partner_programme'
+    WHEN r.referral_source IN ('pitch_partner', 'creator_referral') THEN r.referral_source
+    WHEN ppr.partner_user_id IS NOT NULL THEN 'pitch_partner'
+    ELSE 'direct' END`;
+const PLAN_STARTED = "COALESCE(r.paid_at, r.created)";
+
+const PLANS_FROM = `
+  FROM (SELECT DISTINCT ON (c.user_id) c.*, count(*) OVER (PARTITION BY c.user_id)::int AS plan_rows
+          FROM creator_plans c WHERE ${IS_PLAN}
+         ORDER BY c.user_id, ${PLAN_RANK}, c.created DESC) r
+  LEFT JOIN users u ON u.id = r.user_id
+  ${INFLUENCER("r.user_id")}
+  LEFT JOIN pitch_partner_referrals ppr ON ppr.referee_user_id = r.user_id
+  LEFT JOIN users ru ON ru.id = CASE WHEN r.status = 'granted' THEN NULL
+                                     WHEN r.referral_source IN ('pitch_partner', 'creator_referral') THEN r.referrer_user_id
+                                     ELSE ppr.partner_user_id END
+  LEFT JOIN LATERAL (
+    SELECT first_name, last_name, instagram_name, instagram_username
+      FROM influencers WHERE user_id = ru.id AND deleted = '-infinity'
+     ORDER BY created DESC LIMIT 1
+  ) ri ON true`;
+// location_country is free text ("London, United Kingdom"): its last part.
+const PLAN_COUNTRY = `COALESCE(NULLIF(TRIM(REGEXP_REPLACE(COALESCE(i.location_country, ''), '^.*,', '')), ''), NULLIF(i.country, ''), '')`;
+const REFERRER_NAME =
+  `COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(ri.first_name, '') || ' ' || COALESCE(ri.last_name, '')), '\\s+', ' ', 'g'), ''), NULLIF(ri.instagram_name, ''), ru.email, '')`;
+const PLAN_COLUMNS = `
+  r.id, r.user_id, r.plan, r.status, r.currency, r.amount_minor::float8 AS amount_minor, r.billing_interval,
+  r.stripe_customer_id, COALESCE(r.stripe_subscription_id, '') AS stripe_subscription_id, r.stripe_payment_intent_id,
+  r.current_period_end, r.trial_ends_at, r.cancel_at_period_end, r.ended_at, r.paid_at, r.past_due_since,
+  r.refund_due, r.refunded_at, r.refund_reason, r.refund_gave_up_at, r.trial_kind, r.created, r.plan_rows,
+  ${pastDueLapsed("r")} AS lapsed,
+  (${PLAN_STATE}) AS state, (${PLAN_KIND}) AS kind, (${PLAN_NEXT}) AS next_at, ${PLAN_STARTED} AS started_at,
+  (${PLAN_SOURCE}) AS source, ru.id AS referrer_user_id, ${REFERRER_NAME} AS referrer_name,
+  ri.instagram_username AS referrer_instagram,
+  u.email, ${CREATOR_NAME} AS name, i.instagram_username, i.profile_pic_name, i.instagram_profile_image,
+  ${PLAN_COUNTRY} AS country,
+  (u.id IS NULL OR (u.deleted IS NOT NULL AND u.deleted <> 'infinity')) AS account_deleted`;
+
+export const PLAN_STATES = ["paying", "trial", "free", "cancels", "past_due", "ended", "refunded", "disputed"];
+export const PLAN_KINDS = ["pro_monthly", "pro_yearly", "founding", "partner_trial", "gift"];
+const PLAN_SOURCES = ["pitch_partner", "creator_referral", "partner_programme", "direct"];
+const PLAN_SORTS = {
+  creator: CREATOR_NAME,
+  plan: `(${PLAN_KIND})`,
+  status: `array_position(ARRAY[${PLAN_STATES.map((s) => `'${s}'`).join(", ")}], (${PLAN_STATE}))`,
+  price: "r.amount_minor",
+  started: PLAN_STARTED,
+  // Founding never ends: last when soonest first.
+  next: `COALESCE((${PLAN_NEXT}), 'infinity'::timestamptz)`,
+  source: `(${PLAN_SOURCE})`,
+  country: PLAN_COUNTRY,
+};
+const PLAN_FILTERS = {
+  creator: textFilter(CREATOR_NAME, "u.email", "i.instagram_username"),
+  status: enumFilter(Object.fromEntries(PLAN_STATES.map((s) => [s, `(${PLAN_STATE}) = '${s}'`]))),
+  plan: enumFilter(Object.fromEntries(PLAN_KINDS.map((k) => [k, `(${PLAN_KIND}) = '${k}'`]))),
+  currency: enumFilter(Object.fromEntries(["gbp", "usd", "eur"].map((c) => [c, `lower(r.currency) = '${c}'`]))),
+  source: enumFilter(Object.fromEntries(PLAN_SOURCES.map((s) => [s, `(${PLAN_SOURCE}) = '${s}'`]))),
+  started: dateFilter(PLAN_STARTED),
+  next: dateFilter(`(${PLAN_NEXT})`),
+  country: textFilter(PLAN_COUNTRY),
+};
+
+// Where a plan's Stripe objects are: live mode for prod, test mode for dev
+// (the main app on dev bills with Stripe's test keys).
+const stripeDashboard = (target) => (target === "dev" ? "https://dashboard.stripe.com/test" : "https://dashboard.stripe.com");
 
 // Since when the summary counts: a number of days, or everything.
 function sinceDays(raw) {
@@ -405,6 +545,62 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
     } catch (e) {
       if (notPromoted(e)) return res.json({ available: false, view, items: [], total: 0 });
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/pitch/plans?limit=&offset=&sortBy=&sortDir=&filter[col]= —
+  // one line per creator with a Pitch Pro or Founding plan, newest first.
+  router.get("/plans", async (req, res) => {
+    const { limit, offset } = pageOf(req.query);
+    const params = [];
+    const conds = filterConditions(parseColumnFilters(req.query), PLAN_FILTERS, params);
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const order = orderBySql(req.query, PLAN_SORTS, `${PLAN_STARTED} DESC, r.user_id`);
+    const countParams = [...params];
+    params.push(limit, offset);
+    const stripe = stripeDashboard(req.dbTarget);
+    try {
+      const [{ rows }, count] = await Promise.all([
+        query(`SELECT ${PLAN_COLUMNS} ${PLANS_FROM} ${where} ORDER BY ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
+        query(`SELECT count(*)::int AS n ${PLANS_FROM} ${where}`, countParams),
+      ]);
+      res.json({ available: true, items: await withAvatars(rows, sign), total: count.rows[0]?.n ?? 0, stripe_dashboard: stripe });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false, items: [], total: 0, stripe_dashboard: stripe });
+      console.error("[pitch-plans] list", e);
+      res.status(500).json({ error: "Couldn't load the Pitch Pro plans. Try again in a moment." });
+    }
+  });
+
+  // GET /api/pitch/plans/summary — how many creators are in each state, and
+  // per currency what the plans paying now bill: monthly and yearly Pitch Pro
+  // that renews, and Founding paid once. No conversion between currencies.
+  router.get("/plans/summary", async (_req, res) => {
+    try {
+      const [states, money] = await Promise.all([
+        query(`SELECT (${PLAN_STATE}) AS state, count(*)::int AS n ${PLANS_FROM} GROUP BY 1`),
+        query(
+          `SELECT lower(r.currency) AS currency,
+                  count(*)::int AS paying,
+                  count(*) FILTER (WHERE r.plan = 'pro' AND r.billing_interval <> 'year')::int AS monthly,
+                  COALESCE(sum(r.amount_minor) FILTER (WHERE r.plan = 'pro' AND r.billing_interval <> 'year'), 0)::float8 AS monthly_minor,
+                  count(*) FILTER (WHERE r.plan = 'pro' AND r.billing_interval = 'year')::int AS yearly,
+                  COALESCE(sum(r.amount_minor) FILTER (WHERE r.plan = 'pro' AND r.billing_interval = 'year'), 0)::float8 AS yearly_minor,
+                  count(*) FILTER (WHERE r.plan = 'founding')::int AS founding,
+                  COALESCE(sum(r.amount_minor) FILTER (WHERE r.plan = 'founding'), 0)::float8 AS founding_minor
+             ${PLANS_FROM}
+            WHERE (${PLAN_STATE}) = 'paying'
+            GROUP BY 1 ORDER BY 2 DESC, 1`,
+        ),
+      ]);
+      const counts = Object.fromEntries(PLAN_STATES.map((s) => [s, 0]));
+      for (const row of states.rows) counts[row.state] = row.n;
+      const total = states.rows.reduce((a, row) => a + row.n, 0);
+      res.json({ available: true, total, counts, currencies: money.rows });
+    } catch (e) {
+      if (notPromoted(e)) return res.json({ available: false });
+      console.error("[pitch-plans] summary", e);
+      res.status(500).json({ error: "Couldn't load the Pitch Pro counts. Try again in a moment." });
     }
   });
 
