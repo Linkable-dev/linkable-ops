@@ -4,7 +4,7 @@ import express from "express";
 import { pitchRoutes } from "../routes/pitch.js";
 import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
 import { approvePitchReview, rejectPitchReview, listPitchReviews, REVIEW } from "../lib/pitchReviews.js";
-import { reviewAccount, reviewProfiles } from "../../src/components/pitch/pitchLabels.js";
+import { reviewAccount, reviewProfiles, pitchStatus, eventLabel, CHANNEL_LABEL } from "../../src/components/pitch/pitchLabels.js";
 
 async function serve(t, query, sign = async (keys) => keys.map(() => null), reviews) {
   const app = express();
@@ -289,4 +289,28 @@ test("a PitchReview's View as brand link and her accounts decode, and the card l
   assert.equal(reviewProfiles({ creator_handle: "mayacollins" }).main.url, "https://www.instagram.com/mayacollins/");
   // No account: nothing to link.
   assert.deepEqual(reviewProfiles({ creator_handle: "", main_platform: "" }), { main: null, accounts: [] });
+});
+
+test("Send from my email has its own channel, filter and words", async (t) => {
+  const seen = [];
+  const request = await serve(t, async (sql, params) => {
+    seen.push({ sql, params });
+    return /count\(\*\)::int AS n/.test(sql) ? { rows: [{ n: 0 }] } : { rows: [] };
+  });
+  await request("/pitches?filter[channel]=own");
+  const list = seen.find((q) => /LIMIT/.test(q.sql));
+  assert.match(list.sql, /p\.delivery = 'own' OR \(p\.from_my_email AND p\.delivery = 'lemlist'\) THEN 'own'/);
+  assert.match(list.sql, /p\.own_email_state/);
+  seen.length = 0;
+  await request("/pitches?filter[channel]=lemlist");
+  assert.match(seen.find((q) => /LIMIT/.test(q.sql)).sql, /p\.delivery = 'lemlist' AND NOT p\.from_my_email/);
+
+  assert.equal(CHANNEL_LABEL.own, "Creator's own email");
+  assert.equal(pitchStatus({ status: "scheduled", delivery: "own", own_email_state: "ready" }).label, "Creator to send");
+  assert.match(pitchStatus({ status: "scheduled", delivery: "lemlist", lemlist_state: "pending", from_my_email: true }).note, /creator sends it/);
+  assert.equal(pitchStatus({ status: "sent", delivery: "own", own_email_state: "sent" }).note, "Sent from the creator's email");
+  assert.equal(eventLabel({ event: "sent", detail: { via: "own_email", marked_by: "bcc" } }), "Sent from the creator's email (its Bcc arrived)");
+  assert.equal(eventLabel({ event: "sent", detail: { via: "own_email", marked_by: "creator" } }), "Creator said she sent it from her email");
+  assert.equal(eventLabel({ event: "notify_unsent_1730000000_sent", detail: {} }), "Creator told her pitch wasn't sent");
+  assert.equal(eventLabel({ event: "reply_to_creator", detail: {} }), "Brand's emailed reply passed to the creator");
 });

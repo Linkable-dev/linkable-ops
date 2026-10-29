@@ -55,14 +55,17 @@ async function withAvatars(rows, sign) {
 }
 
 // Where the pitch went out: Lemlist (a brand off Linkable, since 4 Oct),
-// Linkable Messages (a brand on Linkable), or Linkable's own email (before
-// Lemlist). Sandboxed = dev, to a tester instead of the brand.
+// Linkable Messages (a brand on Linkable), Linkable's own email (before
+// Lemlist), or the creator's own email (Send from my email, 29 Oct: the
+// contact is found through the Lemlist queue, then delivery 'own' and she
+// sends it). Sandboxed = dev, to a tester instead of the brand.
 const EVENTS_LATERAL = `LEFT JOIN LATERAL (
     SELECT bool_or(e.detail->>'sandboxed' = 'true') AS sandboxed,
            bool_or(e.detail->>'in_app' = 'true') AS in_app
       FROM pitch_events e WHERE e.pitch_id = p.id AND e.event IN ('scheduled', 'sent')
   ) ev ON true`;
-const CHANNEL = `CASE WHEN p.delivery = 'lemlist' THEN 'lemlist'
+const CHANNEL = `CASE WHEN p.delivery = 'own' OR (p.from_my_email AND p.delivery = 'lemlist') THEN 'own'
+                      WHEN p.delivery = 'lemlist' THEN 'lemlist'
                       WHEN COALESCE(ev.in_app, false) THEN 'in_app'
                       WHEN p.sent_at IS NOT NULL THEN 'email'
                       ELSE '' END`;
@@ -78,6 +81,7 @@ const PITCH_COLUMNS = `
   p.id, p.status, p.tier, p.bonus, p.created, p.sent_at, p.sent_to, p.contact_name, p.contact_role,
   p.delivery, p.lemlist_state, p.lemlist_error, p.view_count, p.first_viewed_at, p.last_viewed_at,
   p.replied_at, p.accepted_at, p.declined_at, p.trial_started_at, p.brand_paid_at, p.idea,
+  p.from_my_email, p.own_email_state, p.own_email_ready_at,
   ${CHANNEL} AS channel, COALESCE(ev.sandboxed, false) AS sandboxed,
   p.creator_user_id, u.email AS creator_email, ${CREATOR_NAME} AS creator_name,
   i.instagram_username AS creator_instagram, i.profile_pic_name, i.instagram_profile_image,
@@ -118,7 +122,8 @@ const PITCH_FILTERS = {
     no_contact: "p.lemlist_state = 'failed'",
   }),
   channel: enumFilter({
-    lemlist: "p.delivery = 'lemlist'",
+    lemlist: "p.delivery = 'lemlist' AND NOT p.from_my_email",
+    own: `(${CHANNEL}) = 'own'`,
     email: `(${CHANNEL}) = 'email'`,
     in_app: "COALESCE(ev.in_app, false)",
   }),
@@ -508,7 +513,7 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
       const [events, replies] = await Promise.all([
         query(`SELECT id, created, event, detail FROM pitch_events WHERE pitch_id = $1 ORDER BY created, id`, [req.params.id]),
         query(
-          `SELECT id, direction, from_email, subject, body, received_at, notified_at
+          `SELECT id, direction, from_email, subject, body, received_at, notified_at, creator_notified_at
              FROM pitch_replies WHERE pitch_id = $1 ORDER BY received_at`,
           [req.params.id],
         ).catch((e) => (notPromoted(e) ? { rows: [] } : Promise.reject(e))),

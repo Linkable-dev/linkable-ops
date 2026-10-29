@@ -42,7 +42,7 @@ export const STATUS_OPTIONS = [
   { value: "skipped", label: "Skipped" },
 ];
 
-export const CHANNEL_LABEL = { lemlist: "Lemlist", email: "Linkable email", in_app: "Linkable Messages" };
+export const CHANNEL_LABEL = { lemlist: "Lemlist", email: "Linkable email", in_app: "Linkable Messages", own: "Creator's own email" };
 export const CHANNEL_OPTIONS = Object.entries(CHANNEL_LABEL).map(([value, label]) => ({ value, label }));
 
 // Where a Lemlist pitch is in its sequence (pitches.lemlist_state).
@@ -58,9 +58,18 @@ export function pitchStatus(p) {
   if (p.status === "ready" && p.lemlist_state === "failed") {
     return { label: "No contact found", color: "#B91C1C", note: p.lemlist_error || "Back with the creator to send again" };
   }
+  // Send from my email: Linkable finds the contact, then the creator sends it.
+  if (p.status === "scheduled" && p.delivery === "own" && p.own_email_state === "ready") {
+    return { label: "Creator to send", color: "#2563EB",
+             note: `Waiting for her to send it from her email${p.own_email_ready_at ? ` (ready ${when(p.own_email_ready_at)})` : ""}` };
+  }
   const s = STATUS[p.status] || { label: p.status, color: "#737C9A" };
   let note = "";
   if (p.delivery === "lemlist" && p.status !== "ready") note = p.lemlist_error || LEMLIST_NOTE[p.lemlist_state] || "";
+  if (p.from_my_email && p.delivery === "lemlist" && p.status === "scheduled" && !p.lemlist_error) {
+    note = "Finding the brand's contact, then the creator sends it from her email";
+  }
+  if (p.delivery === "own" && p.own_email_state === "sent") note = "Sent from the creator's email";
   if (p.status === "viewed" && p.view_count > 1) note = `${p.view_count} views`;
   return { ...s, note };
 }
@@ -99,12 +108,20 @@ const EVENT = {
   accepted: "Accepted",
   needs_manual: "Needs a person to finish the accept",
   brand_paid: "Brand paid",
+  own_email_ready: "Contact found: ready for the creator to send from her email",
+  own_email_ready_sent: "Creator told it's ready to send",
+  own_email_expired: "Creator didn't send it within 14 days: back in her drafts",
+  reply_to_creator: "Brand's emailed reply passed to the creator",
 };
 
 export function eventLabel(e) {
   const step = /^lemlist_step_(\d+)_sent$/.exec(e.event);
   if (step) return `Lemlist sent email ${Number(step[1]) + 1} of 3`;
   const d = e.detail || {};
+  if (/^notify_unsent_\d+_sent$/.test(e.event)) return "Creator told her pitch wasn't sent";
+  if (e.event === "sent" && d.via === "own_email") {
+    return d.marked_by === "bcc" ? "Sent from the creator's email (its Bcc arrived)" : "Creator said she sent it from her email";
+  }
   if (e.event === "sent") return d.in_app ? "Delivered in Linkable Messages" : d.via === "lemlist" ? "Marked Sent" : "Sent by Linkable email";
   if (e.event === "viewed" && d.first) return "Brand opened the proposal for the first time";
   if (e.event === "idea_saved" && d.edited) return "Creator edited and saved the idea";
