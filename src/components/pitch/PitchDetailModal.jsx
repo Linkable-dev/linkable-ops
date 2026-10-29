@@ -106,7 +106,9 @@ function PitchBody({ p, events, replies, showIgnored, setShowIgnored }) {
     ["Sent to", p.sent_to ? [p.sent_to, [p.contact_name, p.contact_role].filter(Boolean).join(", ")].filter(Boolean).join(" · ") : "—"],
     ["Proposal views", p.view_count ? `${p.view_count} · first ${when(p.first_viewed_at)}${p.view_count > 1 ? ` · last ${when(p.last_viewed_at)}` : ""}` : "None yet"],
     ["Replied", p.replied_at ? when(p.replied_at) : "No"],
-    ["Follow ups", p.delivery === "lemlist"
+    ["Follow ups", p.channel === "own"
+      ? "None from Linkable: the creator follows up from her email"
+      : p.delivery === "lemlist"
       ? `${lemlistSteps} of 3 Lemlist emails sent`
       : p.auto_follow_up ? `${followUps} sent, automatic` : followUps ? `${followUps} sent` : "Off"],
     ["Accepted", p.accepted_at ? when(p.accepted_at) : p.accept_started_at ? `Started ${when(p.accept_started_at)}` : "No"],
@@ -192,6 +194,7 @@ function PitchBody({ p, events, replies, showIgnored, setShowIgnored }) {
             <div key={r.id} style={box}>
               <div style={{ fontSize: 12, ...muted, marginBottom: 6 }}>
                 {r.direction === "brand" ? "Brand" : "Creator"}{r.from_email ? ` · ${r.from_email}` : ""} · {when(r.received_at)}
+                {r.direction === "brand" && r.creator_notified_at ? ` · passed to the creator ${when(r.creator_notified_at)}` : ""}
               </div>
               {r.subject && <div style={{ fontWeight: 600, marginBottom: 6 }}>{r.subject}</div>}
               <div style={{ whiteSpace: "pre-wrap" }}>{r.body}</div>
@@ -213,7 +216,18 @@ function PitchBody({ p, events, replies, showIgnored, setShowIgnored }) {
         </div>
       </>}
 
-      {p.delivery === "lemlist" && <>
+      {p.channel === "own" && <>
+        <div style={section}>Creator's own email</div>
+        <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 14px", fontSize: 13 }}>
+          <span style={muted}>State</span>
+          <span>{p.own_email_state === "sent" ? "Sent by the creator" : p.own_email_state === "ready" ? "Ready: waiting for the creator to send it" : "Finding the brand's contact"}</span>
+          {p.own_email_ready_at && <><span style={muted}>Ready since</span><span>{when(p.own_email_ready_at)}</span></>}
+          {p.lemlist_error && <><span style={muted}>Problem</span><span style={{ color: t.danger }}>{p.lemlist_error}</span></>}
+          {p.brand_contact_source && <><span style={muted}>Contact from</span><span>{p.brand_contact_source.replace(/_/g, " ")}</span></>}
+        </div>
+      </>}
+
+      {p.delivery === "lemlist" && !p.from_my_email && <>
         <div style={section}>Lemlist</div>
         <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 14px", fontSize: 13 }}>
           <span style={muted}>State</span><span>{p.lemlist_state || "—"}{p.lemlist_attempts ? ` · ${p.lemlist_attempts} contact ${p.lemlist_attempts === 1 ? "try" : "tries"}` : ""}</span>
