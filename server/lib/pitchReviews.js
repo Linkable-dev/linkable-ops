@@ -2,7 +2,8 @@
 // wait for the Linkable team before they go out. The main app owns the
 // queue and the send, so ops asks it: ListPitchReviews, ApprovePitchReview
 // (sends the pitch at once, through the same path and daily cap as every
-// pitch) and RejectPitchReview (the reason is what the creator reads), each
+// pitch), RejectPitchReview (the reason is what the creator reads) and
+// ArchivePitchReview (aside quietly, nothing to the creator), each
 // signed with ops' own service key (lib/mainAppGrpc.js), which the gRPC
 // server accepts for these RPCs and the payments admin only.
 //
@@ -104,4 +105,14 @@ export async function rejectPitchReview(pitchId, { reason = "", admin } = {}, ta
   return res;
 }
 
-export const pitchReviewsClient = { list: listPitchReviews, approve: approvePitchReview, reject: rejectPitchReview };
+// Archive: put it aside quietly. Back in the creator's Drafts with no note
+// and no email; she can send it again and it comes back to the queue.
+export async function archivePitchReview(pitchId, { admin } = {}, target) {
+  if (!UUID.test(String(pitchId || ""))) throw fail(404, "That pitch doesn't exist.");
+  const bytes = await call("ArchivePitchReview", encodeFields({ 1: pitchId, 4: admin?.email || "" }), target);
+  const res = decodeMessage(bytes, DECISION_RESPONSE);
+  console.log(`[pitch-review] archive target=${target} admin=${admin?.email} pitch=${pitchId}`);
+  return res;
+}
+
+export const pitchReviewsClient = { list: listPitchReviews, approve: approvePitchReview, reject: rejectPitchReview, archive: archivePitchReview };

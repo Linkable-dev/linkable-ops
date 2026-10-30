@@ -371,6 +371,13 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
     } catch (e) { reviewError(res, e); }
   });
 
+  // POST /api/pitch/reviews/:id/archive — aside quietly, nothing to the creator.
+  router.post("/reviews/:id/archive", async (req, res) => {
+    try {
+      res.json(await reviews.archive(req.params.id, { admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
   // Pitch Partners (main app QA 132): applications to approve or reject, and
   // videos to check are live. All through the main app (lib/pitchPartners.js).
   // GET /api/pitch/partners?queue=applications|videos|approved|rejected&limit=&offset=

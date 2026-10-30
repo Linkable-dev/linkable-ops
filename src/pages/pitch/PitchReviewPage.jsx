@@ -15,7 +15,8 @@ import { SocialIcon } from "../../components/ui/SocialIcon";
 // here before they go out. Each shows the creator, the pitch as the brand will
 // read it, and where it goes. Approve sends it at once through the main app's
 // usual send path; Reject asks for a reason, which the creator reads on her
-// pitch and by email, and she can edit it and send it again.
+// pitch and by email, and she can edit it and send it again. Archive puts it
+// aside quietly (no reason, no email): back in her Drafts, out of the queue.
 //
 // Never a link to the brand's proposal (/p/<token>): opening it counts as the
 // brand viewing it and emails the creator. View as brand (QA 122) opens the
@@ -39,6 +40,7 @@ const HELP = [
   ["View as brand", "Opens the page the brand will get from this pitch, in a new tab, as it will look. Reply is off, and nothing is counted or sent. The link works for an hour; the list reads itself again before its links run out."],
   ["Approve", "Sends the pitch now: Messages for a brand on Linkable, otherwise the Lemlist queue like every other pitch, follow ups included."],
   ["Reject", "Asks for the reason. The creator reads it on her pitch and in an email, edits the pitch and sends it again, and it comes back here."],
+  ["Archive", "Puts it aside without a word to the creator: no reason, no email. It goes back to her Drafts as it was, and if she sends it again it comes back here. For a pitch you won't send and won't explain, like a test."],
 ];
 
 const RESET = { bounce: "Back in review: one of her pitches bounced", complaint: "Back in review: a brand reported her" };
@@ -86,6 +88,16 @@ function ReviewCard({ r, onDone, onFailed, isStale, freshViewUrl }) {
       setContact(r.contact_email || "");
       onFailed();
     }
+    finally { setBusy(""); }
+  };
+
+  const archive = async () => {
+    setBusy("archive");
+    setError(null);
+    try {
+      await api.archivePitchReview(r.pitch_id);
+      onDone(`${r.creator_name || "The creator"}’s pitch to ${r.brand_name} is archived. She wasn't told; it is back in her Drafts.`);
+    } catch (e) { setError(e.message); }
     finally { setBusy(""); }
   };
 
@@ -227,6 +239,8 @@ function ReviewCard({ r, onDone, onFailed, isStale, freshViewUrl }) {
           <Btn variant="secondary" onClick={() => { setRejecting(false); setReason(""); setError(null); }} disabled={!!busy}>Cancel</Btn>
           <Btn variant="danger" onClick={reject} loading={busy === "reject"}>Reject with this reason</Btn>
         </> : <>
+          <Btn variant="secondary" onClick={archive} loading={busy === "archive"} disabled={busy === "approve"}
+               title="Aside quietly: nothing to the creator, back in her Drafts.">Archive</Btn>
           <Btn variant="secondary" onClick={() => setRejecting(true)} disabled={!!busy}>Reject</Btn>
           <Btn onClick={approve} loading={busy === "approve"}>Approve and send</Btn>
         </>}

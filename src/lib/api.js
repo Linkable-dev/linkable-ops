@@ -214,6 +214,8 @@ export const api = {
     request(`/pitch/reviews/${id}/approve`, { method: "POST", body: JSON.stringify({ contact_email: contactEmail || "" }) }),
   rejectPitchReview: (id, reason) =>
     request(`/pitch/reviews/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+  // Archive puts it aside quietly: nothing to the creator.
+  archivePitchReview: (id) => request(`/pitch/reviews/${id}/archive`, { method: "POST" }),
   // Pitch Partners: applications (approve gives 30 days of Pitch Pro, reject's
   // reason is what she reads) and videos to check are live.
   getPitchPartners: ({ queue, limit = 25, offset = 0 } = {}) => request(`/pitch/partners?${buildQs({ queue, limit, offset })}`),
