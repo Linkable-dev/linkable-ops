@@ -23,6 +23,7 @@ const PitchCreatorsPage = lazy(() => import("./pages/pitch/PitchCreatorsPage"));
 const PitchReviewPage = lazy(() => import("./pages/pitch/PitchReviewPage"));
 const PitchPartnersPage = lazy(() => import("./pages/pitch/PitchPartnersPage"));
 const PitchBrandsPage = lazy(() => import("./pages/pitch/PitchBrandsPage"));
+const PitchProPage = lazy(() => import("./pages/pitch/PitchProPage"));
 const PitchSection = lazy(() => import("./components/pitch/PitchParts.jsx").then(m => ({ default: m.PitchSection })));
 const CostsPage = lazy(() => import("./pages/CostsPage"));
 const AiCreatorsPage = lazy(() => import("./pages/AiCreatorsPage"));
@@ -74,6 +75,7 @@ createRoot(document.getElementById("root")).render(
                       <Route path="/ops/pitch/partners" element={<PitchPartnersPage />} />
                       <Route path="/ops/pitch/creators" element={<PitchCreatorsPage />} />
                       <Route path="/ops/pitch/brands" element={<PitchBrandsPage />} />
+                      <Route path="/ops/pitch/pro" element={<PitchProPage />} />
                     </Route>
                     {/* The page was "Pitch brands" until it became a tab of Pitch. */}
                     <Route path="/ops/pitch-brands" element={<Navigate to="/ops/pitch/brands" replace />} />

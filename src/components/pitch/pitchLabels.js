@@ -10,6 +10,7 @@ export const PITCH_TABS = [
   { to: "/ops/pitch/partners", label: "Partners", match: (p) => p.startsWith("/ops/pitch/partners") },
   { to: "/ops/pitch/creators", label: "Creators", match: (p) => p.startsWith("/ops/pitch/creators") },
   { to: "/ops/pitch/brands", label: "Brands", match: (p) => p.startsWith("/ops/pitch/brands") },
+  { to: "/ops/pitch/pro", label: "Pitch Pro", match: (p) => p.startsWith("/ops/pitch/pro") },
 ];
 
 // pitches.status, as an admin says it.
@@ -41,7 +42,7 @@ export const STATUS_OPTIONS = [
   { value: "skipped", label: "Skipped" },
 ];
 
-export const CHANNEL_LABEL = { lemlist: "Lemlist", email: "Linkable email", in_app: "Linkable Messages" };
+export const CHANNEL_LABEL = { lemlist: "Lemlist", email: "Linkable email", in_app: "Linkable Messages", own: "Creator's own email" };
 export const CHANNEL_OPTIONS = Object.entries(CHANNEL_LABEL).map(([value, label]) => ({ value, label }));
 
 // Where a Lemlist pitch is in its sequence (pitches.lemlist_state).
@@ -57,9 +58,18 @@ export function pitchStatus(p) {
   if (p.status === "ready" && p.lemlist_state === "failed") {
     return { label: "No contact found", color: "#B91C1C", note: p.lemlist_error || "Back with the creator to send again" };
   }
+  // Send from my email: Linkable finds the contact, then the creator sends it.
+  if (p.status === "scheduled" && p.delivery === "own" && p.own_email_state === "ready") {
+    return { label: "Creator to send", color: "#2563EB",
+             note: `Waiting for her to send it from her email${p.own_email_ready_at ? ` (ready ${when(p.own_email_ready_at)})` : ""}` };
+  }
   const s = STATUS[p.status] || { label: p.status, color: "#737C9A" };
   let note = "";
   if (p.delivery === "lemlist" && p.status !== "ready") note = p.lemlist_error || LEMLIST_NOTE[p.lemlist_state] || "";
+  if (p.from_my_email && p.delivery === "lemlist" && p.status === "scheduled" && !p.lemlist_error) {
+    note = "Finding the brand's contact, then the creator sends it from her email";
+  }
+  if (p.delivery === "own" && p.own_email_state === "sent") note = "Sent from the creator's email";
   if (p.status === "viewed" && p.view_count > 1) note = `${p.view_count} views`;
   return { ...s, note };
 }
@@ -98,12 +108,20 @@ const EVENT = {
   accepted: "Accepted",
   needs_manual: "Needs a person to finish the accept",
   brand_paid: "Brand paid",
+  own_email_ready: "Contact found: ready for the creator to send from her email",
+  own_email_ready_sent: "Creator told it's ready to send",
+  own_email_expired: "Creator didn't send it within 14 days: back in her drafts",
+  reply_to_creator: "Brand's emailed reply passed to the creator",
 };
 
 export function eventLabel(e) {
   const step = /^lemlist_step_(\d+)_sent$/.exec(e.event);
   if (step) return `Lemlist sent email ${Number(step[1]) + 1} of 3`;
   const d = e.detail || {};
+  if (/^notify_unsent_\d+_sent$/.test(e.event)) return "Creator told her pitch wasn't sent";
+  if (e.event === "sent" && d.via === "own_email") {
+    return d.marked_by === "bcc" ? "Sent from the creator's email (its Bcc arrived)" : "Creator said she sent it from her email";
+  }
   if (e.event === "sent") return d.in_app ? "Delivered in Linkable Messages" : d.via === "lemlist" ? "Marked Sent" : "Sent by Linkable email";
   if (e.event === "viewed" && d.first) return "Brand opened the proposal for the first time";
   if (e.event === "idea_saved" && d.edited) return "Creator edited and saved the idea";
@@ -253,4 +271,146 @@ export function partnerAccount(r) {
   if (/^[A-Za-z0-9._]{1,30}$/.test(ig)) links.push({ label: "Instagram", href: `https://www.instagram.com/${ig}/` });
   if (/^[A-Za-z0-9._]{1,30}$/.test(tt)) links.push({ label: "TikTok", href: `https://www.tiktok.com/@${tt}` });
   return { line, links };
+}
+
+// --- Pitch Pro: who pays (creator_plans, one line per creator) ---------------
+
+// "26 Nov 2026" — a billing date wants the day, not "in 3d".
+export function day(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d)) return String(v);
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// 1900, "gbp" -> "£19"; 1950 -> "£19.50". The currency's own symbol, never
+// converted.
+export function money(minor, currency) {
+  const cur = String(currency || "").toUpperCase();
+  const amount = (Number(minor) || 0) / 100;
+  if (!/^[A-Z]{3}$/.test(cur)) return String(amount);
+  try {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency", currency: cur, minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    }).format(amount);
+  } catch {
+    return `${cur} ${amount}`;
+  }
+}
+
+// What she is on (the server's kind).
+export const PLAN_KIND_LABEL = {
+  pro_monthly: "Pro monthly",
+  pro_yearly: "Pro yearly",
+  founding: "Founding",
+  partner_trial: "Partner trial",
+  gift: "Gift",
+};
+export const PLAN_KIND_OPTIONS = Object.entries(PLAN_KIND_LABEL).map(([value, label]) => ({ value, label }));
+
+// Where her plan is (the server's state), as the filter and the summary say it.
+export const PLAN_STATE_LABEL = {
+  paying: "Paying",
+  trial: "Trial",
+  free: "Gift running",
+  cancels: "Cancels",
+  past_due: "Past due",
+  ended: "Ended",
+  refunded: "Refunded",
+  disputed: "Disputed",
+};
+export const PLAN_STATE_OPTIONS = Object.entries(PLAN_STATE_LABEL).map(([value, label]) => ({ value, label }));
+const PLAN_STATE_COLOR = {
+  paying: "#16A34A", trial: "#2563EB", free: "#7C3AED", cancels: "#B45309",
+  past_due: "#B91C1C", ended: "#9CA3AF", refunded: "#9CA3AF", disputed: "#B91C1C",
+};
+
+export const PLAN_SOURCE_LABEL = {
+  pitch_partner: "Pitch Partner link",
+  creator_referral: "Creator referral",
+  partner_programme: "Is a Pitch Partner",
+  direct: "Direct",
+};
+export const PLAN_SOURCE_OPTIONS = Object.entries(PLAN_SOURCE_LABEL).map(([value, label]) => ({ value, label }));
+
+export const CURRENCY_OPTIONS = [
+  { value: "gbp", label: "GBP" }, { value: "usd", label: "USD" }, { value: "eur", label: "EUR" },
+];
+
+const REFUND_REASON = {
+  second_pro: "A second Pitch Pro",
+  already_founding: "Already a Founding Creator",
+  sold_out: "Founding was sold out",
+};
+
+// The status tag and the line under it. "Cancels on 26 Nov 2026". r.lapsed
+// is the server's word that a past due plan no longer counts as Pro (14 days
+// on, or at once when it failed straight out of a trial she never paid for).
+export function planStatus(r) {
+  const color = PLAN_STATE_COLOR[r.state] || "#737C9A";
+  switch (r.state) {
+    case "paying":
+      return { label: "Paying", color, note: r.plan === "founding" ? "Paid once, Pitch Pro for good" : "" };
+    case "trial": {
+      const note = r.kind === "partner_trial" ? "A Pitch Partner's free first month"
+        : r.trial_kind === "deferred" ? "Payment moved past her gift"
+        : r.kind === "gift" ? "Free while her gift runs"
+        : "";
+      return { label: "Trial", color, note };
+    }
+    case "free":
+      return { label: "Gift running", color, note: "Given by Pitch Partners, no card" };
+    case "cancels":
+      return { label: `Cancels on ${day(r.current_period_end) || "period end"}`, color,
+               note: r.status === "trialing" ? "Cancelled in her trial: never charged" : "Paid up to then, won't renew" };
+    case "past_due": {
+      // Unpaid and incomplete never count as Pro: Stripe stopped trying.
+      if (r.status === "unpaid") return { label: "Unpaid", color, note: "Not paid: back on Free" };
+      if (r.status === "incomplete") return { label: "First payment incomplete", color, note: "Not Pro: back on Free" };
+      const note = r.lapsed ? `Not paid${r.past_due_since ? ` since ${day(r.past_due_since)}` : ""}: back on Free`
+        : r.past_due_since ? `Card failing since ${day(r.past_due_since)}` : "Card failing, Stripe retrying";
+      return { label: "Past due", color, note };
+    }
+    case "ended":
+      return { label: "Ended", color, note: r.status === "granted" ? "Her gift ran out" : "" };
+    case "refunded":
+      // Refunded by hand in Stripe: status refunded, no refunded_at.
+      if (r.refund_due && r.refund_gave_up_at) return { label: "Refund failed", color: "#B91C1C", note: "Refund it by hand in Stripe" };
+      return { label: r.refund_due ? "Refund due" : "Refunded", color, note: REFUND_REASON[r.refund_reason] || "" };
+    case "disputed":
+      return { label: "Disputed", color, note: "Her bank took the payment back (dispute lost)" };
+    default:
+      return { label: r.status || "Unknown", color, note: "" };
+  }
+}
+
+// "£19 / month", "$190 / year", "£99 once", "Free".
+export function planPrice(r) {
+  if (r.status === "granted" || !(Number(r.amount_minor) > 0)) return "Free";
+  const amount = money(r.amount_minor, r.currency);
+  if (r.plan === "founding") return `${amount} once`;
+  return `${amount} / ${r.billing_interval === "year" ? "year" : "month"}`;
+}
+
+// The date that matters next and what it is: "Renews", "First payment",
+// "Ends", "Ended", "Refunded". Founding never ends.
+export function planNext(r) {
+  if (r.state === "paying" && r.plan === "founding") return { verb: "Never ends", at: "" };
+  if (r.state === "trial" && r.trial_kind === "deferred") return { verb: "Next payment", at: r.next_at || "" };
+  const verb = {
+    paying: "Renews", trial: "First payment", cancels: "Ends", free: "Ends",
+    past_due: "Period ends", ended: "Ended", refunded: "Refunded", disputed: "",
+  }[r.state] || "";
+  return { verb, at: r.next_at || "" };
+}
+
+// The plan's own page in Stripe: the subscription, or Founding's payment.
+// None for Pitch Pro given (nothing in Stripe).
+export function stripeLinks(r, base) {
+  if (!base) return { plan: "", customer: "" };
+  const plan = r.stripe_subscription_id ? `${base}/subscriptions/${encodeURIComponent(r.stripe_subscription_id)}`
+    : r.stripe_payment_intent_id ? `${base}/payments/${encodeURIComponent(r.stripe_payment_intent_id)}`
+    : "";
+  const customer = r.stripe_customer_id ? `${base}/customers/${encodeURIComponent(r.stripe_customer_id)}` : "";
+  return { plan, customer };
 }

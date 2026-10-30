@@ -735,7 +735,12 @@ function DmPanel({ lead, maxChars, drafting, onSettled, onNotice, sticky, follow
     if (["sent", "followup_sent"].includes(action) && dirty) {
       await api.updateInstagramDm(lead.handle, editAction, text);
     }
-    onSettled(await api.updateInstagramDm(lead.handle, action), false);
+    const out = await api.updateInstagramDm(lead.handle, action);
+    onSettled(out, false);
+    // DM sent also lists the brand for creators to pitch (main app QA 145).
+    if (out.pitch && out.pitch.status !== "already") {
+      onNotice({ tone: out.pitch.status === "failed" ? "danger" : "info", text: `@${lead.handle}: ${out.pitch.message}` });
+    }
   });
   const sentAction = followUp ? "followup_sent" : "sent";
 
