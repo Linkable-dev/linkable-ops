@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import { pitchRoutes } from "../routes/pitch.js";
 import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
-import { approvePitchReview, rejectPitchReview, listPitchReviews, REVIEW } from "../lib/pitchReviews.js";
+import { approvePitchReview, rejectPitchReview, archivePitchReview, listPitchReviews, REVIEW } from "../lib/pitchReviews.js";
 import { reviewAccount, reviewProfiles } from "../../src/components/pitch/pitchLabels.js";
 
 async function serve(t, query, sign = async (keys) => keys.map(() => null), reviews) {
@@ -173,6 +173,7 @@ test("the review queue relays the list, Approve and Reject to the main app", asy
       if (!opts.reason) throw e;
       return { status: "ready" };
     },
+    archive: async (id, opts, target) => { calls.push(["archive", id, opts.admin.email, target]); return { status: "ready" }; },
   };
   const request = await serve(t, async () => ({ rows: [] }), undefined, reviews);
   const list = await request("/reviews?limit=500&offset=-3");
@@ -187,6 +188,10 @@ test("the review queue relays the list, Approve and Reject to the main app", asy
   plain(bad.body.error);
   const rejected = await request(`/reviews/${ID}/reject`, "POST", { reason: "Name the product" });
   assert.deepEqual(rejected.body, { status: "ready" });
+  // Archive carries only who did it: no reason, nothing for the creator.
+  const archived = await request(`/reviews/${ID}/archive`, "POST");
+  assert.deepEqual(archived.body, { status: "ready" });
+  assert.deepEqual(calls[4], ["archive", ID, "pitch-test@example.com", "dev"]);
 });
 
 test("without the service key the queue says so instead of failing", async () => {
@@ -199,6 +204,8 @@ test("without the service key the queue says so instead of failing", async () =>
     await assert.rejects(approvePitchReview(ID, {}, "dev"), (e) => e.status === 503);
     await assert.rejects(rejectPitchReview(ID, { reason: " " }, "dev"), (e) => e.status === 400);
     await assert.rejects(approvePitchReview("nope", {}, "dev"), (e) => e.status === 404);
+    await assert.rejects(archivePitchReview("nope", {}, "dev"), (e) => e.status === 404);
+    await assert.rejects(archivePitchReview(ID, {}, "dev"), (e) => e.status === 503);
     await assert.rejects(approvePitchReview(ID, { contactEmail: "not an email" }, "dev"), (e) => e.status === 400);
   } finally {
     if (before !== undefined) process.env.MAIN_APP_SERVICE_KEY = before;
