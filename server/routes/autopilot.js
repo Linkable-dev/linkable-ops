@@ -199,7 +199,8 @@ async function lemlistUnsubscribe(emails) {
   let ok = 0;
   for (const email of emails) {
     try {
-      const r = await fetch(`https://api.lemlist.com/api/unsubscribes/${encodeURIComponent(email)}`, {
+      // v2: Lemlist removed the v1 /api/unsubscribes routes in Nov 2026 (404).
+      const r = await fetch(`https://api.lemlist.com/api/v2/unsubscribes/variables/${encodeURIComponent(email)}`, {
         method: "POST",
         headers: { Authorization: auth },
       });
