@@ -289,6 +289,8 @@ export default function Sidebar() {
                 that received it could see. */}
             {navItem("/ops/content", "Campaign content", path.startsWith("/ops/content"), contentIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
+            {/* Brands' Instagram calls with a Google Form, run as campaigns (QA 171). */}
+            {navItem("/ops/calls", "Campaigns from calls", path.startsWith("/ops/calls"), campaignsIcon)}
             {navItem("/ops/costs", "Costs & margin", path.startsWith("/ops/costs"), costsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
             {/* Creators pitching brands: who sent what, the creators, the brands. */}

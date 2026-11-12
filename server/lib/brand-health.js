@@ -176,6 +176,8 @@ export async function loadBrandFacts() {
         AND l3.updated >= NOW() - INTERVAL '30 days'
     ) lk ON true
     WHERE u.role = 2 AND u.deleted = 'infinity'::timestamptz AND ${ND("b")}
+      -- External calls' stand-in brands (main app QA 171) are not customers.
+      AND u.email NOT LIKE '%@external-calls.linkable.invalid'
       -- Hidden means out of the live marketplace: internal stores, test shops,
       -- and brands that uninstalled. Scoring them puts names on the churn
       -- radar that nobody can act on.

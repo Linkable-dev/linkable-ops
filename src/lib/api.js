@@ -229,6 +229,23 @@ export const api = {
     request(`/pitch/partners/stuck-payouts?${buildQs({ limit, offset })}`),
   reconcilePitchPartnerPayout: (batch) =>
     request(`/pitch/partners/stuck-payouts/${batch}/reconcile`, { method: "POST", body: "{}" }),
+  // Campaigns from calls (main app QA 171): brands' Google Form calls as
+  // campaigns. Drafts to check, Manual add, edit, Read again, the photo,
+  // Approve / Reject / Close, held applications and each brand's applicants.
+  getExternalCalls: ({ status = "", source = "", limit = 10, offset = 0 } = {}) =>
+    request(`/external-calls?${buildQs({ status, source, limit, offset })}`),
+  getExternalCall: (id) => request(`/external-calls/${id}`),
+  addExternalCall: (body) => request("/external-calls", { method: "POST", body: JSON.stringify(body) }),
+  updateExternalCall: (id, draft) => request(`/external-calls/${id}`, { method: "PUT", body: JSON.stringify({ draft }) }),
+  rereadExternalCall: (id, caption) => request(`/external-calls/${id}/read`, { method: "POST", body: JSON.stringify({ caption: caption || "" }) }),
+  setExternalCallImage: (id, imageUrl) => request(`/external-calls/${id}/image`, { method: "POST", body: JSON.stringify({ image_url: imageUrl || "" }) }),
+  decideExternalCall: (id, decision, reason) =>
+    request(`/external-calls/${id}/decide`, { method: "POST", body: JSON.stringify({ decision, reason: reason || "" }) }),
+  getExternalSubmissions: ({ status = "", brand = "", callId = "", limit = 10, offset = 0 } = {}) =>
+    request(`/external-calls/submissions?${buildQs({ status, brand, call_id: callId, limit, offset })}`),
+  actOnExternalSubmission: (id, action) =>
+    request(`/external-calls/submissions/${id}`, { method: "POST", body: JSON.stringify({ action }) }),
+  getExternalCallBrands: ({ limit = 10, offset = 0 } = {}) => request(`/external-calls/brands?${buildQs({ limit, offset })}`),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>

@@ -94,7 +94,9 @@ async function loadBrands() {
                shopify_created_at DESC NULLS LAST, synced_at DESC NULLS LAST
       LIMIT 1
     ) asub ON true
-    WHERE u.role = 2`);
+    WHERE u.role = 2
+      -- External calls' stand-in brands (main app QA 171) are not customers.
+      AND u.email NOT LIKE '%@external-calls.linkable.invalid'`);
   return rows;
 }
 
