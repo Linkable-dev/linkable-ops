@@ -519,7 +519,13 @@ function Brands({ onOpen }) {
 
 export default function ExternalCallsPage() {
   const { theme: t } = useTheme();
-  const [tab, setTab] = useState("draft");
+  // ?tab=held (the team's held-submission email links here) opens that tab.
+  const [tab, setTab] = useState(() => {
+    try {
+      const wanted = new URLSearchParams(window.location.search).get("tab");
+      return wanted && (["held", "brands"].includes(wanted) || CALL_TABS.some((c) => c.value === wanted)) ? wanted : "draft";
+    } catch { return "draft"; }
+  });
   const [source, setSource] = useState("");
   const [brand, setBrand] = useState("");
   const [rows, setRows] = useState([]);
