@@ -3,6 +3,7 @@ import { cloudSqlQuery } from "../lib/cloudsql.js";
 import { signedUrls } from "../lib/gcs.js";
 import { pitchReviewsClient } from "../lib/pitchReviews.js";
 import { pitchPartnersClient } from "../lib/pitchPartners.js";
+import { pitchSignalsClient } from "../lib/pitchSignals.js";
 import {
   parseColumnFilters, filterConditions, orderBySql,
   textFilter, numberFilter, dateFilter, enumFilter, boolFilter,
@@ -342,7 +343,7 @@ const pageOf = (q, def = 25) => ({
   offset: Math.max(parseInt(q.offset) || 0, 0),
 });
 
-export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews = pitchReviewsClient, partners = pitchPartnersClient } = {}) {
+export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews = pitchReviewsClient, partners = pitchPartnersClient, signals = pitchSignalsClient } = {}) {
   const router = Router();
 
   // The In review queue (QA 112). Errors from the main app are its own
@@ -418,6 +419,59 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
   router.post("/partners/:userId/video", async (req, res) => {
     try {
       res.json(await partners.video(req.params.userId, { decision: req.body?.decision, reason: req.body?.reason, admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // Pitch signals (main app QA 172): brands asking for creators on
+  // Instagram. Listed, added by hand from a post link, edited, approved,
+  // hidden, read again; all through the main app (lib/pitchSignals.js).
+  // GET /api/pitch/signals?status=live|draft|hidden|dropped&limit=&offset=
+  router.get("/signals", async (req, res) => {
+    const { limit, offset } = pageOf(req.query);
+    try {
+      res.json(await signals.list({ status: String(req.query.status || ""), limit, offset }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // GET /api/pitch/signals/stats?since=YYYY-MM-DD — reply rate, signal vs normal.
+  router.get("/signals/stats", async (req, res) => {
+    try {
+      res.json(await signals.stats({ since: String(req.query.since || "") }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/signals { post_url, caption?, image_url?, brand_name?, instagram?, website?, contact_email? }
+  router.post("/signals", async (req, res) => {
+    try {
+      res.json(await signals.draft(req.body || {}, { admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // PATCH /api/pitch/signals/:id { the editable fields }
+  router.patch("/signals/:id", async (req, res) => {
+    try {
+      res.json(await signals.update(req.params.id, req.body || {}, { admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/signals/:id/approve — live, under the 30 day rule.
+  router.post("/signals/:id/approve", async (req, res) => {
+    try {
+      res.json(await signals.approve(req.params.id, { admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/signals/:id/hide { reason }
+  router.post("/signals/:id/hide", async (req, res) => {
+    try {
+      res.json(await signals.hide(req.params.id, { reason: req.body?.reason, admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
+  // POST /api/pitch/signals/:id/reread { caption?, image_url? }
+  router.post("/signals/:id/reread", async (req, res) => {
+    try {
+      res.json(await signals.reread(req.params.id, { caption: req.body?.caption, imageUrl: req.body?.image_url, admin: req.admin }, req.dbTarget));
     } catch (e) { reviewError(res, e); }
   });
 
