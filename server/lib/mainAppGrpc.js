@@ -124,12 +124,25 @@ export function decodeStrings(buf) {
   return out;
 }
 
-// Encodes { fieldNumber: value } where a value is a string (wire type 2) or a
-// non-negative integer (varint); proto3 skips "" and 0.
+// Encodes { fieldNumber: value } where a value is a string (wire type 2), a
+// non-negative integer (varint), a Buffer (a nested message, already
+// encoded) or an array of strings or Buffers (a repeated field, one entry
+// each); proto3 skips "", 0 and empty arrays.
 export function encodeFields(fields) {
   const parts = [];
   for (const [num, value] of Object.entries(fields)) {
     if (value == null || value === "" || value === 0) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const bytes = Buffer.isBuffer(item) ? item : Buffer.from(String(item), "utf8");
+        parts.push(varint((Number(num) << 3) | 2), varint(bytes.length), bytes);
+      }
+      continue;
+    }
+    if (Buffer.isBuffer(value)) {
+      parts.push(varint((Number(num) << 3) | 2), varint(value.length), value);
+      continue;
+    }
     if (typeof value === "number") {
       if (!Number.isInteger(value) || value < 0) throw new Error(`field ${num}: only non-negative integers`);
       parts.push(varint(Number(num) << 3), varint(value));

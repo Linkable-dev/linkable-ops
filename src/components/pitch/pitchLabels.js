@@ -8,6 +8,7 @@ export const PITCH_TABS = [
   { to: "/ops/pitch", label: "Pitches", match: (p) => p === "/ops/pitch" },
   { to: "/ops/pitch/review", label: "In review", match: (p) => p.startsWith("/ops/pitch/review") },
   { to: "/ops/pitch/partners", label: "Partners", match: (p) => p.startsWith("/ops/pitch/partners") },
+  { to: "/ops/pitch/signals", label: "Signals", match: (p) => p.startsWith("/ops/pitch/signals") },
   { to: "/ops/pitch/creators", label: "Creators", match: (p) => p.startsWith("/ops/pitch/creators") },
   { to: "/ops/pitch/brands", label: "Brands", match: (p) => p.startsWith("/ops/pitch/brands") },
   { to: "/ops/pitch/pro", label: "Pitch Pro", match: (p) => p.startsWith("/ops/pitch/pro") },
@@ -413,4 +414,47 @@ export function stripeLinks(r, base) {
     : "";
   const customer = r.stripe_customer_id ? `${base}/customers/${encodeURIComponent(r.stripe_customer_id)}` : "";
   return { plan, customer };
+}
+
+// Pitch signals (main app QA 172): the status pills, and how a signal's
+// facts read in the list.
+export const SIGNAL_TABS = [
+  { value: "live", label: "Live", empty: "No live signals. The agent adds brands' calls for creators every hour." },
+  { value: "draft", label: "Drafts", empty: "No drafts. Add one from an Instagram post link." },
+  { value: "hidden", label: "Hidden", empty: "Nothing hidden yet." },
+  { value: "dropped", label: "Dropped", empty: "Nothing dropped yet." },
+];
+
+export const SIGNAL_STATUS = {
+  live: { label: "Live", color: "#16A34A" },
+  draft: { label: "Draft", color: "#B45309" },
+  hidden: { label: "Hidden", color: "#737C9A" },
+  dropped: { label: "Dropped", color: "#737C9A" },
+};
+
+const CONTACT_FROM = { post: "from the post", instagram: "from their Instagram profile", website: "from their website", manual: "added by hand" };
+export const signalContactFrom = (from) => CONTACT_FROM[from] || "";
+
+export const HOW_TO_APPLY = [
+  { value: "", label: "Not said" },
+  { value: "email", label: "Email" },
+  { value: "dm", label: "DM" },
+  { value: "comment", label: "Comment" },
+  { value: "link", label: "Link" },
+  { value: "other", label: "Other" },
+];
+
+// "Wants Small or medium dogs" or "Spots 5 creators": what the post says
+// about who it wants, as the creator's card shows it.
+export function signalWants(s) {
+  if (s?.spots) return { label: "Spots", text: s.spots };
+  if (s?.wants) return { label: "Wants", text: s.wants };
+  return { label: "Wants", text: "" };
+}
+
+export const signalSource = (s) => (s?.source === "manual" ? "Added manually" : "Agent");
+
+export function replyRate(rate) {
+  const n = Number(rate) || 0;
+  return `${Math.round(n * 1000) / 10}%`;
 }
