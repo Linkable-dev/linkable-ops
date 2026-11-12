@@ -246,6 +246,15 @@ export const api = {
   actOnExternalSubmission: (id, action) =>
     request(`/external-calls/submissions/${id}`, { method: "POST", body: JSON.stringify({ action }) }),
   getExternalCallBrands: ({ limit = 10, offset = 0 } = {}) => request(`/external-calls/brands?${buildQs({ limit, offset })}`),
+  // Pitch signals: brands asking for creators on Instagram (main app QA 172).
+  getPitchSignals: ({ status, limit = 25, offset = 0 } = {}) => request(`/pitch/signals?${buildQs({ status, limit, offset })}`),
+  getPitchSignalStats: ({ since } = {}) => request(`/pitch/signals/stats?${buildQs({ since })}`),
+  draftPitchSignal: (input) => request(`/pitch/signals`, { method: "POST", body: JSON.stringify(input) }),
+  updatePitchSignal: (id, signal) => request(`/pitch/signals/${id}`, { method: "PATCH", body: JSON.stringify(signal) }),
+  approvePitchSignal: (id) => request(`/pitch/signals/${id}/approve`, { method: "POST", body: "{}" }),
+  hidePitchSignal: (id, reason) => request(`/pitch/signals/${id}/hide`, { method: "POST", body: JSON.stringify({ reason }) }),
+  rereadPitchSignal: (id, { caption = "", image_url = "" } = {}) =>
+    request(`/pitch/signals/${id}/reread`, { method: "POST", body: JSON.stringify({ caption, image_url }) }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>
