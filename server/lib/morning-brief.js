@@ -57,6 +57,7 @@ export async function gatherBrief() {
       SELECT
         (SELECT COUNT(*) FROM users u JOIN brands b ON b.user_id = u.id
           WHERE u.role = 2 AND u.deleted = 'infinity'::timestamptz AND COALESCE(b.hidden,false) = false
+            AND u.email NOT LIKE '%@external-calls.linkable.invalid'
             AND u.created >= NOW() - INTERVAL '1 day') AS new_brands,
         (SELECT COUNT(*) FROM orders WHERE deleted = '-infinity'::timestamptz
             AND created >= NOW() - INTERVAL '1 day') AS orders_today,
