@@ -263,6 +263,8 @@ function CallCard({ call: initial, onDone }) {
   const [editing, setEditing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [closing, setClosing] = useState(false);
+  // Off by default: publish quietly, test it, then "Email creators".
+  const [emailCreators, setEmailCreators] = useState(false);
   const [rereading, setRereading] = useState(false);
   const [reason, setReason] = useState("");
   const [caption, setCaption] = useState("");
@@ -288,9 +290,12 @@ function CallCard({ call: initial, onDone }) {
   const decide = (decision) => {
     if (decision === "reject" && !reason.trim()) { setError("Write why, for the record."); return; }
     setBusy(decision);
-    act(() => api.decideExternalCall(call.id, decision, reason.trim()), (c) => onDone(
-      decision === "approve" ? `${c.brand_name || "The call"} is live: creators in its region and niches see it in Live campaigns.`
-        : decision === "close" ? `${c.brand_name || "The call"} is closed. Applications moved to Ended.`
+    const sent = decision === "approve" && !emailCreators ? "approve_quiet" : decision;
+    act(() => api.decideExternalCall(call.id, sent, reason.trim()), (c) => onDone(
+      sent === "approve" ? `${c.brand_name || "The call"} is live, and the creators in its region and niches will get the new campaign email.`
+        : sent === "approve_quiet" ? `${c.brand_name || "The call"} is live. No creator was emailed: press Email creators when it's ready.`
+        : sent === "notify" ? `Creators in ${c.brand_name || "the call"}'s region and niches will get the new campaign email in the next few minutes.`
+        : sent === "close" ? `${c.brand_name || "The call"} is closed. Applications moved to Ended.`
         : `${c.brand_name || "The call"} is rejected.`,
     ));
   };
@@ -370,6 +375,13 @@ function CallCard({ call: initial, onDone }) {
             {["draft", "rejected", "live"].includes(call.status) && <Btn variant="secondary" onClick={edit}>{call.status === "live" ? "Edit live campaign" : "Check and edit"}</Btn>}
             {call.status === "draft" && <Btn variant="secondary" onClick={() => setRejecting(true)}>Reject</Btn>}
             {call.status === "live" && <Btn variant="secondary" onClick={() => setClosing(true)}>Close</Btn>}
+            {call.status === "live" && <Btn variant="secondary" onClick={() => decide("notify")} loading={busy === "notify"}>Email creators</Btn>}
+            {["draft", "rejected"].includes(call.status) && (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                <input type="checkbox" checked={emailCreators} onChange={(e) => setEmailCreators(e.target.checked)} />
+                Email matching creators now
+              </label>
+            )}
             {["draft", "rejected"].includes(call.status) && <Btn onClick={() => decide("approve")} loading={busy === "approve"}>Approve</Btn>}
           </>}
         </div>

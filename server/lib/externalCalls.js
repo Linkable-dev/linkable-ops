@@ -51,7 +51,8 @@ const BRAND_LIST = { 1: ["brands", { repeated: true, schema: BRAND }], 2: ["tota
 
 export const CALL_STATUSES = ["", "reading", "draft", "live", "closed", "rejected", "failed"];
 export const SUBMISSION_STATUSES = ["", "sending", "sent", "simulated", "held", "dismissed"];
-export const DECISIONS = ["approve", "reject", "close"];
+// approve_quiet publishes without emailing creators; notify emails them later (once).
+export const DECISIONS = ["approve", "approve_quiet", "reject", "close", "notify"];
 
 const HTTP_FOR_GRPC = {
   [GRPC.INVALID_ARGUMENT]: 400, [GRPC.NOT_FOUND]: 404, [GRPC.FAILED_PRECONDITION]: 409, 6: 409, // 6 = ALREADY_EXISTS
@@ -132,7 +133,7 @@ export async function setExternalCallImage(id, { imageUrl = "", admin } = {}, ta
 }
 
 export async function decideExternalCall(id, { decision, reason = "", admin } = {}, target) {
-  if (!DECISIONS.includes(decision)) throw fail(400, "Choose approve, reject or close.");
+  if (!DECISIONS.includes(decision)) throw fail(400, "Choose approve, reject, close or notify.");
   if (String(reason).length > 500) throw fail(400, "Keep the reason under 500 characters.");
   const res = decodeMessage(await call("DecideExternalCall", encodeFields({
     1: idOf(id), 2: decision, 3: String(reason || "").trim(), 4: admin?.email || "",
