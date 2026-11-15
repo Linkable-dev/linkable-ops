@@ -475,6 +475,14 @@ export function pitchRoutes({ query = cloudSqlQuery, sign = signedUrls, reviews 
     } catch (e) { reviewError(res, e); }
   });
 
+  // POST /api/pitch/signals/:id/photos { photo_urls: [up to 4 links] } →
+  // { signal, notice }: the brand's product photos, pasted by hand.
+  router.post("/signals/:id/photos", async (req, res) => {
+    try {
+      res.json(await signals.photos(req.params.id, { photoUrls: req.body?.photo_urls, admin: req.admin }, req.dbTarget));
+    } catch (e) { reviewError(res, e); }
+  });
+
   // GET /api/pitch/summary?days=30 — the funnel, counted on when each pitch
   // was sent. "paying per 100 sent" is the number Pitch is judged on.
   router.get("/summary", async (req, res) => {
