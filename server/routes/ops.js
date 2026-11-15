@@ -2,6 +2,7 @@ import { Router } from "express";
 import { cloudSqlQuery } from "../lib/cloudsql.js";
 import { parseColumnFilters, filterConditions, textFilter, numberFilter } from "../lib/tableQuery.js";
 import { creatorMatches } from "../lib/campaign-matchmaking.js";
+import { setCampaignHidden } from "../lib/campaignVisibility.js";
 
 // Link status enum (from main proto):
 //   0=unset
@@ -25,6 +26,8 @@ const QUICK_FILTERS = {
   "no-applications": "creators_applied = 0",
   "stuck-shipping":  "(creators_accepted - externals_accepted) > 0 AND products_shipped < (creators_accepted - externals_accepted)",
   "no-sales":        "products_shipped > 0 AND sales = 0",
+  // Taken out of creators' Discover by ops (lib/campaignVisibility.js).
+  "hidden":          "ops_hidden",
 };
 
 // `deleted` uses '-infinity' as sentinel for "not deleted" in this DB.
@@ -54,7 +57,9 @@ const ENRICHED_FILTERS = {
   bottleneck:        textFilter("bottleneck_label"),
 };
 
-export function opsRoutes() {
+// `query` and `visibility` are injectable for the tests; the defaults are
+// the main app's Cloud SQL and its SetCampaignOpsHidden RPC.
+export function opsRoutes({ query = cloudSqlQuery, visibility = { setHidden: setCampaignHidden } } = {}) {
   const router = Router();
 
   // GET /api/ops/campaigns?limit=&offset=&search=&sortBy=&sortDir=
@@ -104,7 +109,7 @@ export function opsRoutes() {
       const countFilterSql = filterConditions(columnFilters, CAMPAIGN_FILTERS, countParams)
         .map((c) => ` AND ${c}`).join("");
 
-      const { rows: countRows } = await cloudSqlQuery(
+      const { rows: countRows } = await query(
         `SELECT COUNT(*)::int AS total
          FROM products p
          LEFT JOIN brands b ON b.id = p.brand_id
@@ -113,6 +118,17 @@ export function opsRoutes() {
       );
       const baseTotal = countRows[0]?.total || 0;
       const quick = QUICK_FILTERS[req.query.quick] ? req.query.quick : null;
+
+      // "Hidden from Discover" (ops_hidden_campaigns) lives in the main app's
+      // database and arrives with its deploy: until the table is there every
+      // campaign reads as shown, and the page still loads.
+      const { rows: hideRows } = await query(
+        `SELECT to_regclass('ops_hidden_campaigns') IS NOT NULL AS ok`, []);
+      const canHide = !!hideRows[0]?.ok;
+      const hideCols = canHide
+        ? "(ohc.product_id IS NOT NULL) AS ops_hidden, ohc.hidden_at AS ops_hidden_at, ohc.hidden_by AS ops_hidden_by"
+        : "false AS ops_hidden, NULL::timestamptz AS ops_hidden_at, NULL::text AS ops_hidden_by";
+      const hideJoin = canHide ? "LEFT JOIN ops_hidden_campaigns ohc ON ohc.product_id = p.id" : "";
 
       // Compute aggregates for ALL matched products (active set is small —
       // ~tens, not thousands), then sort + paginate. Sort key may reference
@@ -128,12 +144,13 @@ export function opsRoutes() {
       const outerConds = [...(quick ? [QUICK_FILTERS[quick]] : []), ...enrichedConds];
       const outerWhere = outerConds.length ? ` WHERE ${outerConds.join(" AND ")}` : "";
 
-      const { rows } = await cloudSqlQuery(`
+      const { rows } = await query(`
         WITH base AS (
           SELECT p.id, p.title AS campaign_name, b.store_name AS brand_name, p.user_id AS brand_user_id,
-                 p.status AS product_status, p.created
+                 p.status AS product_status, p.created, ${hideCols}
           FROM products p
           LEFT JOIN brands b ON b.id = p.brand_id
+          ${hideJoin}
           WHERE ${ND.replace(/deleted/g, "p.deleted")}
             AND p.status = ${PRODUCT_ACTIVE}
             AND ($1::text IS NULL OR p.title ILIKE $1 OR b.store_name ILIKE $1)${baseFilterSql}
@@ -214,6 +231,9 @@ export function opsRoutes() {
             p.brand_user_id,
             p.product_status,
             p.created,
+            p.ops_hidden,
+            p.ops_hidden_at,
+            p.ops_hidden_by,
             -- Platform + external combined: one number per funnel stage. The
             -- externals_* columns carry the split for tooltips and the funnel pills.
             (COALESCE(la.creators_invited, 0)  + COALESCE(ea.externals_invited, 0))::int  AS creators_invited,
@@ -269,10 +289,23 @@ export function opsRoutes() {
       // function over the filtered set; without it the cheap base count is exact
       // and survives an empty page.
       const total = outerConds.length ? (rows[0]?.full_count ?? 0) : baseTotal;
-      res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir, quick });
+      res.json({ rows, total, limit, offset, sortBy: sortKey, sortDir, quick, canHide });
     } catch (e) {
       console.error("[ops/campaigns]", e);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/ops/campaigns/:id/discover { hidden: true|false }
+  // "Hide from Discover" / "Show in Discover": the main app takes the campaign
+  // out of every creator-facing listing, or puts it back. Nothing else about
+  // the campaign changes (lib/campaignVisibility.js).
+  router.post("/campaigns/:id/discover", async (req, res) => {
+    try {
+      res.json(await visibility.setHidden(req.params.id, req.body?.hidden, { admin: req.admin }, req.dbTarget));
+    } catch (e) {
+      if (!e.status) console.error("[ops/campaign-discover]", e);
+      res.status(e.status || 500).json({ error: e.status ? e.message : "We couldn’t change that campaign. Try again." });
     }
   });
 
@@ -301,7 +334,7 @@ export function opsRoutes() {
       // same campaign (re-invites, apply-after-invite). We show the most advanced
       // link's status and aggregate clicks/sales/sample state across all their
       // links, so the funnel here matches the campaign-level aggregates exactly.
-      const { rows } = await cloudSqlQuery(`
+      const { rows } = await query(`
         WITH nd AS (
           SELECT l.*, COALESCE(l.influencer_user_id::text, l.id::text) AS creator_key
           FROM links l
@@ -343,7 +376,7 @@ export function opsRoutes() {
       // External creators (not yet Linkable users) invited to this campaign by
       // email. They live in external_creator_links, which the links query above
       // can't see; without this they'd be invisible in the ops view.
-      const { rows: extRows } = await cloudSqlQuery(`
+      const { rows: extRows } = await query(`
         SELECT
           ecl.id                                                                                    AS link_id,
           ecl.status                                                                                AS link_status,

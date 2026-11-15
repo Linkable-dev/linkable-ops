@@ -4,6 +4,8 @@ import { BrandLink } from "../components/brand/BrandLink";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
+import { Btn } from "../components/ui/Button";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 import { SkeletonTableRows, SkeletonTable, SkeletonPills } from "../components/ui/Skeleton";
 import { useColumnWidths, useColumnOrder, ResizeHandle, DragHandle, ColumnFilter, fitWidths } from "../components/table/tableTools";
 import CreatorMatchesModal from "../components/campaigns/CreatorMatchesModal";
@@ -53,6 +55,8 @@ const COLUMNS = [
   { key: "clicks",            label: "Clicks", width: 80, num: true, sortKey: "clicks", filter: { type: "number" } },
   { key: "sales",             label: "Sales", width: 80, num: true, sortKey: "sales", filter: { type: "number" } },
   { key: "bottleneck",        label: "Bottleneck", width: 180, fill: true, sortKey: "bottleneck", filter: { type: "select", extra: { options: BOTTLENECK_OPTIONS } } },
+  // Buttons, not data: pinned last (CAMPAIGNS_FIXED_KEYS) and not resizable.
+  { key: "actions",           label: "Actions", width: 190, resizable: false },
 ];
 // Each column at least as wide as its own header needs, with the slack going
 // to the two `fill` columns. The hand-written numbers below are floors now
@@ -60,13 +64,13 @@ const COLUMNS = [
 // to fit the word "Accepted".
 const DEFAULT_WIDTHS = fitWidths(COLUMNS);
 // The expand-chevron is the only column pinned out of dragging — see comment above.
-const CAMPAIGNS_FIXED_KEYS = ["expand"];
+const CAMPAIGNS_FIXED_KEYS = ["expand", "actions"];
 
 // One switch, not eleven inline <Td>s — so the row body can map over
 // whatever order the header is currently in instead of a hardcoded sequence
 // that has to stay in lockstep with it by hand. Each case is exactly what
 // used to sit directly in the JSX for that column.
-function renderCampaignCell(key, c, { theme, mode, isOpen, bottleneck, setMatchesFor }) {
+function renderCampaignCell(key, c, { theme, mode, isOpen, bottleneck, setMatchesFor, canHide, discoverBusy, onDiscover }) {
   switch (key) {
     case "expand":
       return (
@@ -75,7 +79,12 @@ function renderCampaignCell(key, c, { theme, mode, isOpen, bottleneck, setMatche
         </svg>
       );
     case "campaign_name":
-      return c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>;
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span>{c.campaign_name || <em style={{ color: theme.textMuted }}>Untitled</em>}</span>
+          {c.ops_hidden && <HiddenFromDiscoverPill by={c.ops_hidden_by} at={c.ops_hidden_at} />}
+        </div>
+      );
     case "brand_name":
       return <BrandLink userId={c.brand_user_id}>{c.brand_name || "—"}</BrandLink>;
     case "creators_invited":
@@ -107,9 +116,50 @@ function renderCampaignCell(key, c, { theme, mode, isOpen, bottleneck, setMatche
           >Find creators</button>
         </div>
       );
+    case "actions":
+      // Header left, the buttons grouped right.
+      return (
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+          <Btn
+            size="sm"
+            variant={c.ops_hidden ? "solid" : "secondary"}
+            loading={discoverBusy}
+            disabled={!canHide}
+            onClick={(e) => { e.stopPropagation(); onDiscover(c); }}
+            title={!canHide
+              ? "The main app on this database can’t hide campaigns yet. It arrives with its next deploy."
+              : c.ops_hidden
+                ? "Put this campaign back in creators’ Discover"
+                : "Take this campaign out of creators’ Discover. Nothing else about it changes."}
+          >
+            {c.ops_hidden ? "Show in Discover" : "Hide from Discover"}
+          </Btn>
+        </div>
+      );
     default:
       return null;
   }
+}
+
+// "Hidden from Discover" next to the campaign's name: the amber of the HIDDEN
+// pill on Users, so a hidden thing reads the same everywhere in ops.
+function HiddenFromDiscoverPill({ by, at }) {
+  const when = at ? new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+  const who = by ? String(by).replace(/^linkable-ops:/, "") : "";
+  return (
+    <span
+      title={`Hidden from creators’ Discover${who ? ` by ${who}` : ""}${when ? ` on ${when}` : ""}. The brand still sees and runs it.`}
+      style={{
+        display: "inline-flex", alignItems: "center", flexShrink: 0,
+        padding: "1px 6px", borderRadius: 999,
+        fontSize: 9, fontWeight: 700, lineHeight: 1.5, letterSpacing: 0.3,
+        color: "#B45309", background: "rgba(180, 83, 9, 0.12)",
+        border: "1px solid rgba(180, 83, 9, 0.28)",
+      }}
+    >
+      HIDDEN FROM DISCOVER
+    </span>
+  );
 }
 
 // Per-column cell style overrides that used to be written inline at each
@@ -141,6 +191,10 @@ export default function CampaignsOpsPage() {
   const [sortDir, setSortDir] = useState("desc");
   const [filters, setFilters] = useState({}); // per-column server-side filters
   const [matchesFor, setMatchesFor] = useState(null); // campaign whose creator shortlist is open
+  const [canHide, setCanHide] = useState(true); // the main app's database has ops_hidden_campaigns
+  const [discoverBusy, setDiscoverBusy] = useState(null); // campaign id whose Discover switch is in flight
+  const [actionError, setActionError] = useState("");
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   const { widths, startResize, resetWidth } = useColumnWidths("ops-campaigns", DEFAULT_WIDTHS);
   const { orderedColumns, dragHandleProps, dropTargetProps, dragOverKey } = useColumnOrder("ops-campaigns", COLUMNS, CAMPAIGNS_FIXED_KEYS);
@@ -199,6 +253,7 @@ export default function CampaignsOpsPage() {
       .then((res) => {
         setCampaigns(res.rows || []);
         setTotal(res.total || 0);
+        setCanHide(res.canHide !== false);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -217,6 +272,38 @@ export default function CampaignsOpsPage() {
       } catch (e) {
         setCreatorsById((prev) => ({ ...prev, [id]: { error: e.message } }));
       } finally { setCreatorsLoading(false); }
+    }
+  };
+
+  // Hide from Discover asks first (creators stop seeing it at once); Show in
+  // Discover is the undo, so it doesn't.
+  const handleDiscover = async (c) => {
+    const hide = !c.ops_hidden;
+    if (hide) {
+      const ok = await ask({
+        title: "Hide from Discover?",
+        body: `${c.campaign_name || "This campaign"}${c.brand_name ? ` by ${c.brand_name}` : ""} leaves Discover and every list creators see, and creators can’t apply to it on their own any more. Nothing else changes: the brand still sees and runs it, and creators already on it keep working. You can show it again at any time.`,
+        confirmLabel: "Hide from Discover",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setActionError("");
+    setDiscoverBusy(c.id);
+    try {
+      const res = await api.setCampaignDiscoverHidden(c.id, hide);
+      const next = { ops_hidden: res.hidden, ops_hidden_by: res.hidden_by || null, ops_hidden_at: res.hidden_at || null };
+      if (filter === "hidden" && !res.hidden) {
+        // Shown again: it no longer belongs under "Hidden from Discover".
+        setCampaigns((rows) => rows.filter((r) => r.id !== c.id));
+        setTotal((t) => Math.max(0, t - 1));
+      } else {
+        setCampaigns((rows) => rows.map((r) => (r.id === c.id ? { ...r, ...next } : r)));
+      }
+    } catch (e) {
+      setActionError(`${c.campaign_name || "That campaign"}: ${e.message}`);
+    } finally {
+      setDiscoverBusy(null);
     }
   };
 
@@ -255,6 +342,7 @@ export default function CampaignsOpsPage() {
           ["no-applications", "No applications"],
           ["stuck-shipping", "Stuck shipping"],
           ["no-sales", "No sales yet"],
+          ["hidden", "Hidden from Discover"],
         ].map(([k, label]) => (
           <button
             key={k}
@@ -269,6 +357,14 @@ export default function CampaignsOpsPage() {
           >{label}</button>
         ))}
       </div>
+
+      {actionError && (
+        <div role="alert" style={{
+          marginBottom: 12, padding: "10px 14px", borderRadius: 8, fontSize: 13,
+          border: "1px solid rgba(220, 38, 38, 0.3)", background: "rgba(220, 38, 38, 0.08)", color: theme.text,
+        }}>{actionError}</div>
+      )}
+      {confirmDialog}
 
       {matchesFor && (
         <CreatorMatchesModal campaign={matchesFor} onClose={() => setMatchesFor(null)} />
@@ -304,9 +400,13 @@ export default function CampaignsOpsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <SkeletonTableRows rows={8} cols={["expand", "text", "text", "num", "num", "num", "num", "num", "num", "num", "pill"]} theme={theme} />}
+              {loading && <SkeletonTableRows rows={8} cols={["expand", "text", "text", "num", "num", "num", "num", "num", "num", "num", "pill", "pill"]} theme={theme} />}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>No live campaigns match. Paused and ended campaigns are never listed here.</td></tr>
+                <tr><td colSpan={orderedColumns.length} style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>
+                  {filter === "hidden"
+                    ? "No live campaign is hidden from Discover."
+                    : "No live campaigns match. Paused and ended campaigns are never listed here."}
+                </td></tr>
               )}
               {filtered.map((c) => {
                 const isOpen = expandedId === c.id;
@@ -326,13 +426,16 @@ export default function CampaignsOpsPage() {
                     >
                       {orderedColumns.map((col) => (
                         <Td key={col.key} theme={theme} num={col.num} style={campaignCellStyle(col.key, c, theme)}>
-                          {renderCampaignCell(col.key, c, { theme, mode, isOpen, bottleneck, setMatchesFor })}
+                          {renderCampaignCell(col.key, c, {
+                            theme, mode, isOpen, bottleneck, setMatchesFor,
+                            canHide, discoverBusy: discoverBusy === c.id, onDiscover: handleDiscover,
+                          })}
                         </Td>
                       ))}
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={11} style={{ padding: 0, background: mode === "dark" ? "#0d0d0d" : "#FAFAFA", borderTop: `1px solid ${theme.border}` }}>
+                        <td colSpan={orderedColumns.length} style={{ padding: 0, background: mode === "dark" ? "#0d0d0d" : "#FAFAFA", borderTop: `1px solid ${theme.border}` }}>
                           <CreatorTable
                             theme={theme}
                             mode={mode}
