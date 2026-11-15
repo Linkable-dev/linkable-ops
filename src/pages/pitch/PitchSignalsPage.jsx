@@ -29,7 +29,11 @@ const HELP = [
   ["Add from post", "Paste the post link. If the agent saw the post, its caption and picture come with it; if not, paste the caption and a picture link. Check the draft, then Approve."],
   ["Live", "30 days from the post, or until its deadline if sooner. The daily check hides it after that, or when the post is deleted. Pitches already sent carry on."],
   ["Emails", "Go to the contact email: the address in the post, else the one on their Instagram profile, else their website's."],
+  ["Photos", "A brand only shows in Brands to pitch once it has a product photo. When none can be found (its website blocks us), open the signal and use Set product photos: paste up to 4 photo links, the first is the cover. A signal waiting for photos then goes live."],
 ];
+
+const PHOTO_BOXES = 4;
+const noLinks = () => Array(PHOTO_BOXES).fill("");
 
 const blank = {
   brand_name: "", instagram: "", website: "", wants: "", spots: "", asks: "", offers: "", how_to_apply: "",
@@ -103,6 +107,76 @@ function AddModal({ open, onClose, onDrafted }) {
   );
 }
 
+// The brand's product photos: its card's cover is the first. Set product
+// photos copies up to four pasted links into Linkable's storage and replaces
+// them; a signal waiting for photos goes live if everything else is fine.
+function ProductPhotos({ signal, disabled, onSaved }) {
+  const { theme: t } = useTheme();
+  const photos = signal.brand_photos || [];
+  const [editing, setEditing] = useState(false);
+  const [links, setLinks] = useState(noLinks);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const close = () => { setEditing(false); setLinks(noLinks()); setError(null); };
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.setPitchSignalPhotos(signal.id, links.map((x) => x.trim()));
+      close();
+      onSaved(r);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const thumb = { width: 72, height: 72, objectFit: "cover", borderRadius: 8, display: "block", background: t.surfaceAlt };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <Label>Product photos</Label>
+        {!editing && (
+          <Btn size="sm" variant="secondary" onClick={() => setEditing(true)} disabled={disabled} style={{ marginLeft: "auto" }}>
+            Set product photos
+          </Btn>
+        )}
+      </div>
+      {photos.length > 0 ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {photos.map((src, i) => (
+            <div key={src} style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+              <img src={src} alt={`Product photo ${i + 1}`} style={thumb} />
+              <span style={{ fontSize: 11, color: t.textMuted }}>{i === 0 ? "Cover" : `Photo ${i + 1}`}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: t.textMuted }}>
+          {signal.brand_id ? "No product photos yet, so the brand isn't listed." : "No product photos yet."}
+        </div>
+      )}
+      {editing && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ gridColumn: "1 / -1", fontSize: 12, color: t.textMuted }}>
+            Paste links to the photos themselves (right-click a photo on their site, then Copy image address). They replace the current photos.
+          </div>
+          {links.map((v, i) => (
+            <Field key={i} label={i === 0 ? "Photo 1 (the cover)" : `Photo ${i + 1} (optional)`}>
+              <Input value={v} placeholder="https://…" aria-label={`Photo ${i + 1} link`}
+                     onChange={(e) => setLinks(links.map((x, j) => (j === i ? e.target.value : x)))} />
+            </Field>
+          ))}
+          {error && <div style={{ gridColumn: "1 / -1" }}><Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner></div>}
+          <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Btn size="sm" variant="secondary" onClick={close} disabled={busy}>Cancel</Btn>
+            <Btn size="sm" onClick={save} loading={busy} disabled={!links.some((x) => x.trim())}>Save photos</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One signal: what the read found, editable, with Save, Read again,
 // Approve and Hide. Keyed by the signal's id, so another signal starts fresh.
 function SignalModal({ signal, onClose, onChanged }) {
@@ -171,6 +245,18 @@ function SignalModal({ signal, onClose, onChanged }) {
           </div>
         </div>
         {s.note && <Banner tone="warning">{s.note}</Banner>}
+
+        {s.status !== "dropped" && (
+          <ProductPhotos signal={s} disabled={!!busy} onSaved={(r) => {
+            setS(r.signal);
+            setForm(formOf(r.signal));
+            setError(null);
+            setNotice(r.notice || (r.signal.status === "live"
+              ? `Photos saved. Live until ${friendlyDate(r.signal.live_until)}.`
+              : "Photos saved."));
+            onChanged();
+          }} />
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <Field label="Brand name"><Input value={form.brand_name} onChange={set("brand_name")} disabled={!editable} /></Field>

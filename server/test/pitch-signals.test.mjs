@@ -6,6 +6,7 @@ import { decodeMessage, encodeFields } from "../lib/mainAppGrpc.js";
 import {
   SIGNAL, SIGNAL_LIST, STATS, encodeSignalEdit, listPitchSignals, draftPitchSignal, updatePitchSignal,
   approvePitchSignal, hidePitchSignal, rereadPitchSignal, pitchSignalStats,
+  PHOTOS_RESULT, encodeSignalPhotos, setPitchSignalPhotos,
 } from "../lib/pitchSignals.js";
 import { SIGNAL_TABS, signalWants, signalSource, replyRate, signalContactFrom } from "../../src/components/pitch/pitchLabels.js";
 
@@ -135,4 +136,53 @@ test("a list and the stats decode field by field", () => {
   assert.equal(replyRate(0.125), "12.5%");
   assert.equal(signalContactFrom("instagram"), "from their Instagram profile");
   assert.deepEqual(SIGNAL_TABS.map((x) => x.value), ["live", "draft", "hidden", "dropped"]);
+});
+
+// Set product photos (a brand whose site blocks the main app, like Chapter
+// and Charm): the four boxes go as they are, so the main app names a bad
+// link by its box; the answer is the signal with its brand's photos, and
+// why it isn't live yet when it isn't.
+test("set product photos: the route, the request and the answer", async (t) => {
+  const calls = [];
+  const request = await serve(t, {
+    photos: async (id, o, target) => {
+      calls.push([id, o.photoUrls, o.admin.email, target]);
+      return { signal: { id, status: "live", brand_photos: ["https://signed.test/0.jpg"] }, notice: "" };
+    },
+  });
+  const links = ["https://cdn.test/ring.jpg", "", "https://cdn.test/necklace.jpg", ""];
+  const r = await request(`/signals/${ID}/photos`, "POST", { photo_urls: links });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.signal.status, "live");
+  assert.deepEqual(calls[0], [ID, links, "signals-test@example.com", "dev"]);
+
+  const bytes = encodeSignalPhotos(ID, [" https://cdn.test/ring.jpg ", "", "https://cdn.test/necklace.jpg"], "fede@linkable.link");
+  const req = decodeMessage(bytes, { 1: ["id", "string"], 2: ["photo_urls", ["string"]], 3: ["actor", "string"] });
+  assert.deepEqual(req, { id: ID, photo_urls: ["https://cdn.test/ring.jpg", "", "https://cdn.test/necklace.jpg"], actor: "fede@linkable.link" });
+
+  const signal = encodeFields({ 1: ID, 2: "hidden", 4: "no product photos", 35: ["https://signed.test/a.jpg", "https://signed.test/b.jpg"] });
+  const res = decodeMessage(encodeFields({ 1: signal, 2: "The photos are saved, but the signal isn't live yet: Its 30 days, or its deadline, have already passed." }), PHOTOS_RESULT);
+  assert.equal(res.signal.status, "hidden");
+  assert.deepEqual(res.signal.brand_photos, ["https://signed.test/a.jpg", "https://signed.test/b.jpg"]);
+  assert.match(res.notice, /^The photos are saved, but/);
+});
+
+test("set product photos: bad links are named and never reach the main app", async () => {
+  const before = process.env.MAIN_APP_SERVICE_KEY;
+  delete process.env.MAIN_APP_SERVICE_KEY;
+  const refused = (message) => (e) => e.status === 400 && e.message === message;
+  try {
+    await assert.rejects(setPitchSignalPhotos("nope", { photoUrls: ["https://cdn.test/a.jpg"] }, "dev"), (e) => e.status === 404);
+    await assert.rejects(setPitchSignalPhotos(ID, { photoUrls: ["", " "] }, "dev"), refused("Paste at least one photo link."));
+    await assert.rejects(setPitchSignalPhotos(ID, { photoUrls: "https://cdn.test/a.jpg" }, "dev"), refused("Paste at least one photo link."));
+    await assert.rejects(setPitchSignalPhotos(ID, { photoUrls: ["a", "b", "c", "d", "e"].map((x) => `https://cdn.test/${x}.jpg`) }, "dev"),
+      refused("Paste up to 4 photo links."));
+    await assert.rejects(setPitchSignalPhotos(ID, { photoUrls: ["cdn.test/a.jpg"] }, "dev"),
+      refused("That photo isn't a web link. Paste a link that starts with https://."));
+    await assert.rejects(setPitchSignalPhotos(ID, { photoUrls: ["https://cdn.test/a.jpg", "", "ftp://cdn.test/b.jpg"] }, "dev"),
+      refused("Photo 3 isn't a web link. Paste a link that starts with https://."));
+    await assert.rejects(setPitchSignalPhotos(ID, { photoUrls: ["https://cdn.test/a.jpg"] }, "dev"), (e) => e.status === 503);
+  } finally {
+    if (before !== undefined) process.env.MAIN_APP_SERVICE_KEY = before;
+  }
 });

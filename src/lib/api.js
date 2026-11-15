@@ -255,6 +255,8 @@ export const api = {
   hidePitchSignal: (id, reason) => request(`/pitch/signals/${id}/hide`, { method: "POST", body: JSON.stringify({ reason }) }),
   rereadPitchSignal: (id, { caption = "", image_url = "" } = {}) =>
     request(`/pitch/signals/${id}/reread`, { method: "POST", body: JSON.stringify({ caption, image_url }) }),
+  setPitchSignalPhotos: (id, photo_urls) =>
+    request(`/pitch/signals/${id}/photos`, { method: "POST", body: JSON.stringify({ photo_urls }) }),
   getAutopilotCampaigns: ({ limit = 50, offset = 0, filters, sortBy, sortDir } = {}) =>
     request(`/autopilot/campaigns?${buildQs({ limit, offset, filters, sortBy, sortDir })}`),
   getAutopilotEvents: (id, { limit = 50 } = {}) =>

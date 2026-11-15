@@ -10,7 +10,8 @@
 // the reply rate of signal pitches against normal ones. All through the main
 // app (ListPitchSignals, DraftPitchSignal, UpdatePitchSignal,
 // ApprovePitchSignal, HidePitchSignal, RereadPitchSignal,
-// GetPitchSignalStats in proto/pitch_signals.proto), signed with ops' own
+// GetPitchSignalStats, SetPitchSignalPhotos in proto/pitch_signals.proto),
+// signed with ops' own
 // service key (lib/mainAppGrpc.js). No SQL fallback: the main app owns the
 // read, the picture copy and the email checks.
 import { mainAppGrpcConfigured, unaryCall, encodeFields, decodeMessage, GrpcError, GRPC } from "./mainAppGrpc.js";
@@ -40,8 +41,10 @@ export const SIGNAL = {
   21: ["contact_email", "string"], 22: ["contact_from", "string"], 23: ["regions", ["string"]], 24: ["niches", ["string"]],
   25: ["min_followers", "int"], 26: ["max_followers", "int"], 27: ["deadline", "string"], 28: ["live_until", "string"],
   29: ["approved_at", "string"], 30: ["approved_by", "string"], 31: ["created", "string"],
-  32: ["pitches_sent", "int"], 33: ["replies", "int"], 34: ["note", "string"],
+  32: ["pitches_sent", "int"], 33: ["replies", "int"], 34: ["note", "string"], 35: ["brand_photos", ["string"]],
 };
+// PitchSignalPhotosResult: the signal, and why it still isn't live ("" when it is).
+export const PHOTOS_RESULT = { 1: ["signal", { schema: SIGNAL }], 2: ["notice", "string"] };
 export const SIGNAL_LIST = { 1: ["signals", { repeated: true, schema: SIGNAL }], 2: ["total", "int"] };
 export const STATS = {
   1: ["rows", { repeated: true, schema: { 1: ["label", "string"], 2: ["sent", "int"], 3: ["replied", "int"], 4: ["reply_rate", "double"] } }],
@@ -166,6 +169,39 @@ export async function rereadPitchSignal(id, { caption = "", imageUrl = "", admin
   return act("RereadPitchSignal", id, { 4: clean(caption, 5000), 5: image }, admin, target);
 }
 
+// Set product photos: 1 to 4 links ops pasted for the signal's brand, when
+// the main app can't find its photos (a site that blocks our server). The
+// main app copies each one, makes them the brand's photos (the first the
+// card's cover) and makes a waiting signal live. The form's four boxes go
+// as they are, blanks included, so the main app names a bad link by its box
+// ("Photo 3 couldn't be copied").
+export const PHOTO_LINKS_MAX = 4;
+
+export function encodeSignalPhotos(id, photoUrls, actor = "") {
+  const raw = Array.isArray(photoUrls) ? photoUrls : [];
+  if (raw.length > 10) throw fail(400, `Paste up to ${PHOTO_LINKS_MAX} photo links.`);
+  const links = raw.map((x) => clean(x, 2000));
+  const filled = links.filter(Boolean);
+  if (filled.length === 0) throw fail(400, "Paste at least one photo link.");
+  if (filled.length > PHOTO_LINKS_MAX) throw fail(400, `Paste up to ${PHOTO_LINKS_MAX} photo links.`);
+  const bad = links.findIndex((x) => x && !/^https?:\/\/[^\s/]+/i.test(x));
+  if (bad >= 0) {
+    const name = filled.length === 1 ? "That photo" : `Photo ${bad + 1}`;
+    throw fail(400, `${name} isn't a web link. Paste a link that starts with https://.`);
+  }
+  // PitchSignalPhotosRequest: id 1, photo_urls 2 (repeated), actor 3.
+  return encodeFields({ 1: id, 2: links, 3: actor });
+}
+
+export async function setPitchSignalPhotos(id, { photoUrls = [], admin } = {}, target) {
+  if (!UUID.test(String(id || ""))) throw fail(404, "That signal doesn't exist.");
+  const bytes = await call("SetPitchSignalPhotos", encodeSignalPhotos(id, photoUrls, admin?.email || ""), target);
+  const res = decodeMessage(bytes, PHOTOS_RESULT);
+  const signal = res.signal || decodeMessage(Buffer.alloc(0), SIGNAL);
+  console.log(`[pitch-signals] SetPitchSignalPhotos target=${target} admin=${admin?.email} id=${id} photos=${signal.brand_photos.length} status=${signal.status}`);
+  return { signal, notice: res.notice };
+}
+
 // Reply rate: normal pitches against signal pitches by the signal's age.
 export async function pitchSignalStats({ since = "" } = {}, target) {
   if (!mainAppGrpcConfigured()) return { available: false, reason: NOT_CONFIGURED, rows: [], live: 0 };
@@ -176,5 +212,5 @@ export async function pitchSignalStats({ since = "" } = {}, target) {
 
 export const pitchSignalsClient = {
   list: listPitchSignals, draft: draftPitchSignal, update: updatePitchSignal, approve: approvePitchSignal,
-  hide: hidePitchSignal, reread: rereadPitchSignal, stats: pitchSignalStats,
+  hide: hidePitchSignal, reread: rereadPitchSignal, stats: pitchSignalStats, photos: setPitchSignalPhotos,
 };
