@@ -177,6 +177,10 @@ export const api = {
   getOpsCampaigns: ({ limit = 25, offset = 0, search = "", sortBy = "", sortDir = "", filters, quick } = {}) =>
     request(`/ops/campaigns?${buildQs({ limit, offset, search, sortBy, sortDir, filters, quick })}`),
   getOpsCampaignCreators: (id) => request(`/ops/campaigns/${id}/creators`),
+  // "Hide from Discover" (hidden true) / "Show in Discover" (false): the main
+  // app takes the campaign out of every list creators see, or puts it back.
+  setCampaignDiscoverHidden: (id, hidden) =>
+    request(`/ops/campaigns/${id}/discover`, { method: "POST", body: JSON.stringify({ hidden }) }),
 
   // Autopilot: the recruiting machine. Read-only about the AGENT — starting and
   // stopping one goes through the main app's console, which enforces the budget
