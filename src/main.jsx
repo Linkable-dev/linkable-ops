@@ -28,6 +28,7 @@ const PitchProPage = lazy(() => import("./pages/pitch/PitchProPage"));
 const PitchSection = lazy(() => import("./components/pitch/PitchParts.jsx").then(m => ({ default: m.PitchSection })));
 const CostsPage = lazy(() => import("./pages/CostsPage"));
 const ExternalCallsPage = lazy(() => import("./pages/ExternalCallsPage"));
+const CallInboxPage = lazy(() => import("./pages/CallInboxPage"));
 const AiCreatorsPage = lazy(() => import("./pages/AiCreatorsPage"));
 const ContentPage = lazy(() => import("./pages/ContentPage"));
 const EmailPage = lazy(() => import("./pages/EmailPage.jsx"));
@@ -71,6 +72,7 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/ops/campaigns" element={<CampaignsOpsPage />} />
                     <Route path="/ops/calls" element={<ExternalCallsPage />} />
+                    <Route path="/ops/calls/add" element={<CallInboxPage />} />
                     <Route path="/ops/autopilot" element={<AutopilotPage />} />
                     <Route element={<PitchSection />}>
                       <Route path="/ops/pitch" element={<PitchesPage />} />

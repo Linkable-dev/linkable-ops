@@ -21,6 +21,7 @@ import { costsRoutes } from "./routes/costs.js";
 import { pitchBrandsRoutes } from "./routes/pitch-brands.js";
 import { pitchRoutes } from "./routes/pitch.js";
 import { externalCallsRoutes } from "./routes/external-calls.js";
+import { callInboxRoutes } from "./routes/call-inbox.js";
 import { dbTargetMiddleware } from "./middleware/dbTarget.js";
 
 // The API, in one place.
@@ -99,6 +100,9 @@ app.use("/api/pitch-brands", dbTargetMiddleware, requireOpsAdmin, pitchBrandsRou
 app.use("/api/pitch", dbTargetMiddleware, requireOpsAdmin, pitchRoutes());
 // Campaigns from brands' Google Form calls (main app QA 171), through the main app.
 app.use("/api/external-calls", dbTargetMiddleware, requireOpsAdmin, externalCallsRoutes());
+// Add calls from the phone: a post link and screenshots, read by Claude, into
+// Campaigns from calls (a Google Form) or a Pitch signal draft.
+app.use("/api/call-inbox", dbTargetMiddleware, requireOpsAdmin, callInboxRoutes());
 // GTM outreach as agents: a goal, a budget and a clock — see lib/outbound-agent.js.
 app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());

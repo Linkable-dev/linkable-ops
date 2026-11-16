@@ -290,7 +290,9 @@ export default function Sidebar() {
             {navItem("/ops/content", "Campaign content", path.startsWith("/ops/content"), contentIcon)}
             {navItem("/ops/campaigns", "Campaigns", path.startsWith("/ops/campaigns"), campaignsIcon)}
             {/* Brands' Instagram calls with a Google Form, run as campaigns (QA 171). */}
-            {navItem("/ops/calls", "Campaigns from calls", path.startsWith("/ops/calls"), campaignsIcon)}
+            {navItem("/ops/calls", "Campaigns from calls", path.startsWith("/ops/calls") && !path.startsWith("/ops/calls/add"), campaignsIcon)}
+            {/* Add calls from the phone: a post link and screenshots. */}
+            {navItem("/ops/calls/add", "Add calls", path.startsWith("/ops/calls/add"), campaignsIcon)}
             {navItem("/ops/costs", "Costs & margin", path.startsWith("/ops/costs"), costsIcon)}
             {navItem("/users", "Impersonation", path.startsWith("/users"), usersIcon)}
             {/* Creators pitching brands: who sent what, the creators, the brands. */}
