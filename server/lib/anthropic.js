@@ -25,6 +25,9 @@ export async function claudeMessage({
   // one of those must opt out; the 0.7 default is kept for existing callers
   // on older models.
   temperature = 0.7,
+  // e.g. { type: "disabled" }: the 5-series Haiku thinks by default and can
+  // spend a small max_tokens on it before answering.
+  thinking,
   apiKey = process.env.ANTHROPIC_API_KEY,
 }) {
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
@@ -38,6 +41,7 @@ export async function claudeMessage({
   if (system) body.system = system;
   if (tools && tools.length) body.tools = tools;
   if (toolChoice) body.tool_choice = toolChoice;
+  if (thinking) body.thinking = thinking;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
