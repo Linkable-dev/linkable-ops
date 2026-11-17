@@ -432,7 +432,7 @@ export const SIGNAL_STATUS = {
   dropped: { label: "Dropped", color: "#737C9A" },
 };
 
-const CONTACT_FROM = { post: "from the post", instagram: "from their Instagram profile", website: "from their website", manual: "added by hand" };
+const CONTACT_FROM = { post: "from the post", instagram: "from their Instagram profile", website: "from their website", manual: "added by hand", guessed: "guessed: their general inbox (none published)" };
 export const signalContactFrom = (from) => CONTACT_FROM[from] || "";
 
 export const HOW_TO_APPLY = [
