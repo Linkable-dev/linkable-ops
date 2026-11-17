@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
@@ -15,6 +15,9 @@ import { Banner } from "../components/pitch/PitchParts";
 
 const MAX_SHOTS = 4;
 const MAX_SIDE = 1600;
+// Batch mode: one screenshot per post, up to this many at a time, two read at once.
+const MAX_BATCH = 30;
+const BATCH_AT_ONCE = 2;
 
 // A phone screenshot as a JPEG small enough to send (about 300 KB).
 function shrink(file) {
@@ -40,6 +43,170 @@ const KIND = {
   campaign: { label: "Campaign from a call", where: "/ops/calls", review: "Review in Campaigns from calls" },
   signal: { label: "Pitch signal draft", where: "/ops/pitch/signals", review: "Review in Pitch signals" },
 };
+
+
+// Batch mode (Federico, 17 Nov 2026: "ci metto 5 min per campagna"): one
+// screenshot per post and nothing else. Each card reads its screenshot,
+// finds the post on the account's profile by its caption, then adds it the
+// way the single add does. When the post can't be found, the card asks for
+// its link and keeps what it read.
+const STEP = {
+  queued: "Waiting",
+  reading: "Reading the screenshot…",
+  finding: "Finding the post on Instagram…",
+  adding: "Adding…",
+  need_link: "We couldn't find this post. Paste its link.",
+  added: "",
+  error: "",
+};
+
+function BatchCalls() {
+  const { theme: t } = useTheme();
+  const [items, setItems] = useState([]);
+  const running = useRef(0);
+  const started = useRef(new Set());
+  const fileRef = useRef(null);
+
+  const patch = (id, change) => setItems((list) => list.map((it) => (it.id === id ? { ...it, ...change } : it)));
+
+  const add = async (it, postUrl, found, fromLink = false) => {
+    patch(it.id, { state: "adding", error: null });
+    const f = it.facts || {};
+    let res;
+    try {
+      res = await api.addCallFromPhone({
+      post_url: postUrl,
+      caption: found?.caption || f.caption || "",
+      instagram: f.handle || "",
+      form_url: f.google_form_url || "",
+      brand_name: f.brand_name || found?.full_name || "",
+      website: f.website || found?.website || "",
+      contact_email: f.contact_email || "",
+      not_a_call: f.is_creator_call === false,
+      });
+    } catch (err) {
+      patch(it.id, fromLink ? { state: "need_link" } : { state: "error", error: err.message });
+      throw err;
+    }
+    patch(it.id, { state: "added", result: res });
+  };
+
+  const work = async (it) => {
+    try {
+      patch(it.id, { state: "reading" });
+      const facts = await api.readCallScreenshot({ media_type: it.media_type, data: it.data });
+      patch(it.id, { facts, state: "finding" });
+      const found = facts.handle ? await api.findCallPost(facts.handle, facts.caption) : { post_url: "" };
+      if (!found.post_url) {
+        patch(it.id, { state: "need_link", found });
+        return;
+      }
+      await add({ ...it, facts }, found.post_url, found);
+    } catch (err) {
+      patch(it.id, { state: "error", error: err.message });
+    }
+  };
+
+  // Two cards at a time, in the order they were added.
+  useEffect(() => {
+    for (const next of items.filter((it) => it.state === "queued" && !started.current.has(`${it.id}:${it.tries || 0}`))) {
+      if (running.current >= BATCH_AT_ONCE) break;
+      started.current.add(`${next.id}:${next.tries || 0}`);
+      running.current++;
+      work(next).finally(() => {
+        running.current--;
+        setItems((list) => [...list]);
+      });
+    }
+    // work only patches items by id; re-running on each change is the queue.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  const pick = async (e) => {
+    const files = Array.from(e.target.files || []).slice(0, MAX_BATCH);
+    e.target.value = "";
+    const shrunk = await Promise.all(files.map((f) => shrink(f).catch(() => null)));
+    const stamp = Date.now();
+    setItems((list) => [
+      ...shrunk.filter(Boolean).map((s, i) => ({ id: `${stamp}-${i}`, ...s, state: "queued" })),
+      ...list,
+    ]);
+  };
+
+  const muted = { fontSize: 13, color: t.textMuted, lineHeight: 1.45 };
+  const done = items.filter((it) => it.state === "added").length;
+  const busy = items.filter((it) => ["queued", "reading", "finding", "adding"].includes(it.state)).length;
+  return (
+    <Card style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>Screenshots only</div>
+        <div style={{ ...muted, marginTop: 4 }}>
+          One screenshot per post, showing the account's handle and the start of the caption. Pick as many as you like:
+          we find each post on Instagram ourselves and add it. Keep this page open while it works.
+        </div>
+      </div>
+      <Btn onClick={() => fileRef.current?.click()} style={{ width: "100%" }}>Pick screenshots</Btn>
+      <input ref={fileRef} type="file" accept="image/*" multiple onChange={pick} style={{ display: "none" }} />
+      {items.length > 0 && (
+        <div style={muted}>{done} added{busy ? ` · ${busy} in progress` : ""}{items.length - done - busy ? ` · ${items.length - done - busy} need you` : ""}</div>
+      )}
+      {items.map((it) => <BatchCard key={it.id} it={it} onLink={add} onRetry={() => patch(it.id, { state: "queued", error: null, tries: (it.tries || 0) + 1 })} />)}
+    </Card>
+  );
+}
+
+function BatchCard({ it, onLink, onRetry }) {
+  const { theme: t } = useTheme();
+  const [link, setLink] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const k = it.result ? KIND[it.result.kind] || KIND.signal : null;
+  const who = it.facts?.handle ? `@${it.facts.handle}` : "Screenshot";
+  const muted = { fontSize: 13, color: t.textMuted, lineHeight: 1.45 };
+
+  const saveLink = async () => {
+    setSaving(true);
+    setError(null);
+    try { await onLink(it, link.trim(), it.found, true); }
+    catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 10, padding: 10, border: `1px solid ${t.border}`, borderRadius: 12 }}>
+      <img src={it.preview} alt="" style={{ width: 48, height: 84, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />
+      <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
+        {it.state === "added" && k ? (
+          <>
+            <div style={muted}>
+              {k.label}
+              {it.facts?.is_creator_call === false ? " · the screenshot didn’t look like a call for creators: check it" : ""}
+            </div>
+            <Link to={k.where} style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{k.review}</Link>
+          </>
+        ) : it.state === "error" ? (
+          <>
+            <div style={{ ...muted, color: t.danger || t.text }}>{it.error}</div>
+            <Btn variant="secondary" onClick={onRetry}>Try again</Btn>
+          </>
+        ) : it.state === "need_link" ? (
+          <>
+            <div style={muted}>{STEP.need_link}</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://www.instagram.com/p/…"
+                     inputMode="url" autoCapitalize="off" autoCorrect="off" />
+              <Btn variant="secondary" onClick={saveLink} loading={saving} disabled={!link.trim()}>Add</Btn>
+            </div>
+            {error && <div style={{ ...muted, color: t.danger || t.text }}>{error}</div>}
+          </>
+        ) : (
+          <div style={muted}>{STEP[it.state]}</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function CallInboxPage() {
   const { theme: t } = useTheme();
@@ -87,13 +254,19 @@ export default function CallInboxPage() {
       <div>
         <div style={{ fontSize: 22, fontWeight: 600 }}>Add calls</div>
         <div style={{ ...muted, marginTop: 4 }}>
-          One Instagram post at a time. In Instagram tap Share, then Copy link, and paste it here. Add screenshots of the post
-          when our agent may not have seen it: we read the handle, caption, Google Form, website and email from them.
-          With a Google Form it goes to Campaigns from calls, otherwise it becomes a Pitch signal draft. Nothing goes live until you approve it.
+          With a Google Form a post goes to Campaigns from calls, otherwise it becomes a Pitch signal draft. Nothing goes live until you approve it.
         </div>
       </div>
 
+      <BatchCalls />
+
       <Card style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>One post by its link</div>
+          <div style={{ ...muted, marginTop: 4 }}>
+            In Instagram tap Share, then Copy link, and paste it here. Add screenshots when our agent may not have seen the post.
+          </div>
+        </div>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Instagram post link</div>
           <div style={{ display: "flex", gap: 8 }}>

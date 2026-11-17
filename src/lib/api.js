@@ -242,6 +242,8 @@ export const api = {
   addExternalCall: (body) => request("/external-calls", { method: "POST", body: JSON.stringify(body) }),
   // Add calls from the phone: a post link and screenshots (server/lib/callInbox.js).
   addCallFromPhone: (body) => request("/call-inbox", { method: "POST", body: JSON.stringify(body) }),
+  readCallScreenshot: (image) => request("/call-inbox/read", { method: "POST", body: JSON.stringify({ images: [image] }) }),
+  findCallPost: (handle, caption) => request("/call-inbox/find", { method: "POST", body: JSON.stringify({ handle, caption }) }),
   updateExternalCall: (id, draft) => request(`/external-calls/${id}`, { method: "PUT", body: JSON.stringify({ draft }) }),
   rereadExternalCall: (id, caption) => request(`/external-calls/${id}/read`, { method: "POST", body: JSON.stringify({ caption: caption || "" }) }),
   setExternalCallImage: (id, imageUrl) => request(`/external-calls/${id}/image`, { method: "POST", body: JSON.stringify({ image_url: imageUrl || "" }) }),

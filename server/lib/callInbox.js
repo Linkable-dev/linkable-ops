@@ -13,6 +13,7 @@
 import { claudeMessage, tokenStats } from "./anthropic.js";
 import { externalCallsClient } from "./externalCalls.js";
 import { pitchSignalsClient } from "./pitchSignals.js";
+import { findPost } from "./postFinder.js";
 
 // Haiku reads text off a screenshot well and costs a fraction of a cent.
 export const CALL_READER_MODEL = process.env.CALL_INBOX_MODEL || "claude-haiku-5-5";
@@ -23,6 +24,12 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const POST_URL = /^https?:\/\/(www\.)?instagram\.com\/(?:[A-Za-z0-9_.]+\/)?(p|reel|reels|tv)\/[A-Za-z0-9_-]+/i;
 const FORM_URL = /(forms\.gle\/|docs\.google\.com\/forms\/)/i;
+
+// formLinkIn: a Google Form link written in a caption.
+export function formLinkIn(text) {
+  const m = String(text || "").match(/https?:\/\/(?:forms\.gle\/[A-Za-z0-9_-]+|docs\.google\.com\/forms\/[^\s)]+)/i);
+  return m ? m[0] : "";
+}
 
 function fail(status, message) {
   const e = new Error(message);
@@ -103,6 +110,34 @@ function checkImages(images) {
   });
 }
 
+// readOneScreenshot: the batch mode's first step, one screenshot (one post)
+// read without adding anything yet.
+export async function readOneScreenshot(input = {}, deps = {}) {
+  const { read = readCallScreenshots } = deps;
+  const images = checkImages(input.images);
+  if (!images.length) throw fail(400, "Add the post's screenshot.");
+  try {
+    return await read(images);
+  } catch (e) {
+    console.error(`[call-inbox] screenshot not read: ${e.message}`);
+    throw fail(502, "We couldn't read that screenshot. Try it again.");
+  }
+}
+
+// findPostFromScreenshot: the batch mode's second step, the post's link from
+// what the screenshot showed (lib/postFinder.js).
+export async function findPostFromScreenshot(input = {}, deps = {}) {
+  const { find = findPost } = deps;
+  const handle = clean(input.handle, 100).replace(/^@/, "");
+  if (!handle) throw fail(400, "We couldn't see the account's handle in the screenshot. Paste the post's link.");
+  try {
+    return await find({ handle, seen: clean(input.caption, 2000) });
+  } catch (e) {
+    console.error(`[call-inbox] post not looked up: ${e.message}`);
+    throw fail(502, "We couldn't look the post up on Instagram just now. Paste its link, or try again.");
+  }
+}
+
 // addCallFromPhone: one post. The link is required (both queues key on it);
 // screenshots and the typed fields are optional, a typed field winning over
 // what the screenshot says.
@@ -123,13 +158,19 @@ export async function addCallFromPhone(input = {}, { admin } = {}, target, deps 
   }
   const typedForm = clean(input.form_url, 500);
   if (typedForm && !FORM_URL.test(typedForm)) throw fail(400, "That Google Form link doesn't look right. It starts with https://forms.gle/ or https://docs.google.com/forms/.");
-  const formUrl = typedForm || facts.google_form_url;
   const caption = clean(input.caption, 5000) || facts.caption;
+  // The batch mode sends the post's full caption, where the form link is
+  // written out even when the screenshot cut it.
+  const formUrl = typedForm || facts.google_form_url || formLinkIn(caption);
   const handle = clean(input.instagram, 100).replace(/^@/, "") || facts.handle;
+  const brandName = clean(input.brand_name, 200) || facts.brand_name;
+  const website = clean(input.website, 300) || facts.website;
+  const typedEmail = clean(input.contact_email, 200).toLowerCase();
+  const contactEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typedEmail) ? typedEmail : facts.contact_email;
   const read_ = {
-    handle, brand_name: facts.brand_name, has_caption: Boolean(caption), form_url: formUrl,
-    website: facts.website, contact_email: facts.contact_email,
-    not_a_call: images.length > 0 && !facts.is_creator_call,
+    handle, brand_name: brandName, has_caption: Boolean(caption), form_url: formUrl,
+    website, contact_email: contactEmail,
+    not_a_call: (images.length > 0 && !facts.is_creator_call) || input.not_a_call === true,
   };
 
   if (formUrl) {
@@ -138,8 +179,8 @@ export async function addCallFromPhone(input = {}, { admin } = {}, target, deps 
     return { kind: "campaign", id: call.id, status: call.status, post_url: postUrl, read: read_ };
   }
   const signal = await signals.draft({
-    post_url: postUrl, caption, instagram: handle, brand_name: facts.brand_name,
-    website: facts.website, contact_email: facts.contact_email,
+    post_url: postUrl, caption, instagram: handle, brand_name: brandName,
+    website, contact_email: contactEmail,
   }, { admin }, target);
   console.log(`[call-inbox] signal admin=${admin?.email} post=${postUrl} id=${signal.id} status=${signal.status}`);
   return { kind: "signal", id: signal.id, status: signal.status, post_url: postUrl, read: read_ };
