@@ -521,6 +521,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ hidden }),
     }),
+  // Let in a creator the main app's sign up checks held back.
+  approveCreatorGate: (userId) =>
+    request(`/admin-users/${userId}/approve-creator-gate`, { method: "POST" }),
   // Hold a creator's payouts while something is looked into, and release them
   // (main app payments part 2). A reason is required to hold.
   getPayoutHold: (userId) =>

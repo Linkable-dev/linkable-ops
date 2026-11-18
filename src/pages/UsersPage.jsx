@@ -97,8 +97,8 @@ const CREATOR_COLUMNS = [
     filter: { type: "date" } },
   { key: "last_sign_in",              label: "Last sign in", width: 132, sortable: true, defaultDir: "desc",
     filter: { type: "date" } },
-  // Room for Hide + Rule out + Hold payouts + View.
-  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 150, resizable: false },
+  // Room for Approve + Hide + Rule out + Hold payouts + View.
+  { key: "actions",                   label: "",             width: ACTIONS_WIDTH + 230, resizable: false },
 ];
 
 // The Creators tab can also be read as a grid of photo cards, like Discover in
@@ -140,6 +140,7 @@ const CREATOR_FILTER_BAR = [
   ] },
   { key: "photo", label: "Photo", any: "Photo or not", width: 140, options: [["yes", "Has a photo"], ["no", "No photo"]] },
   { key: "status", label: "Status", any: "Any status", width: 140, options: [["active", "Active"], ["ruled_out", "Ruled out"]] },
+  { key: "gate", label: "Checks", any: "Any checks", width: 170, options: [["held", "On the list (checks failed)"], ["approved", "Approved by us"]] },
 ];
 
 const creatorCount = (n) => `${friendlyNumber(n)} creator${Number(n) === 1 ? "" : "s"}`;
@@ -193,6 +194,7 @@ export default function UsersPage() {
   const [disqualifying, setDisqualifying] = useState(null); // user_id being ruled out
   const [holding, setHolding] = useState(null); // user_id whose payouts are being held/released
   const [hiding, setHiding] = useState(null); // user_id being taken off / put back on this page
+  const [approving, setApproving] = useState(null); // user_id being let in past the sign up checks
   const [actionError, setActionError] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [filters, setFilters] = useState({});
@@ -451,6 +453,34 @@ export default function UsersPage() {
     }
   }
 
+  // The sign up checks held this creator back (under 1,000 followers, say)
+  // but her content is good: let her in. Brands see her straight away and the
+  // main app sends her the "You're in" email within 15 minutes. No undo, so
+  // it asks first and names what failed.
+  async function handleApproveGate(row) {
+    const label = row.instagram_username ? `@${row.instagram_username.replace(/^@+/, "")}`
+      : (`${row.first_name || ""} ${row.last_name || ""}`.trim() || row.email);
+    const failed = (row.gate_failed || []).join("; ");
+    const ok = await ask({
+      title: `Approve ${label}?`,
+      body: `${failed ? `Failed: ${failed}. ` : ""}They get into the app, brands can see them and they can apply and pitch. They get the "You're in" email within 15 minutes, and the checks never run for them again.`,
+      confirmLabel: "Approve",
+    });
+    if (!ok) return;
+    setActionError("");
+    setApproving(row.user_id);
+    try {
+      const out = await api.approveCreatorGate(row.user_id);
+      setRows((rs) => rs.map((r) => (r.user_id === row.user_id
+        ? { ...r, gate_held: false, gate_verdict: "passed", gate_approved_at: out.gate_approved_at, gate_approved_by: out.gate_approved_by }
+        : r)));
+    } catch (err) {
+      setActionError(`${row.email}: ${err.message}`);
+    } finally {
+      setApproving(null);
+    }
+  }
+
   async function handleRestore(row) {
     const label = row.store_name || row.email || "this brand";
     const ok = await ask({
@@ -632,9 +662,11 @@ export default function UsersPage() {
                 busy={impersonating === row.user_id}
                 disqualifyBusy={disqualifying === row.user_id}
                 hideBusy={hiding === row.user_id}
+                approveBusy={approving === row.user_id}
                 onImpersonate={() => handleImpersonate(row)}
                 onDisqualify={() => handleDisqualify(row)}
                 onHide={() => handleHide(row)}
+                onApproveGate={() => handleApproveGate(row)}
               />
             ))}
           </CardGrid>
@@ -742,11 +774,13 @@ export default function UsersPage() {
               disqualifyBusy={disqualifying === row.user_id}
               holdBusy={holding === row.user_id}
               hideBusy={hiding === row.user_id}
+              approveBusy={approving === row.user_id}
               onImpersonate={() => handleImpersonate(row)}
               onManage={() => setManageRow(row)}
               onDisqualify={() => handleDisqualify(row)}
               onPayoutHold={() => handlePayoutHold(row)}
               onHide={() => handleHide(row)}
+              onApproveGate={() => handleApproveGate(row)}
             />
           ))
         )}
@@ -801,7 +835,7 @@ export default function UsersPage() {
 function renderUserCell(key, row, ctx) {
   const {
     tab, theme, avatar, initials, showImg, onImgError,
-    busy, disqualifyBusy, holdBusy, hideBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide,
+    busy, disqualifyBusy, holdBusy, hideBusy, approveBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide, onApproveGate,
   } = ctx;
   switch (key) {
     case "avatar":
@@ -861,6 +895,7 @@ function renderUserCell(key, row, ctx) {
                 || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
             </span>
             {row.ops_hidden && <HiddenPill title="Hidden from this page and from Discover. Unhide puts them back in both." />}
+            {row.gate_held && <GatePill row={row} />}
           </span>
           {(row.location_country || row.location_city) && (
             <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -901,6 +936,18 @@ function renderUserCell(key, row, ctx) {
     case "actions":
       return (
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, minWidth: 0 }}>
+          {tab === "creators" && row.gate_held && (
+            <Btn
+              size="sm"
+              variant="solid"
+              color="#15803D"
+              onClick={onApproveGate}
+              loading={approveBusy}
+              title={gateTitle(row)}
+            >
+              Approve
+            </Btn>
+          )}
           {tab === "creators" && (
             <Btn
               size="sm"
@@ -962,7 +1009,7 @@ function renderUserCell(key, row, ctx) {
   }
 }
 
-function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, hideBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide }) {
+function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBusy, holdBusy, hideBusy, approveBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide, onApproveGate }) {
   const kind = tab === "brands" ? "brand" : "creator";
   const avatar = avatarFor(row, kind);
   const initials = initialsFor(row, kind);
@@ -972,7 +1019,7 @@ function UserRow({ row, tab, theme, template, orderedColumns, busy, disqualifyBu
   const ctx = {
     tab, theme, avatar, initials, showImg,
     onImgError: () => setImgFailed(true),
-    busy, disqualifyBusy, holdBusy, hideBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide,
+    busy, disqualifyBusy, holdBusy, hideBusy, approveBusy, onImpersonate, onManage, onDisqualify, onPayoutHold, onHide, onApproveGate,
   };
 
   return (
@@ -1024,7 +1071,7 @@ const cardBadge = { padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWei
 // engagement rate, audience, location, Hide, and the same actions as the table
 // row. Followers can arrive as the string "undefined" on old rows (see the
 // table cell), and engagement rate is already a percentage.
-function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate, onDisqualify, onHide }) {
+function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, approveBusy, onImpersonate, onDisqualify, onHide, onApproveGate }) {
   const avatar = avatarFor(row, "creator");
   const [imgFailed, setImgFailed] = useState(false);
   const showImg = avatar && !imgFailed;
@@ -1048,8 +1095,18 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
         {showImg
           ? <img src={avatar} alt="" draggable="false" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
           : initialsFor(row, "creator")}
-        {(row.disqualified_at || row.ops_hidden) && (
-          <div style={{ position: "absolute", left: 8, top: 8, display: "flex", gap: 4 }}>
+        {(row.disqualified_at || row.ops_hidden || row.gate_held || row.gate_approved_at) && (
+          <div style={{ position: "absolute", left: 8, top: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {row.gate_held && (
+              <span title={gateTitle(row)} style={{ ...cardBadge, background: "#6D28D9" }}>
+                On the list
+              </span>
+            )}
+            {!row.gate_held && row.gate_approved_at && (
+              <span title={gateTitle(row)} style={{ ...cardBadge, background: "#15803D" }}>
+                Approved
+              </span>
+            )}
             {row.disqualified_at && (
               <span title={row.disqualified_reason || "no reason recorded"} style={{ ...cardBadge, background: "#DC2626" }}>
                 Ruled out
@@ -1097,6 +1154,19 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
           {!hideBusy && <EyeIcon off={!row.ops_hidden} />}
         </Btn>
         <span style={{ flex: 1 }} />
+        {row.gate_held && (
+          <Btn
+            size="sm"
+            variant="solid"
+            color="#15803D"
+            onClick={onApproveGate}
+            loading={approveBusy}
+            title={gateTitle(row)}
+            style={cardBtn}
+          >
+            Approve
+          </Btn>
+        )}
         <Btn
           size="sm"
           variant={row.disqualified_at ? "solid" : "outline"}
@@ -1116,6 +1186,18 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, onImpersonate
       </div>
     </div>
   );
+}
+
+// The sign up checks, as a hover line: what failed, or who let her in.
+function gateTitle(row) {
+  if (row.gate_held) {
+    const failed = (row.gate_failed || []).join("\n");
+    return `Held back by the sign up checks${failed ? `:\n${failed}` : " (check not finished)"}\nApprove lets them in anyway.`;
+  }
+  if (row.gate_approved_at) {
+    return `Approved past the sign up checks${row.gate_approved_by ? ` by ${row.gate_approved_by}` : ""} on ${friendlyDate(row.gate_approved_at)}`;
+  }
+  return "";
 }
 
 // Eye with a slash for Hide, open for Unhide.
@@ -1305,6 +1387,25 @@ function hexToRgba(hex, a) {
   const n = parseInt(full, 16);
   if (Number.isNaN(n)) return `rgba(115,115,115,${a})`;
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// Held back by the main app's sign up checks (on "You're on the list").
+function GatePill({ row }) {
+  const color = "#6D28D9";
+  return (
+    <span
+      title={gateTitle(row)}
+      style={{
+        display: "inline-flex", alignItems: "center", flexShrink: 0,
+        padding: "1px 6px", borderRadius: 999,
+        fontSize: 9, fontWeight: 700, lineHeight: 1.5, letterSpacing: 0.3,
+        color, background: hexToRgba(color, 0.12),
+        border: `1px solid ${hexToRgba(color, 0.28)}`,
+      }}
+    >
+      ON THE LIST
+    </span>
+  );
 }
 
 // Marketplace-visibility marker for a brand with brands.hidden = true. Amber,

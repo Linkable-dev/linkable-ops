@@ -231,6 +231,17 @@ export function adminUsersRoutes() {
     }
   });
 
+  // Let in a creator the sign up checks held back (under 1,000 followers but
+  // good content, say). The main app treats it as passed for good and sends
+  // her the "You're in" email on its next 15-minute tick (linkable #gate-approve).
+  router.post("/:userId/approve-creator-gate", async (req, res) => {
+    try {
+      res.json(await approveCreatorGate(req.params.userId, req.admin, req.dbTarget || "prod"));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   // Hold / release a creator's payouts (main app payments part 2). Through the
   // main app's RPCs when ops has its service key, else the same rows the RPCs
   // write (lib/payoutHolds.js). A production tool, like restore; refused with
@@ -329,6 +340,44 @@ async function setCreatorOpsHidden(userId, hidden, admin, dbTarget) {
     admin: admin?.email, userId, hidden, dbTarget,
   });
   return { user_id: userId, hidden };
+}
+
+// The sign up gate (main app services/creator_gate.go): a creator held on
+// "You're on the list", or hidden after a failed check, let in by the team.
+// Written here like Hide; the main app never rechecks an approved creator and
+// sends CE3 "You're in" itself (SendTeamApprovedInEmails).
+async function approveCreatorGate(userId, admin, dbTarget) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    const e = new Error("Invalid user_id"); e.status = 400; throw e;
+  }
+  const { rows: cols } = await cloudSqlQuery(
+    `SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'creator_gate' AND column_name = 'approved_at'`,
+    [], dbTarget,
+  );
+  if (!cols.length) {
+    const e = new Error("This database can't take approvals yet. It arrives with the next promotion of the main app.");
+    e.status = 409;
+    throw e;
+  }
+  const { rows } = await cloudSqlQuery(
+    `UPDATE creator_gate
+        SET verdict = 'passed', approved_at = NOW(), approved_by = $2,
+            passed_at = COALESCE(passed_at, NOW()),
+            error = '', next_retry_at = NULL, updated = NOW()
+      WHERE user_id = $1::uuid
+        AND (verdict = 'failed' OR (gated AND verdict <> 'passed'))
+  RETURNING user_id::text, approved_at, approved_by`,
+    [userId, admin?.email || "linkable-ops"],
+    dbTarget,
+  );
+  if (!rows.length) {
+    const e = new Error("This creator isn't held back by the sign up checks, so there is nothing to approve.");
+    e.status = 409;
+    throw e;
+  }
+  console.info("[ops] creator let in past the sign up checks", { admin: admin?.email, userId, dbTarget });
+  return { user_id: rows[0].user_id, gate_held: false, gate_approved_at: rows[0].approved_at, gate_approved_by: rows[0].approved_by };
 }
 
 // DEV-ONLY hard delete of a brand + everything hanging off it, in one
@@ -863,6 +912,13 @@ const CREATOR_NICHES_SQL =
 const CREATOR_RULED_OUT_SQL = `(to_jsonb(i) ->> 'disqualified_at') IS NOT NULL`;
 // Taken off this page by an operator (sql/ops_hidden_users.sql).
 const CREATOR_OPS_HIDDEN_SQL = `EXISTS (SELECT 1 FROM ops_hidden_users oh WHERE oh.user_id = u.id)`;
+// Held back by the main app's sign up checks (postgres.CreatorGateHiddenSQL):
+// on "You're on the list", or hidden from brands after a failed check.
+const CREATOR_GATE_HELD_SQL = `EXISTS (SELECT 1 FROM creator_gate cg WHERE cg.user_id = u.id
+  AND (cg.verdict = 'failed' OR (cg.gated AND cg.verdict <> 'passed')))`;
+// Let in by the team. Through to_jsonb: approved_at arrives with a promotion.
+const CREATOR_GATE_APPROVED_SQL = `EXISTS (SELECT 1 FROM creator_gate cg WHERE cg.user_id = u.id
+  AND (to_jsonb(cg) ->> 'approved_at') IS NOT NULL)`;
 
 const CREATOR_SORTS = {
   creator_name:              `LOWER(${CREATOR_NAME_SQL})`,
@@ -895,6 +951,7 @@ const CREATOR_FILTERS = {
   engagement_rate: numberFilter(CREATOR_ER_SQL),
   photo:  enumFilter({ yes: CREATOR_HAS_PHOTO_SQL, no: `NOT ${CREATOR_HAS_PHOTO_SQL}` }),
   status: enumFilter({ ruled_out: CREATOR_RULED_OUT_SQL, active: `NOT ${CREATOR_RULED_OUT_SQL}` }),
+  gate:   enumFilter({ held: CREATOR_GATE_HELD_SQL, approved: CREATOR_GATE_APPROVED_SQL }),
   // Sent by the page unless Show Hidden is on, like brands.visibility.
   visibility: enumFilter({ visible: `NOT ${CREATOR_OPS_HIDDEN_SQL}`, hidden: CREATOR_OPS_HIDDEN_SQL }),
 };
@@ -976,6 +1033,15 @@ async function listCreators(query) {
             to_jsonb(i) ->> 'disqualified_at'     AS disqualified_at,
             COALESCE(to_jsonb(i) ->> 'disqualified_reason', '') AS disqualified_reason,
             ${CREATOR_OPS_HIDDEN_SQL} AS ops_hidden,
+            -- The sign up checks: held back or not, which checks failed, and
+            -- whether the team let her in anyway.
+            COALESCE(cg.verdict = 'failed' OR (cg.gated AND cg.verdict <> 'passed'), false) AS gate_held,
+            COALESCE(cg.verdict, '') AS gate_verdict,
+            COALESCE((SELECT jsonb_agg((c ->> 'title') || ': ' || (c ->> 'line'))
+                        FROM jsonb_array_elements(cg.checks) c
+                       WHERE c ->> 'state' = 'fail' AND c ->> 'key' <> 'category'), '[]'::jsonb) AS gate_failed,
+            to_jsonb(cg) ->> 'approved_at' AS gate_approved_at,
+            COALESCE(to_jsonb(cg) ->> 'approved_by', '') AS gate_approved_by,
             ${holdCols}
             sig.last_sign_in,
             COALESCE(part.n, 0)::int    AS active_partnerships,
@@ -1008,6 +1074,7 @@ async function listCreators(query) {
             AND o.deleted = ${ENTITY_ACTIVE}
        ) rev ON true
        ${holdJoin}
+       LEFT JOIN creator_gate cg ON cg.user_id = u.id
        WHERE ${where}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
