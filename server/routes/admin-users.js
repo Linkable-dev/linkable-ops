@@ -1026,6 +1026,8 @@ async function listCreators(query) {
             i.location_country,
             i.location_city,
             i.niche,
+            -- Her connected TikTok, for the card's TikTok button.
+            COALESCE(ts.username, '') AS tiktok_username,
             -- Read through to_jsonb so this query still runs against a database
             -- that has not had the column yet. Production has not: the main app
             -- creates it at boot and has not been promoted. A listing that 500s
@@ -1050,6 +1052,8 @@ async function listCreators(query) {
        FROM users u
        LEFT JOIN influencers i ON i.user_id = u.id
                                AND i.deleted = ${ENTITY_ACTIVE}
+       LEFT JOIN creator_social_accounts ts ON ts.creator_user_id::text = u.id::text
+                                           AND ts.platform = 'tiktok'
        LEFT JOIN LATERAL (
          -- Last real sign-in (excludes admin_impersonation tokens). OAuth tokens
          -- use user_id='000…0' and identify by sub/email — see brands query above.

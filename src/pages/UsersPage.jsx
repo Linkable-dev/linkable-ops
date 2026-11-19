@@ -1077,6 +1077,9 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, approveBusy, 
   const showImg = avatar && !imgFailed;
   const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || row.instagram_name || "";
   const handle = row.instagram_username ? `@${row.instagram_username.replace(/^@+/, "")}` : "";
+  // Her profiles, one tap away (Federico, 19 Nov).
+  const igHandle = String(row.instagram_username || "").trim().replace(/^@+/, "");
+  const ttHandle = String(row.tiktok_username || "").trim().replace(/^@+/, "");
   const hasFollowers = row.instagram_followers_count && row.instagram_followers_count !== "undefined";
   const er = parseFloat(row.instagram_engagement_rate);
   const location = [row.location_city, row.location_country].filter(Boolean).join(", ");
@@ -1153,6 +1156,32 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, approveBusy, 
         >
           {!hideBusy && <EyeIcon off={!row.ops_hidden} />}
         </Btn>
+        {igHandle && (
+          <Btn
+            size="sm"
+            variant="secondary"
+            href={`https://www.instagram.com/${encodeURIComponent(igHandle)}/`}
+            target="_blank"
+            title={`Open @${igHandle} on Instagram`}
+            aria-label="Instagram"
+            style={socialBtn}
+          >
+            <SocialIcon platform="instagram" />
+          </Btn>
+        )}
+        {ttHandle && (
+          <Btn
+            size="sm"
+            variant="secondary"
+            href={`https://www.tiktok.com/@${encodeURIComponent(ttHandle)}`}
+            target="_blank"
+            title={`Open @${ttHandle} on TikTok`}
+            aria-label="TikTok"
+            style={socialBtn}
+          >
+            <SocialIcon platform="tiktok" />
+          </Btn>
+        )}
         <span style={{ flex: 1 }} />
         {row.gate_held && (
           <Btn
@@ -1198,6 +1227,23 @@ function gateTitle(row) {
     return `Approved past the sign up checks${row.gate_approved_by ? ` by ${row.gate_approved_by}` : ""} on ${friendlyDate(row.gate_approved_at)}`;
   }
   return "";
+}
+
+const socialBtn = { width: 30, height: 30, padding: 0, justifyContent: "center" };
+
+// Black line icons, like the app's SocialIcon: Instagram and TikTok.
+function SocialIcon({ platform }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {platform === "tiktok"
+        ? <path d="M14 3v11.5a3.5 3.5 0 1 1-3.5-3.5M14 3c.4 2.6 2.2 4.4 5 4.6" />
+        : <>
+            <rect x="3" y="3" width="18" height="18" rx="5" />
+            <circle cx="12" cy="12" r="4" />
+            <circle cx="17.5" cy="6.5" r="0.6" fill="currentColor" />
+          </>}
+    </svg>
+  );
 }
 
 // Eye with a slash for Hide, open for Unhide.
