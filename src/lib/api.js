@@ -121,7 +121,7 @@ export const api = {
   deployBlog: () => request("/blog/deploy", { method: "POST", body: "{}" }),
   getBlogTopics: () => request("/blog/topics"),
   createBlogTopic: (data) => request("/blog/topics", { method: "POST", body: JSON.stringify(data) }),
-  proposeBlogTopics: () => request("/blog/topics/propose", { method: "POST", body: "{}" }),
+  proposeBlogTopics: (audience = "brands") => request("/blog/topics/propose", { method: "POST", body: JSON.stringify({ audience }) }),
   updateBlogTopic: (id, data) => request(`/blog/topics/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteBlogTopic: (id) => request(`/blog/topics/${id}`, { method: "DELETE" }),
   getBlogImages: () => request("/blog/images"),

@@ -55,6 +55,8 @@ initBlogCore({
   env,
   style: promptData.style,
   facts: promptData.facts,
+  audiences: promptData.audiences,
+  seedTopics: promptData.seedTopics,
   imagePool: promptData.imagePool,
   db: createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } }),
   findHeroPhoto: (query: string, opts: { exclude?: string[] }) =>

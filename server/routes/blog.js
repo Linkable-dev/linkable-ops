@@ -153,7 +153,7 @@ export function blogRoutes() {
   });
   router.post("/topics/propose", async (req, res) => {
     try {
-      const fresh = await proposeTopics(Number(req.body?.count) || 10);
+      const fresh = await proposeTopics(Number(req.body?.count) || 10, req.body?.audience === "creators" ? "creators" : "brands");
       const { data: last } = await supabase.from("blog_topics").select("position").order("position", { ascending: false }).limit(1);
       const base = (last?.[0]?.position || 0) + 1;
       const { data, error } = await supabase.from("blog_topics").upsert(fresh.map((t, i) => ({ ...t, keyword: t.keyword.toLowerCase(), position: base + i })), { onConflict: "keyword", ignoreDuplicates: true }).select();
