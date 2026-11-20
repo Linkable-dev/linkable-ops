@@ -410,17 +410,20 @@ function TopicsPanel({ topics, reload, onError }) {
   const { theme: t } = useTheme();
   const [keyword, setKeyword] = useState("");
   const [angle, setAngle] = useState("");
+  // Who the article is for. A creator topic is filed under "For creators",
+  // which is what the writer and the site read (server/lib/blog-core.js).
+  const [audience, setAudience] = useState("brands");
   const [busy, setBusy] = useState(null);
 
   const add = async () => {
     if (!keyword.trim()) return;
     setBusy("add");
-    try { await api.createBlogTopic({ keyword: keyword.trim(), angle: angle.trim() }); setKeyword(""); setAngle(""); await reload(); }
+    try { await api.createBlogTopic({ keyword: keyword.trim(), angle: angle.trim(), category: audience === "creators" ? "For creators" : "Guide" }); setKeyword(""); setAngle(""); await reload(); }
     catch (e) { onError(e.message); } finally { setBusy(null); }
   };
   const propose = async () => {
     setBusy("propose");
-    try { await api.proposeBlogTopics(); await reload(); } catch (e) { onError(e.message); } finally { setBusy(null); }
+    try { await api.proposeBlogTopics(audience); await reload(); } catch (e) { onError(e.message); } finally { setBusy(null); }
   };
   const remove = async (id) => {
     setBusy(id);
@@ -432,7 +435,8 @@ function TopicsPanel({ topics, reload, onError }) {
   return (
     <>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "flex-end" }}>
-        <div style={{ flex: 1 }}><Label>Keyword</Label><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="what a brand owner would search" /></div>
+        <div style={{ width: 130 }}><Label>For</Label><Select value={audience} onChange={setAudience} ariaLabel="Who the article is for" options={[{ value: "brands", label: "Brands" }, { value: "creators", label: "Creators" }]} /></div>
+        <div style={{ flex: 1 }}><Label>Keyword</Label><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={audience === "creators" ? "what a creator would search" : "what a brand owner would search"} /></div>
         <div style={{ flex: 1.4 }}><Label>Angle</Label><Input value={angle} onChange={(e) => setAngle(e.target.value)} placeholder="optional" /></div>
         <Btn size="sm" onClick={add} loading={busy === "add"} style={{ height: 41 }}>Add</Btn>
         <Btn size="sm" variant="outline" onClick={propose} loading={busy === "propose"} style={{ height: 41, whiteSpace: "nowrap" }}>Propose 10 with AI</Btn>

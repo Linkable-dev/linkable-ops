@@ -14,9 +14,19 @@ uses, so the prompt, the validator and the repair pass exist in exactly one copy
 Only the runtime pieces are injected: the prompt data, `Deno.env`, the Supabase
 client and the Pexels lookup.
 
-`server/data/blog/{style.md,facts.md,images.json}` stay the source of truth. Deno
+`server/data/blog` stays the source of truth: `style.md`, `facts.md`, `images.json`, the two audience
+briefs (`audience-brands.md`, `audience-creators.md`) and `creator-topics.json`. Deno
 only ships files that something imports, so `npm run blog:build-data` bundles
 them into `_shared/prompt-data.json`. A test fails if that bundle goes stale.
+
+## Who it writes for
+
+Articles alternate between brands and creators. A creator article is due when the newest published post was
+for brands (`BLOG_CREATOR_EVERY`, default 2, sets the mix: 3 means one in three). The category says which:
+`For creators` is the creator one, and the landing site reads it to end the post with the Pitch sign-up, not
+the brand trial. The first creator topics come from `creator-topics.json`, added to the backlog the first time
+a creator article is due; after that the model proposes them, as it does for brands. A topic or a title is
+only checked for repeats against its own audience's posts.
 
 ## Deploy
 

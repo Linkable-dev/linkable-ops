@@ -10,10 +10,12 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 // Set once at startup by whichever adapter is loading this:
 //   env            plain object of the variables below
 //   style, facts   contents of style.md and facts.md
+//   audiences      { brands, creators }: contents of audience-brands.md and audience-creators.md
+//   seedTopics     contents of creator-topics.json, the creator backlog's first fill
 //   imagePool      contents of images.json
 //   db             a supabase-js client for the blog project
 //   findHeroPhoto  (query, { exclude }) => hero image object or null
-const cfg = { env: {}, style: "", facts: "", imagePool: [], db: null, findHeroPhoto: async () => null };
+const cfg = { env: {}, style: "", facts: "", audiences: { brands: "", creators: "" }, seedTopics: [], imagePool: [], db: null, findHeroPhoto: async () => null };
 export function initBlogCore(next) {
   Object.assign(cfg, next);
   bannedCache = null;
@@ -53,6 +55,37 @@ let bannedCache = null;
 const bannedWords = () => (bannedCache ||= (cfg.style.match(/Never use these words or phrases: (.*)/)?.[1] || "")
   .split(",").map((w) => w.trim().replace(/\.$/, "")).filter((w) => w.length > 2));
 
+/* -------------------------------------------------------------- audience */
+// Every article is written for brands or for creators. The category carries
+// it, so nothing new is stored: a topic or a post in CREATOR_CATEGORY is for
+// creators and everything else is for brands. The landing site reads the same
+// category to choose the box at the end of the post (start a campaign, or
+// start pitching), so the two repos must agree on this string.
+export const CREATOR_CATEGORY = "For creators";
+export const BRAND_CATEGORIES = ["Sourcing", "Strategy", "Playbook", "Measurement", "By category"];
+export const audienceOf = (category) => (category === CREATOR_CATEGORY ? "creators" : "brands");
+// "Too similar" only means something inside one audience. "Creator marketing
+// for skincare brands" and "how to pitch skincare brands as a creator" share
+// their words and are different articles for different readers, so every
+// repeat check compares a topic or a title with its own audience's only.
+export const forAudience = (rows, audience) => (rows || []).filter((r) => audienceOf(r.category) === audience);
+// A creator article is due when none of the last (every - 1) posts was one, so
+// the default of 2 alternates day by day. BLOG_CREATOR_EVERY changes the mix.
+const creatorEvery = () => { const n = Math.floor(Number(cfg.env.BLOG_CREATOR_EVERY)); return n >= 1 ? n : 2; };
+export function nextAudience(recentCategories, every = 2) {
+  const window = (recentCategories || []).slice(0, Math.max(0, every - 1));
+  return window.some((c) => audienceOf(c) === "creators") ? "brands" : "creators";
+}
+// Style guide, then who the reader is, then the facts. Two prefixes, each
+// cached on its own.
+const systemPrompt = (audience) => [{ type: "text", text: [cfg.style, cfg.audiences?.[audience] || "", cfg.facts].filter(Boolean).join("\n\n"), cache_control: { type: "ephemeral" } }];
+// Where an article may link. The landing site drops any link outside its own
+// allow list (tools/blog/lib.mjs), so a path added here must be added there.
+const LINKS = {
+  brands: "[words](/pricing), [words](/creators), [words](/contact), [words](/blog/some-existing-slug) or [words](https://apps.shopify.com/linkable-1)",
+  creators: "[words](/pitch), [words](/creators) or [words](/blog/some-existing-slug)",
+};
+
 export const slugify = (s) => s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
 // --- similarity guard: keeps the backlog and the articles from repeating ---
 const STOP = new Set("a an the and or of to for in on with your you how what why when do does is are be vs versus from into every month first should brand brands ecommerce shopify creator creators marketing".split(" "));
@@ -78,7 +111,7 @@ const ArticleSchema = z.object({
   slug: z.string(),
   metaDescription: z.string(),
   excerpt: z.string(),
-  category: z.enum(["Sourcing", "Strategy", "Playbook", "Measurement", "By category", "Guide"]),
+  category: z.enum([...BRAND_CATEGORIES, "Guide", CREATOR_CATEGORY]),
   heroImageId: z.string(),
   heroAlt: z.string(),
   imageQuery: z.string(),
@@ -129,7 +162,7 @@ export function validateArticle(a) {
 
 /* --------------------------------------------------------------- helpers */
 export async function listExistingPosts() {
-  const { data, error } = await db().from("blog_posts").select("slug, title, keyword, hero_image_id, hero_image, status").neq("status", "archived");
+  const { data, error } = await db().from("blog_posts").select("slug, title, keyword, category, hero_image_id, hero_image, status").neq("status", "archived");
   if (error) throw new Error(error.message);
   return data || [];
 }
@@ -148,10 +181,11 @@ export async function uniqueSlug(base, posts) {
 }
 
 /* ---------------------------------------------------------------- topics */
-export async function proposeTopics(count = 10) {
+export async function proposeTopics(count = 10, audience = "brands") {
   const client = anthropic();
-  const posts = await listExistingPosts();
-  const { data: topics } = await db().from("blog_topics").select("keyword");
+  const posts = forAudience(await listExistingPosts(), audience);
+  const { data: allTopics } = await db().from("blog_topics").select("keyword, category");
+  const topics = forAudience(allTopics, audience);
   const TopicSchema = z.object({ topics: z.array(z.object({ keyword: z.string(), angle: z.string(), category: z.string() })) });
   const res = await client.messages.parse({
     model: model(), max_tokens: 4000, thinking: { type: "adaptive" },
@@ -161,14 +195,17 @@ export async function proposeTopics(count = 10) {
     // so whichever runs first should be the one that pays to fill the cache.
     // Left as a plain string, this call wrote nothing and read nothing, and
     // the writer paid the fill premium on a prefix that was already in hand.
-    system: [{ type: "text", text: cfg.style + "\n\n" + cfg.facts, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: `Propose ${count} new blog topics for the Linkable blog. Each needs a search keyword phrase a Shopify brand owner would type (lower case, 4 to 8 words), a one-sentence angle that is specific and opinionated, and a category (Sourcing, Strategy, Playbook, Measurement or "By category"). Avoid anything close to these existing titles and keywords:\n${posts.map((p) => `- ${p.title} (${p.keyword || "no keyword"})`).join("\n")}\n${(topics || []).map((t) => `- ${t.keyword}`).join("\n")}` }],
+    system: systemPrompt(audience),
+    messages: [{ role: "user", content: `Propose ${count} new blog topics for the Linkable blog, for ${audience === "creators" ? "creators" : "brands"}. Each needs a search keyword phrase ${audience === "creators" ? "a creator looking for brand collaborations would type" : "a Shopify brand owner would type"} (lower case, 4 to 8 words, no digits), a one-sentence angle that is specific and opinionated, and a category (${audience === "creators" ? `always "${CREATOR_CATEGORY}"` : 'Sourcing, Strategy, Playbook, Measurement or "By category"'}). Avoid anything close to these existing titles and keywords:\n${posts.map((p) => `- ${p.title} (${p.keyword || "no keyword"})`).join("\n")}\n${(topics || []).map((t) => `- ${t.keyword}`).join("\n")}` }],
   });
   const existing = [...posts.map((p) => p.title), ...posts.map((p) => p.keyword), ...(topics || []).map((t) => t.keyword)].filter(Boolean);
   const out = [];
   for (const t of res.parsed_output?.topics || []) {
     if (tooSimilar(t.keyword, existing) || tooSimilar(t.keyword, out.map((o) => o.keyword))) continue;
-    out.push(t);
+    // The audience decides the category, not the model: a creator topic filed
+    // under a brand category would be written for brands.
+    const category = audience === "creators" ? CREATOR_CATEGORY : (BRAND_CATEGORIES.includes(t.category) ? t.category : "Strategy");
+    out.push({ ...t, category });
   }
   return out;
 }
@@ -218,24 +255,26 @@ Before you return the article, run this check and fix anything that fails:
 export async function writeArticle({ keyword, angle = "", category = "Guide", date = new Date().toISOString().slice(0, 10), onProgress = () => {} }) {
   if (!apiKey()) throw new Error("BLOG_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY) not set");
   const client = anthropic();
-  const posts = await listExistingPosts();
-  const candidates = imageCandidates(posts);
-  const brief = `Write today's article for the Linkable blog.
+  const audience = audienceOf(category);
+  const everyPost = await listExistingPosts();
+  const posts = forAudience(everyPost, audience); // what this article must not repeat, and may link to
+  const candidates = imageCandidates(everyPost);
+  const brief = `Write today's article for the Linkable blog. It is for ${audience}.
 
 Date: ${date}
 Target keyword: ${keyword}
 Angle: ${angle || "your call, but specific and opinionated"}
 Category: ${category}
 
-Existing posts (do not repeat them; link to one or two where genuinely useful, as /blog/<slug>):
-${posts.map((p) => `- /blog/${p.slug}: ${p.title}`).join("\n")}
+Existing posts for ${audience} (do not repeat them; link to one or two where genuinely useful, as /blog/<slug>):
+${posts.map((p) => `- /blog/${p.slug}: ${p.title}`).join("\n") || "- none yet, so link to no post"}
 
 Hero image: choose one of these ids and write a plain descriptive alt text for it.
 ${candidates.map((c) => `- ${c.id}: ${c.alt}`).join("\n")}
 
 Output format:
 - "blocks" is the article body in order. Types: p, h2, h3, ul, ol, quote. For p/h2/h3/quote fill "text" and set "items" to null. For ul/ol fill "items" (each item one sentence or a short phrase) and set "text" to null.
-- Inline formatting inside text and items: **bold**, *italic*, and links as [words](/pricing), [words](/creators), [words](/contact), [words](/blog/some-existing-slug) or [words](https://apps.shopify.com/linkable-1). No other links. No raw HTML.
+- Inline formatting inside text and items: **bold**, *italic*, and links as ${LINKS[audience]}. No other links. No raw HTML.
 - "faqs": 3 or 4 question/answer pairs that do not repeat the H2s.
 - "imageQuery": 2 to 4 words describing a concrete photo scene for this article (stock-photo search).
 - "slug": lower case words joined by hyphens, 3 to 7 words, containing the keyword's main words.
@@ -255,7 +294,7 @@ ${contract()}`;
       max_tokens: 8000,
       thinking: { type: "adaptive" },
       output_config: { effort: "medium", format: zodOutputFormat(ArticleSchema) },
-      system: [{ type: "text", text: cfg.style + "\n\n" + cfg.facts, cache_control: { type: "ephemeral" } }],
+      system: systemPrompt(audience),
       messages: [{ role: "user", content: brief + feedback }],
     });
     const cost = usageCost(res.usage);
@@ -305,14 +344,18 @@ ${contract()}`;
   return { article: { ...best.article, heroImageId }, attempts: log, model: model(), cost: Number(spent.toFixed(4)), valid: false, problems: best.problems };
 }
 
-// Next queued topic: skip anything too close to an existing article and
-// prefer categories not used by the most recent posts, so consecutive
-// articles vary in subject.
+// Next queued topic for the audience whose turn it is: skip anything too close
+// to an existing article and prefer categories not used by the most recent
+// posts, so consecutive articles vary in subject. Returns { topic, audience };
+// topic is null when that audience's backlog is empty, and the caller refills
+// it rather than writing for the other audience again.
 async function pickNextTopic() {
-  const { data: queued } = await db().from("blog_topics").select("*").eq("status", "queued").order("position");
-  if (!queued?.length) return null;
   const { data: recent } = await db().from("blog_posts").select("title, keyword, category, published_at").neq("status", "archived").order("published_at", { ascending: false, nullsFirst: false }).limit(50);
-  const titles = (recent || []).flatMap((p) => [p.title, p.keyword]).filter(Boolean);
+  const audience = nextAudience((recent || []).map((p) => p.category), creatorEvery());
+  const { data: all } = await db().from("blog_topics").select("*").eq("status", "queued").order("position");
+  const queued = (all || []).filter((t) => audienceOf(t.category) === audience);
+  if (!queued.length) return { topic: null, audience };
+  const titles = forAudience(recent, audience).flatMap((p) => [p.title, p.keyword]).filter(Boolean);
   const recentCats = (recent || []).slice(0, 4).map((p) => p.category);
   const candidates = [];
   for (const t of queued) {
@@ -320,9 +363,35 @@ async function pickNextTopic() {
     if (dup) { await db().from("blog_topics").update({ status: "skipped" }).eq("id", t.id); console.log(`topic skipped as too similar: "${t.keyword}" ~ "${dup}"`); continue; }
     candidates.push(t);
   }
-  if (!candidates.length) return null;
+  if (!candidates.length) return { topic: null, audience };
   candidates.sort((a, b) => (recentCats.filter((c) => c === a.category).length - recentCats.filter((c) => c === b.category).length) || (a.position - b.position));
-  return candidates[0];
+  return { topic: candidates[0], audience };
+}
+
+// The creator backlog's first fill is a hand-written list (creator-topics.json),
+// so the first creator articles target phrases chosen on purpose. It is offered
+// once: a keyword already in blog_topics, in any state, is never added again.
+// When the list is used up this returns nothing and the model proposes topics,
+// as it always has for brands.
+export function unusedSeedTopics(seeds, knownKeywords, existingTitles = []) {
+  const known = new Set((knownKeywords || []).map((k) => String(k).toLowerCase()));
+  return (seeds || []).filter((t) => !known.has(t.keyword.toLowerCase()) && !tooSimilar(t.keyword, existingTitles));
+}
+
+async function refillTopics(audience) {
+  let fresh = [];
+  if (audience === "creators") {
+    const { data: known } = await db().from("blog_topics").select("keyword");
+    const posts = forAudience(await listExistingPosts(), audience);
+    fresh = unusedSeedTopics(cfg.seedTopics, (known || []).map((t) => t.keyword), posts.flatMap((p) => [p.title, p.keyword]).filter(Boolean));
+  }
+  if (!fresh.length) fresh = await proposeTopics(10, audience);
+  if (!fresh.length) throw new Error(`no ${audience} topics available`);
+  // Keywords are unique across both audiences, so one that is already there is
+  // left alone: a plain insert would reject the whole batch over one repeat.
+  const { data: inserted, error } = await db().from("blog_topics").upsert(fresh.map((t, i) => ({ keyword: t.keyword.toLowerCase(), angle: t.angle || "", category: t.category, position: 1000 + i })), { onConflict: "keyword", ignoreDuplicates: true }).select();
+  if (error) console.warn("blog topics refill not saved:", error.message);
+  return [...(inserted || [])].sort((a, b) => a.position - b.position)[0] || fresh[0];
 }
 
 // Title-only rewrite: cheap alternative to a full retry when the article is
@@ -416,14 +485,13 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
   } else if (keyword) {
     topic = { keyword, angle: angle || "", category: category || "Guide" };
   } else {
-    topic = await pickNextTopic();
-    if (!topic) {
-      const fresh = await proposeTopics(10);
-      if (!fresh.length) throw new Error("no topics available");
-      const { data: inserted } = await db().from("blog_topics").insert(fresh.map((t, i) => ({ ...t, position: 1000 + i }))).select();
-      topic = inserted?.[0] || fresh[0];
-    }
+    const next = await pickNextTopic();
+    topic = next.topic || await refillTopics(next.audience);
   }
+  // A creator topic is always filed under the creator category and a brand
+  // topic never is, whatever the model returned: the category is what tells the
+  // site which sign-up to offer under the article.
+  const forCreators = audienceOf(topic.category) === "creators";
   const date = new Date().toISOString().slice(0, 10);
   const { article, attempts, model, cost, valid, problems } = await writeArticle({ keyword: topic.keyword, angle: topic.angle, category: topic.category, date });
   if (!valid) publish = false; // needs a human look first
@@ -434,7 +502,7 @@ export async function generatePost({ keyword, angle, category, topicId, publish 
   const heroImage = await cfg.findHeroPhoto(article.imageQuery || topic.keyword, { exclude: posts.map((p) => p.hero_image?.id).filter(Boolean) }).catch((e) => { console.warn("hero photo search failed:", e.message); return null; });
   const row = {
     slug, title: article.title, description: article.metaDescription, excerpt: article.excerpt,
-    category: article.category, keyword: topic.keyword, status: publish ? "published" : "draft", source: "ai",
+    category: forCreators ? CREATOR_CATEGORY : (article.category === CREATOR_CATEGORY ? "Guide" : article.category), keyword: topic.keyword, status: publish ? "published" : "draft", source: "ai",
     hero_image_id: article.heroImageId, hero_image_alt: heroImage?.alt || article.heroAlt, hero_image: heroImage, blocks: article.blocks, faqs: article.faqs,
     word_count: words, read_minutes: readMinutes(words), published_at: publish ? date : null,
     generation: { model, attempts, cost_usd: cost, valid, problems: problems || [], topic: topic.keyword }, created_by: createdBy,

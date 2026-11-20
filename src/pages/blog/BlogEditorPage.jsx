@@ -12,7 +12,9 @@ import { Tag } from "../../components/ui/Tag";
 import { blocksToMarkdown, markdownToBlocks, countWords, inlineHtml } from "../../lib/blog-markdown";
 import { SITE_URL } from "./BlogPage";
 
-const CATEGORIES = ["Guide", "Sourcing", "Strategy", "Playbook", "Measurement", "By category"];
+// "For creators" is the one category written for creators; the site ends those
+// posts with the Pitch sign-up, not the brand trial (server/lib/blog-core.js).
+const CATEGORIES = ["Guide", "Sourcing", "Strategy", "Playbook", "Measurement", "By category", "For creators"];
 const EMPTY = { title: "", slug: "", description: "", excerpt: "", category: "Guide", keyword: "", author_name: "Linkable Team", status: "draft", published_at: "", hero_image_id: "", hero_image_alt: "", hero_image: null, faqs: [], source: "manual" };
 const slugify = (s) => s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
 

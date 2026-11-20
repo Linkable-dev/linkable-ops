@@ -20,7 +20,7 @@ import { insightsRoutes } from "../routes/insights.js";
 import { outboundRoutes } from "../routes/outbound.js";
 import { adminUsersRoutes } from "../routes/admin-users.js";
 import { closeCloudSql } from "../lib/cloudsql.js";
-import { wordCount, readMinutes, validateArticle, LIMITS } from "../lib/blog-writer.js";
+import { wordCount, readMinutes, validateArticle, LIMITS, CREATOR_CATEGORY, BRAND_CATEGORIES, audienceOf, nextAudience, unusedSeedTopics, tooSimilar } from "../lib/blog-writer.js";
 import { normalizeDomain } from "../lib/outbound-attribution.js";
 import {
   WEIGHTS, audienceScore, scoreCreator, parseShippingCountries, countryToIso,
@@ -414,6 +414,67 @@ describe("blog article rules", () => {
     const body = Array.from({ length: 70 }, () => ({ type: "p", text: "word ".repeat(10) }));
     const withDash = validateArticle({ title: "x".repeat(50), excerpt: "e", metaDescription: "m".repeat(130), blocks: [...body, { type: "p", text: "an em dash — here" }], faqs: [] });
     assert.ok(withDash.some((p) => p.includes("dash")), "an em dash passed the style check");
+  });
+});
+
+// The blog writes for brands and for creators in turn. The category is the only
+// thing that says which, and the site picks the sign-up under the post from it,
+// so these pin the routing and the hand-written creator backlog.
+describe("blog audiences", () => {
+  test("only the creator category is written for creators", () => {
+    assert.equal(audienceOf(CREATOR_CATEGORY), "creators");
+    for (const c of [...BRAND_CATEGORIES, "Guide", "", null, undefined]) assert.equal(audienceOf(c), "brands", `category ${JSON.stringify(c)}`);
+  });
+
+  test("creator and brand articles alternate by default", () => {
+    assert.equal(nextAudience([]), "creators", "an empty blog starts with a creator article");
+    assert.equal(nextAudience(["Strategy", "Playbook"]), "creators");
+    assert.equal(nextAudience([CREATOR_CATEGORY, "Strategy"]), "brands");
+    // Simulate two weeks of daily posts: never two creator articles in a row,
+    // never two brand articles in a row.
+    const posted = [];
+    for (let day = 0; day < 14; day++) posted.unshift(nextAudience(posted) === "creators" ? CREATOR_CATEGORY : "Strategy");
+    for (let i = 1; i < posted.length; i++) assert.notEqual(audienceOf(posted[i]), audienceOf(posted[i - 1]), `days ${i - 1} and ${i} went to the same audience`);
+  });
+
+  test("the mix follows BLOG_CREATOR_EVERY", () => {
+    // One creator article in every three.
+    assert.equal(nextAudience(["Strategy", CREATOR_CATEGORY], 3), "brands");
+    assert.equal(nextAudience(["Strategy", "Playbook", CREATOR_CATEGORY], 3), "creators");
+    // Every article for creators.
+    assert.equal(nextAudience([CREATOR_CATEGORY], 1), "creators");
+  });
+
+  const seeds = JSON.parse(fs.readFileSync(new URL("../data/blog/creator-topics.json", import.meta.url), "utf8"));
+
+  test("every hand-written creator topic is usable as written", () => {
+    assert.ok(seeds.length >= 20, "the creator backlog is too short to be worth seeding");
+    for (const t of seeds) {
+      assert.equal(t.category, CREATOR_CATEGORY, `"${t.keyword}" is not filed for creators`);
+      assert.equal(t.keyword, t.keyword.toLowerCase().trim(), `"${t.keyword}" is not a lower-case keyword`);
+      assert.ok(t.angle, `"${t.keyword}" has no angle`);
+      // The writer may only use figures from facts.md, so a keyword that
+      // promises a number ("under 10k") could never be answered.
+      assert.ok(!/\d/.test(t.keyword), `"${t.keyword}" contains a digit`);
+    }
+  });
+
+  test("no creator topic would be skipped as a repeat of another", () => {
+    // pickNextTopic drops a queued topic that is too close to a published
+    // title or keyword. If two seeds are that close, publishing the first
+    // silently throws the second away.
+    for (const [i, t] of seeds.entries()) {
+      const clash = tooSimilar(t.keyword, seeds.slice(0, i).map((x) => x.keyword));
+      assert.equal(clash, null, `"${t.keyword}" is too similar to "${clash}"`);
+    }
+  });
+
+  test("the hand-written list is offered once", () => {
+    const first = unusedSeedTopics(seeds, []);
+    assert.equal(first.length, seeds.length);
+    const known = seeds.map((t) => t.keyword.toUpperCase()); // any state, any case
+    assert.deepEqual(unusedSeedTopics(seeds, known), []);
+    assert.equal(unusedSeedTopics(seeds, [seeds[0].keyword]).length, seeds.length - 1);
   });
 });
 
