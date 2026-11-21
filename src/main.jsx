@@ -49,6 +49,7 @@ const AiInboxPage = lazy(() => import("./pages/AiInboxPage"));
 const AiCampaignDetailPage = lazy(() => import("./pages/AiCampaignDetailPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const TrialsPage = lazy(() => import("./pages/TrialsPage"));
+const SwitchesPage = lazy(() => import("./pages/SwitchesPage"));
 const HealthPage = lazy(() => import("./pages/HealthPage"));
 const BlogPage = lazy(() => import("./pages/blog/BlogPage"));
 const BlogEditorPage = lazy(() => import("./pages/blog/BlogEditorPage"));
@@ -107,6 +108,7 @@ createRoot(document.getElementById("root")).render(
                     <Route path="/ai/campaigns/:id" element={<AiCampaignDetailPage />} />
                     <Route path="/users" element={<UsersPage />} />
                     <Route path="/trials" element={<TrialsPage />} />
+                    <Route path="/ops/switches" element={<SwitchesPage />} />
                     <Route path="/tables/:table" element={<TablePage />} />
                     <Route path="/tables/:table/analytics" element={<TableAnalyticsPage />} />
                     <Route path="/team" element={<TeamPage />} />

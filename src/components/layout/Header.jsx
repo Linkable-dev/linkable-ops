@@ -25,6 +25,7 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/ops/ai-creators")) return { title: "AI creators", subtitle: "Invented people every brand generates with" };
   if (pathname.startsWith("/ops/content")) return { title: "Campaign content", subtitle: "What creators delivered, and what the machine generated" };
   if (pathname.startsWith("/users")) return { title: "Impersonation", subtitle: "Open the main app as a brand or creator" };
+  if (pathname.startsWith("/ops/switches")) return { title: "Switches", subtitle: "Turn a feature of the app off or on" };
   if (pathname.startsWith("/trials")) return { title: "Trials", subtitle: "Trial grants and subscription health" };
   if (pathname.startsWith("/team")) return { title: "Team", subtitle: "Admins of this panel" };
   // GTM. The old outbound pages sit under Brands in the sidebar, so they are
