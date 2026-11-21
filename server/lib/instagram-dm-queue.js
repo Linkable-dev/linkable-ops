@@ -55,7 +55,19 @@ export const SETTING_DEFAULTS = {
   outside_agents: true,
   email_auto_send: false,
   email_auto_send_daily_cap: 20,
+  // The same for creators: invitations to join Linkable, to creators the
+  // worker watched post about a brand, without a person marking each one.
+  creator_auto_send: false,
+  creator_auto_send_daily_cap: 20,
+  // The Lemlist campaigns that take the leads ("" = the ones the worker was
+  // deployed with). Brands by tier, creators with and without a post we saw.
+  email_campaign_tier_a: "",
+  email_campaign_tier_b: "",
+  creator_campaign: "",
+  creator_cold_campaign: "",
 };
+
+const CAMPAIGN_KEYS = ["email_campaign_tier_a", "email_campaign_tier_b", "creator_campaign", "creator_cold_campaign"];
 
 export const AUTO_SEND_MAX_PER_DAY = 100;
 
@@ -74,7 +86,10 @@ export function settingProblem(key, value) {
     const bad = value.filter((v) => !(v in VERTICALS));
     return bad.length ? `not a vertical: ${bad.join(", ")}` : null;
   }
-  if (key === "email_auto_send_daily_cap") {
+  if (CAMPAIGN_KEYS.includes(key)) {
+    return value === "" || /^cam_[A-Za-z0-9]{6,40}$/.test(String(value)) ? null : "that is not a Lemlist campaign id";
+  }
+  if (key === "email_auto_send_daily_cap" || key === "creator_auto_send_daily_cap") {
     return Number.isInteger(value) && value >= 0 && value <= AUTO_SEND_MAX_PER_DAY
       ? null : `choose a whole number from 0 to ${AUTO_SEND_MAX_PER_DAY}`;
   }
