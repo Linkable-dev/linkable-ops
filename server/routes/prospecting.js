@@ -22,6 +22,7 @@ import { classifyMissing } from "../lib/lead-classifier.js";
 import { SEARCH_REQUESTED_KEY, searchState, startProspectorRun } from "../lib/prospector-run.js";
 import { refreshConversions } from "../lib/dm-conversions.js";
 import { dmResults } from "../lib/dm-results.js";
+import { BALANCE_KEY, refreshBalance } from "../lib/gtm-balance.js";
 import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-graph.js";
 import { queueDmBrandForPitch } from "../lib/dm-pitch-brands.js";
 import {
@@ -1028,6 +1029,35 @@ export function prospectingRoutes({ queueDmPitch = queueDmBrandForPitch } = {}) 
       return handleError(res, error, "saving the setting");
     }
     res.json(await readSettings());
+  });
+
+  // Automatic first contact: the team's switch and daily number, what the
+  // worker last reported (email_send_status, written by linkable-prospector
+  // after each hand-over), the balance that steers it, and how many Tier A
+  // leads nobody has decided on yet.
+  router.get("/automation", async (_req, res) => {
+    try {
+      const settings = await readSettings();
+      const { data: rows } = await supabase.from(SETTINGS).select("key,value,updated_at")
+        .in("key", ["email_send_status", BALANCE_KEY]);
+      const stored = Object.fromEntries((rows || []).map((r) => [r.key, r.value]));
+      // Fresh when the product database answers; otherwise the last one kept.
+      const balance = await refreshBalance().catch(() => stored[BALANCE_KEY] || null);
+      const { count } = await supabase.from(TABLE).select("handle", { count: "exact", head: true })
+        .eq("status", "routed").eq("tier", "A").is("pushed_at", null).is("dm_sent_at", null)
+        .or("decision.is.null,decision.eq.pending");
+      res.json({
+        settings: {
+          email_auto_send: settings.email_auto_send === true,
+          email_auto_send_daily_cap: settings.email_auto_send_daily_cap,
+        },
+        status: stored.email_send_status || null,
+        balance,
+        waiting: count || 0,
+      });
+    } catch (err) {
+      handleError(res, err, "reading the automatic sending");
+    }
   });
 
   function dmError(res, error, what) {

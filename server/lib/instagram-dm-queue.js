@@ -46,7 +46,14 @@ export const SETTING_DEFAULTS = {
   // Which verticals the worker searches Instagram for each morning; empty
   // means its generic searches. Read by linkable-prospector's worker.
   search_verticals: [],
+  // First emails to brands without a person marking each lead `send`: only
+  // the strongest leads, and never more than the daily number. Read by
+  // linkable-prospector's worker at every tick. Off unless switched on.
+  email_auto_send: false,
+  email_auto_send_daily_cap: 20,
 };
+
+export const AUTO_SEND_MAX_PER_DAY = 100;
 
 export const UNKNOWN_COUNTRY = "UNKNOWN";
 
@@ -62,6 +69,10 @@ export function settingProblem(key, value) {
     if (!Array.isArray(value)) return "search_verticals must be a list of verticals";
     const bad = value.filter((v) => !(v in VERTICALS));
     return bad.length ? `not a vertical: ${bad.join(", ")}` : null;
+  }
+  if (key === "email_auto_send_daily_cap") {
+    return Number.isInteger(value) && value >= 0 && value <= AUTO_SEND_MAX_PER_DAY
+      ? null : `choose a whole number from 0 to ${AUTO_SEND_MAX_PER_DAY}`;
   }
   if (typeof value !== typeof SETTING_DEFAULTS[key]) {
     return `${key} must be a ${typeof SETTING_DEFAULTS[key]}`;

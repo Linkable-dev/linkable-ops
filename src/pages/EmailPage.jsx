@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
+import { AutoContactCard } from "../components/gtm/AutoContactCard";
 import { FindBrands, HelpList, HelpTip, ListPager, MultiPicker, SortPicker, Tag } from "../components/gtm/QueueParts";
 import { countedOptions, useRowsThatFit, useWide } from "../components/gtm/queueHooks";
 import ProspectingRepliesPage from "./ProspectingRepliesPage";
@@ -274,11 +275,13 @@ export default function EmailPage() {
           <HelpList items={EMAIL_HELP} />
         </HelpTip>
         <span style={{ color: theme.textMuted, fontSize: 13 }}>
-          Read the email, mark it Send, and the next run hands it to Lemlist. Nothing is
-          emailed unless it is marked Send.
+          Read the email, mark it Send, and the next run hands it to Lemlist. Nothing else is
+          emailed unless automatic first emails are switched on below.
         </span>
         <FindBrands theme={theme} search={search} busy={finding} problem={findProblem} onFind={findBrands} />
       </div>
+
+      <AutoContactCard />
 
       {problem && (
         <Card style={{ padding: 16, marginBottom: 0 }}>

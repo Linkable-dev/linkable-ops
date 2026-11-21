@@ -26,6 +26,7 @@ import { buildAlerts, loadDismissals, sendBrandNudge } from "./insights.js";
 import { draftAllMissing } from "../lib/instagram-dm-queue.js";
 import { refreshInstagramToken } from "../lib/instagram-graph.js";
 import { classifyMissing } from "../lib/lead-classifier.js";
+import { refreshBalance } from "../lib/gtm-balance.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -162,6 +163,18 @@ export function cronRoutes() {
       res.json({ token, classified, drafted, followUps });
     } catch (err) {
       console.error("/cron/instagram-drafts error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Creators against live campaigns, once a day, kept where the prospector's
+  // worker reads it: it decides whether automatic brand emails run (lib/gtm-balance.js).
+  router.get("/gtm-balance", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      res.json(await refreshBalance());
+    } catch (err) {
+      console.error("/cron/gtm-balance error:", err);
       res.status(500).json({ error: err.message });
     }
   });
