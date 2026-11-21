@@ -4,6 +4,7 @@ import { tableRoutes } from "./routes/tables.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { opsRoutes } from "./routes/ops.js";
 import { adminUsersRoutes } from "./routes/admin-users.js";
+import { outsideRoutes } from "./routes/outside.js";
 import { switchesRoutes } from "./routes/switches.js";
 import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import { conversationsRoutes, conversationsWebhookRoutes } from "./routes/conversations.js";
@@ -110,6 +111,8 @@ app.use("/api/call-inbox", dbTargetMiddleware, requireOpsAdmin, callInboxRoutes(
 app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 app.use("/api/prospecting", requireOpsAdmin, prospectingRoutes());
+// Outside agents: listening, posts and partners, drafted for a person to send.
+app.use("/api/outside", requireOpsAdmin, outsideRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
 app.use("/api/blog", requireOpsAdmin, blogRoutes());

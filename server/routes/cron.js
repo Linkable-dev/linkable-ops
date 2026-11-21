@@ -27,6 +27,8 @@ import { draftAllMissing } from "../lib/instagram-dm-queue.js";
 import { refreshInstagramToken } from "../lib/instagram-graph.js";
 import { classifyMissing } from "../lib/lead-classifier.js";
 import { refreshBalance } from "../lib/gtm-balance.js";
+import { draftMissing as draftOutside, queueDailyPosts } from "../lib/outside-agents.js";
+import { readSettings as readTeamSettings } from "../lib/instagram-dm-queue.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -175,6 +177,22 @@ export function cronRoutes() {
       res.json(await refreshBalance());
     } catch (err) {
       console.error("/cron/gtm-balance error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The outside agents' drafts, each weekday after the worker's morning
+  // search: today's posts from the newest article, then a reply or an email
+  // for everything found that has none. About $0.004 a draft; nothing is
+  // posted or sent, a person does that.
+  router.get("/outside-drafts", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      if ((await readTeamSettings()).outside_agents === false) return res.json({ skipped: "switched off" });
+      const posts = await queueDailyPosts().catch((e) => ({ error: e.message }));
+      res.json({ posts, ...(await draftOutside({ limit: 20, budgetMs: 45_000 })) });
+    } catch (err) {
+      console.error("/cron/outside-drafts error:", err);
       res.status(500).json({ error: err.message });
     }
   });
