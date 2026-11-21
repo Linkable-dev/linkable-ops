@@ -85,6 +85,9 @@ export const api = {
       method: "POST", body: JSON.stringify({ text }),
     }),
   getProspectingSettings: () => request("/prospecting/settings"),
+  // Automatic first emails to brands: the switch, the daily number, what the
+  // worker last did, and the creators-against-campaigns balance behind it.
+  getEmailAutomation: () => request("/prospecting/automation"),
   setProspectingSetting: (key, value) =>
     request("/prospecting/settings", { method: "POST", body: JSON.stringify({ key, value }) }),
   updateInstagramDm: (handle, action, text) =>
