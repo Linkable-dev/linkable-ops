@@ -47,6 +47,11 @@ test("the switch is a yes or no and the daily number has a ceiling", () => {
   assert.equal(settingProblem("email_auto_send_daily_cap", 20), null);
   assert.equal(settingProblem("email_auto_send_daily_cap", 0), null);
   for (const bad of [-1, 101, 2.5, "20"]) assert.match(settingProblem("email_auto_send_daily_cap", bad), /whole number from 0 to 100/);
+  assert.equal(settingProblem("creator_auto_send", true), null);
+  assert.match(settingProblem("creator_auto_send_daily_cap", 500), /whole number from 0 to 100/);
+  assert.equal(settingProblem("creator_campaign", "cam_iGwk5mnHWRgdTDnB5"), null);
+  assert.equal(settingProblem("creator_campaign", ""), null);
+  assert.match(settingProblem("email_campaign_tier_a", "Brand Outreach"), /not a Lemlist campaign id/);
 });
 
 test("the categories to reach first: creators waiting, no live campaign", () => {

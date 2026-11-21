@@ -1050,6 +1050,8 @@ export function prospectingRoutes({ queueDmPitch = queueDmBrandForPitch } = {}) 
         settings: {
           email_auto_send: settings.email_auto_send === true,
           email_auto_send_daily_cap: settings.email_auto_send_daily_cap,
+          creator_auto_send: settings.creator_auto_send === true,
+          creator_auto_send_daily_cap: settings.creator_auto_send_daily_cap,
         },
         status: stored.email_send_status || null,
         balance,

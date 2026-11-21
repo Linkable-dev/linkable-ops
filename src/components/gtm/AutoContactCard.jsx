@@ -48,6 +48,20 @@ export function AutoContactCard() {
   const balance = data.balance;
   const pausedByBalance = balance?.short_side === "creators";
   const blocker = sendBlocker(data.status);
+  const creatorsOn = data.settings.creator_auto_send;
+  const creatorCap = data.settings.creator_auto_send_daily_cap;
+
+  async function flipCreators(next) {
+    const ok = await ask({
+      title: next ? "Invite creators automatically?" : "Stop automatic creator invitations?",
+      body: next
+        ? `From the next run, up to ${creatorCap} creators a day are invited to join Linkable by email, from influencer@linkable.link, without anyone marking them Send. They are creators the worker watched post about a brand, with an address on their profile. Hold and Hide still win.`
+        : "From the next run, a creator is invited only when someone marks them Send. Invitations already handed to Lemlist carry on.",
+      confirmLabel: next ? "Switch on" : "Switch off",
+      danger: !next,
+    });
+    if (ok) await save("creator_auto_send", next);
+  }
 
   async function save(key, value) {
     setSaving(true);
@@ -57,6 +71,8 @@ export function AutoContactCard() {
       setData((d) => ({ ...d, settings: {
         email_auto_send: settings.email_auto_send === true,
         email_auto_send_daily_cap: settings.email_auto_send_daily_cap,
+        creator_auto_send: settings.creator_auto_send === true,
+        creator_auto_send_daily_cap: settings.creator_auto_send_daily_cap,
       } }));
     } catch (e) {
       setError(e.message);
@@ -135,6 +151,29 @@ export function AutoContactCard() {
           {data.status?.at && (
             <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 8 }}>
               Last run {friendlyDate(data.status.at)}: {data.status.auto || 0} sent automatically, {data.status.auto_today ?? 0} today.
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, flex: 1 }}>Invite creators automatically</div>
+            <Toggle checked={creatorsOn} disabled={saving} label={`Automatic creator invitations: ${creatorsOn ? "on" : "off"}`} onChange={flipCreators} />
+          </div>
+          <div style={{ fontSize: 13, color: theme.textMid, marginTop: 4, lineHeight: 1.5 }}>
+            {creatorsOn
+              ? `On. Up to ${creatorCap} creators a day are invited by email from influencer@linkable.link.`
+              : "Off. A creator is invited only when someone marks them Send."}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: theme.textMuted }}>At most</span>
+            <div style={{ width: 150 }}>
+              <Select value={creatorCap} disabled={saving}
+                      options={[...new Set([...CAPS, creatorCap])].sort((a, b) => a - b).map((n) => ({ value: n, label: `${n} a day` }))}
+                      onChange={(v) => save("creator_auto_send_daily_cap", Number(v))} />
+            </div>
+          </div>
+          {data.status?.at && creatorsOn && (
+            <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 8 }}>
+              Last run: {data.status.creators_auto || 0} invited automatically, {data.status.creators_auto_today ?? 0} today.
             </div>
           )}
         </div>
