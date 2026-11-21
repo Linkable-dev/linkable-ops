@@ -35,6 +35,7 @@ function getPageInfo(pathname) {
   if (pathname.startsWith("/gtm/brands") || pathname.startsWith("/ai/prospecting")) {
     return { title: "Brands", subtitle: "Email" };
   }
+  if (pathname.startsWith("/gtm/outside")) return { title: "Outside agents", subtitle: "Posts to answer, posts of ours and partners" };
   if (pathname.startsWith("/gtm/creators/outreach")) return { title: "Creators", subtitle: "Outreach" };
   if (pathname.startsWith("/gtm/creators/replies")) return { title: "Creators", subtitle: "Replies" };
   if (pathname.startsWith("/gtm/creators")) return { title: "Creators", subtitle: "Creators to invite" };

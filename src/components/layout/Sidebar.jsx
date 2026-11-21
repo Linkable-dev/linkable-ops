@@ -109,6 +109,10 @@ const brandsIcon = icon(<>
   <path d="M5 21V8l7-5 7 5v13" />
   <path d="M10 21v-6h4v6" />
 </>);
+const outsideIcon = icon(<>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18" />
+</>);
 const creatorsIcon = icon(<>
   <circle cx="12" cy="8" r="3.5" />
   <path d="M5 20a7 7 0 0 1 14 0" />
@@ -323,6 +327,8 @@ export default function Sidebar() {
                      path.startsWith("/gtm/brands") || path.startsWith("/ai/prospecting") ||
                      path.startsWith("/ai/agents") || path.startsWith("/ai/inbox"), brandsIcon)}
             {navItem("/gtm/creators", "Creators", path.startsWith("/gtm/creators"), creatorsIcon)}
+            {/* Outside the app: posts to answer, posts of ours, partners. */}
+            {navItem("/gtm/outside", "Outside agents", path.startsWith("/gtm/outside"), outsideIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
           </div>
         )}
