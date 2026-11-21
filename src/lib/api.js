@@ -167,6 +167,10 @@ export const api = {
   deleteMetric: (id) => request(`/insights/metrics/${id}`, { method: "DELETE" }),
   getBrand360: (userId) => request(`/insights/brand/${userId}`),
   // Brand health: score per brand, plus the churn radar and trial ranking.
+  // Switches: main-app features off or on, on the database in the header.
+  getSwitches: () => request("/switches"),
+  setSwitch: (key, enabled) =>
+    request(`/switches/${encodeURIComponent(key)}`, { method: "POST", body: JSON.stringify({ enabled }) }),
   getBrandHealth: ({ limit = 50 } = {}) => request(`/insights/health?limit=${limit}`),
   getHomeSeries: (range = "90d") => request(`/insights/series?range=${encodeURIComponent(range)}`),
   askData: (question) => request("/insights/ask", { method: "POST", body: JSON.stringify({ question }) }),

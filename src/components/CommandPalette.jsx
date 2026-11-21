@@ -20,6 +20,7 @@ const PAGES = [
   ["Pitch brands", "/ops/pitch/brands", "add brand store handle"],
   ["Pitch Pro", "/ops/pitch/pro", "who pays plan subscription founding trial stripe payers"],
   ["Trials", "/trials"], ["Impersonation", "/users"],
+  ["Switches", "/ops/switches", "feature flag toggle turn off on kill disable enable"],
   ["Brands", "/gtm/brands"], ["Creators", "/gtm/creators"],
   // "Replies" pointed at /ai/inbox — the retired system's inbox, holding one
   // conversation — while the live reply queue sat at /gtm/brands/replies under

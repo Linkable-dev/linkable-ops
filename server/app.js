@@ -4,6 +4,7 @@ import { tableRoutes } from "./routes/tables.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { opsRoutes } from "./routes/ops.js";
 import { adminUsersRoutes } from "./routes/admin-users.js";
+import { switchesRoutes } from "./routes/switches.js";
 import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import { conversationsRoutes, conversationsWebhookRoutes } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
@@ -86,6 +87,8 @@ app.use("/api/analytics", dbTargetMiddleware, requireOpsAdmin, analyticsRoutes()
 app.use("/api/ops", dbTargetMiddleware, requireOpsAdmin, opsRoutes());
 app.use("/api/insights", dbTargetMiddleware, requireOpsAdmin, insightsRoutes());
 app.use("/api/admin-users", dbTargetMiddleware, requireOpsAdmin, adminUsersRoutes());
+// Whole main-app features turned off or on, with no deploy.
+app.use("/api/switches", dbTargetMiddleware, requireOpsAdmin, switchesRoutes());
 // Creator recruiting, watched from here now that the brand app does not show it.
 app.use("/api/autopilot", dbTargetMiddleware, requireOpsAdmin, autopilotRoutes());
 // Casting and rendering spend money, so admin-only like everything else here.
