@@ -49,10 +49,6 @@ export const SETTING_DEFAULTS = {
   // First emails to brands without a person marking each lead `send`: only
   // the strongest leads, and never more than the daily number. Read by
   // linkable-prospector's worker at every tick. Off unless switched on.
-  // The outside agents (lib/outside-agents.js): the daily search for posts
-  // to answer and partners to write to, by linkable-prospector's worker, and
-  // the drafts written here. On unless switched off.
-  outside_agents: true,
   email_auto_send: false,
   email_auto_send_daily_cap: 20,
   // The same for creators: invitations to join Linkable, to creators the

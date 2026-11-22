@@ -84,11 +84,6 @@ export const api = {
     request(`/prospecting/instagram/${encodeURIComponent(handle)}/reply`, {
       method: "POST", body: JSON.stringify({ text }),
     }),
-  // Outside agents: posts to answer, posts of ours, partners to write to.
-  getOutside: (params = {}) => request(`/outside?${buildQs(params)}`),
-  getOutsideSummary: () => request("/outside/summary"),
-  draftOutside: () => request("/outside/draft", { method: "POST" }),
-  actOutside: (id, body) => request(`/outside/${id}`, { method: "POST", body: JSON.stringify(body) }),
   getProspectingSettings: () => request("/prospecting/settings"),
   // Automatic first emails to brands: the switch, the daily number, what the
   // worker last did, and the creators-against-campaigns balance behind it.

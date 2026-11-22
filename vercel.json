@@ -49,10 +49,6 @@
       "schedule": "30 5 * * *"
     },
     {
-      "path": "/api/cron/outside-drafts",
-      "schedule": "15 10 * * 1-5"
-    },
-    {
       "path": "/api/cron/direct-outreach?slot=1",
       "schedule": "10 9 * * 1-5"
     },
