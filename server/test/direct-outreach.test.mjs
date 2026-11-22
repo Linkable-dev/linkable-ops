@@ -30,9 +30,9 @@ test("the first creator email reads as written, with the footer under the sign-o
   assert.equal(out.text, [
     "Hi Anna,",
     "Saw your post about @glossier.\nhttps://www.instagram.com/p/abc/",
-    "I work on Linkable. Brands post campaigns there and creators apply. You see the reward before you apply: free product, a fixed fee, commission on what you sell, or a mix.",
-    "It's free for creators, and you can pitch any brand you like from it too.",
-    "Want me to send you the sign-up?",
+    "I work on Linkable. It lets you pitch any brand you'd like to work with. You pick the brand, we help you write the proposal, send it to the right person there, and follow up for you.",
+    "Ten pitches a month are free.",
+    "Want me to send you the link?",
     "Luca\nlinkable.link",
     "Not for you? Reply 'no thanks' and I won't follow up.",
   ].join("\n\n"));
@@ -151,4 +151,19 @@ test("sending pauses itself on bounces or spam reports, and not on a small sampl
   assert.equal(trouble({ mailbox, people: 10, bounced: 3 }), null);
   assert.equal(trouble({ mailbox, people: 10, complaints: 1 }), null);
   assert.match(trouble({ mailbox, people: 10, complaints: 2 }), /2 people marked emails .* as spam/);
+});
+
+test("every creator email is about Pitch, and none promises campaigns", () => {
+  const variables = { ...creator.variables, niche: "beauty" };
+  for (const sequence of ["creator", "creator_cold"]) {
+    let subject = "";
+    SEQUENCES[sequence].steps.forEach((_, i) => {
+      const out = compose({ sequence, variables, subject }, i);
+      assert.equal(out.problem, undefined, `${sequence} step ${i + 1}`);
+      if (i === 0) subject = out.subject;
+      assert.match(out.text, /pitch/i, `${sequence} step ${i + 1}`);
+      assert.doesNotMatch(out.text, /campaign|apply/i, `${sequence} step ${i + 1}`);
+    });
+  }
+  assert.equal(compose({ sequence: "creator_cold", variables }, 0).subject, "pitching beauty brands");
 });
