@@ -29,6 +29,7 @@ import { classifyMissing } from "../lib/lead-classifier.js";
 import { refreshBalance } from "../lib/gtm-balance.js";
 import { draftMissing as draftOutside, queueDailyPosts } from "../lib/outside-agents.js";
 import { readSettings as readTeamSettings } from "../lib/instagram-dm-queue.js";
+import { sendDue as sendDirectOutreach } from "../lib/direct-outreach.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -193,6 +194,26 @@ export function cronRoutes() {
       res.json({ posts, ...(await draftOutside({ limit: 20, budgetMs: 45_000 })) });
     } catch (err) {
       console.error("/cron/outside-drafts error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Our own sender (lib/direct-outreach.js): the next step for everyone in
+  // prospector_outbox who is due one. Several times a working day, so a day's
+  // emails are spread out rather than sent in one burst. ?dry=1 lists what
+  // would go and sends nothing.
+  router.get("/direct-outreach", async (req, res) => {
+    if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const settings = await readTeamSettings();
+      const result = await sendDirectOutreach({
+        dryRun: req.query.dry === "1" || req.query.dry === "true",
+        paused: settings.direct_send_paused === true,
+        limit: Math.min(parseInt(req.query.limit) || 25, 40),
+      });
+      res.json(result);
+    } catch (err) {
+      console.error("/cron/direct-outreach error:", err);
       res.status(500).json({ error: err.message });
     }
   });

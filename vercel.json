@@ -51,6 +51,22 @@
     {
       "path": "/api/cron/outside-drafts",
       "schedule": "15 10 * * 1-5"
+    },
+    {
+      "path": "/api/cron/direct-outreach?slot=1",
+      "schedule": "10 9 * * 1-5"
+    },
+    {
+      "path": "/api/cron/direct-outreach?slot=2",
+      "schedule": "10 11 * * 1-5"
+    },
+    {
+      "path": "/api/cron/direct-outreach?slot=3",
+      "schedule": "10 13 * * 1-5"
+    },
+    {
+      "path": "/api/cron/direct-outreach?slot=4",
+      "schedule": "10 15 * * 1-5"
     }
   ]
 }

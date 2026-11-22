@@ -36,6 +36,7 @@ import { supabase } from "../lib/supabase.js";
 import { cancelPendingTouches } from "./sequencer.js";
 
 import { sandboxRecipient } from "../lib/outbound-sandbox.js";
+import { onReply as directReply, onStop as directStop } from "../lib/direct-outreach.js";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -180,6 +181,31 @@ export async function handleInbound(payload) {
   // Auto-replies: log and bail.
   if (looksLikeAutoReply(norm.headers, bodyText)) {
     return { ignored: "auto-reply", from: norm.from_email };
+  }
+
+  // One of the people our own sender wrote to (lib/direct-outreach.js): their
+  // sequence stops and the reply is passed on to the mailbox it came from. It
+  // ends here, since nobody in that outbox has an AI conversation to continue.
+  if (norm.from_email) {
+    try {
+      const cleaned = extractReplyBody(norm) || bodyText;
+      const direct = await directReply({
+        fromEmail: norm.from_email,
+        subject: norm.subject,
+        text: cleaned,
+        optOut: looksLikeOptOut(cleaned || ""),
+      });
+      if (direct) {
+        if (direct.status === "unsubscribed") {
+          await upsertSuppression({
+            teamId: team, email: norm.from_email, reason: "opt_out", detail: "inbound opt-out (prospector outbox)",
+          }).catch((e) => console.error("opt-out suppression failed:", e.message));
+        }
+        return { action: "direct-outreach-reply", ...direct, from: norm.from_email };
+      }
+    } catch (err) {
+      console.error("direct-outreach inbound failed:", err.message);
+    }
   }
 
   // Daily-200 sequencer cancel + replied_at stamp run BEFORE the conversation
@@ -660,6 +686,11 @@ export async function handleResendStatusEvent(payload) {
   const sendRow = await stampEmailSendForResendEvent({
     teamId, resendId, recipientEmail, eventType: payload.type, data,
   });
+
+  if (recipientEmail && (payload.type === "email.bounced" || payload.type === "email.complained")) {
+    await directStop({ email: recipientEmail, reason: payload.type === "email.bounced" ? "bounce" : "complaint" })
+      .catch((e) => console.error("direct-outreach stop failed:", e.message));
+  }
 
   switch (payload.type) {
     case "email.bounced": {

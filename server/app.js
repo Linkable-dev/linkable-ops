@@ -9,6 +9,7 @@ import { switchesRoutes } from "./routes/switches.js";
 import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import { conversationsRoutes, conversationsWebhookRoutes } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
+import { unsubscribe as unsubscribeDirect } from "./lib/direct-outreach.js";
 import { prospectingRoutes } from "./routes/prospecting.js";
 import { instagramWebhookRoutes } from "./routes/instagram-webhook.js";
 import { outboundRoutes } from "./routes/outbound.js";
@@ -74,6 +75,16 @@ app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes());
 // Public webhook — secured by its Svix signature, not by an admin session.
 app.use("/api/conversations", conversationsWebhookRoutes());
+// The unsubscribe link in our own outreach emails. Public by nature: the
+// only thing it can do is stop emails to the address its token belongs to.
+app.all("/api/out/unsubscribe", async (req, res) => {
+  try {
+    await unsubscribeDirect(req.query.t);
+  } catch (err) {
+    console.error("unsubscribe failed:", err.message);
+  }
+  res.type("text/plain").send("You are unsubscribed. We won't email you again.");
+});
 // Cron — secured by the CRON_SECRET bearer token.
 app.use("/api/cron", cronRoutes());
 // Meta calls this, so no admin auth; every POST is signature-checked inside.

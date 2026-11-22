@@ -23,6 +23,7 @@ import { SEARCH_REQUESTED_KEY, searchState, startProspectorRun } from "../lib/pr
 import { refreshConversions } from "../lib/dm-conversions.js";
 import { dmResults } from "../lib/dm-results.js";
 import { BALANCE_KEY, refreshBalance } from "../lib/gtm-balance.js";
+import { summary as directSummary } from "../lib/direct-outreach.js";
 import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-graph.js";
 import { queueDmBrandForPitch } from "../lib/dm-pitch-brands.js";
 import {
@@ -1052,7 +1053,10 @@ export function prospectingRoutes({ queueDmPitch = queueDmBrandForPitch } = {}) 
           email_auto_send_daily_cap: settings.email_auto_send_daily_cap,
           creator_auto_send: settings.creator_auto_send === true,
           creator_auto_send_daily_cap: settings.creator_auto_send_daily_cap,
+          direct_send_paused: settings.direct_send_paused === true,
         },
+        // What our own sender has done, per mailbox (lib/direct-outreach.js).
+        sending: await directSummary().catch(() => ({ ready: false })),
         status: stored.email_send_status || null,
         balance,
         waiting: count || 0,
