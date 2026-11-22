@@ -10,6 +10,9 @@
 // It never runs unless the team setting `reply_auto` is on.
 
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { supabase } from "./supabase.js";
 import { claudeMessage, cachedSystem } from "./anthropic.js";
 import { facts } from "./outside-agents.js";
@@ -21,6 +24,15 @@ const EMAILS = "prospector_outbox_emails";
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 export const ANSWER_MODEL = "claude-opus-5-5";
+// What the agent may state: the verified facts the blog uses, and the answers
+// to what people ask when we write to them (data/outreach-answers.md).
+const here = dirname(fileURLToPath(import.meta.url));
+let knownCache = null;
+export function known() {
+  if (knownCache == null) knownCache = `${facts()}\n\n${readFileSync(join(here, "..", "data", "outreach-answers.md"), "utf-8")}`;
+  return knownCache;
+}
+
 // US dollars per million tokens, for the cost kept on each person.
 const PRICE = { in: 4, out: 20 };
 
@@ -45,7 +57,7 @@ const RULES = `You answer emails for Linkable, a platform where ecommerce brands
 How to decide:
 - "answer": their message is something you can answer fully and truthfully from the verified facts below. That covers interest ("yes, send it"), and plain questions about what Linkable is, how it works, what it costs, and how to start.
 - "no_answer": they said no, not now, or that they are the wrong person, and asked nothing. Leave them alone. Never argue with a no.
-- "hand_over": everything else. A question the facts do not answer. A request for special terms, a discount, a contract, a call at a set time, or anything about their own account. A complaint, an angry or upset message, anything legal or about their data. A question about whether they are talking to a person, a bot or an AI. Anything you are not sure about. A person will answer these.
+- "hand_over": everything else. A question the facts do not answer. A request for special terms, a discount, a contract, a call at a set time, or anything about their own account. A complaint, an angry or upset message, anything legal, or a request to see, correct or delete what we hold about them (asking where we got their address is a plain question, and you may answer it). A question about whether they are talking to a person, a bot or an AI. Anything you are not sure about. A person will answer these.
 
 How to write an answer. You are writing as the team member whose name signs the email, in the first person ("I"), the way they would type a quick reply between other things:
 - Answer what they asked in the first sentence. Then stop as soon as they have what they need.
@@ -125,7 +137,7 @@ function brief(row, now) {
 const allowedLink = (url) => Object.values(LINKS).some((ok) => url.replace(/[).,]+$/, "") === ok || url.startsWith(`${ok}/`) || url.startsWith(`${ok}?`));
 
 /** Why an answer may not be sent; "" when it may. Pure. */
-export function answerProblem(reply, factsText = facts(), list = []) {
+export function answerProblem(reply, factsText = known(), list = []) {
   const text = String(reply || "").trim();
   if (text.length < 20) return "the answer came back empty";
   // The list a brand asked for is long by nature, and its links are theirs to have.
@@ -182,7 +194,7 @@ export async function decide(row, { ask = claudeMessage, now = new Date() } = {}
     try {
       res = await ask({
         model: ANSWER_MODEL,
-        system: cachedSystem(`${RULES}\nLinks you may use, and no others:\n${Object.values(LINKS).join("\n")}\n\nVerified facts:\n\n${facts()}`),
+        system: cachedSystem(`${RULES}\nLinks you may use, and no others:\n${Object.values(LINKS).join("\n")}\n\nVerified facts:\n\n${known()}`),
         maxTokens: 4000,
         temperature: null, // not accepted by this model
         outputConfig: { effort: "low", format: { type: "json_schema", schema: ANSWER_SCHEMA } },
@@ -208,7 +220,7 @@ export async function decide(row, { ask = claudeMessage, now = new Date() } = {}
     if (out.action !== "answer") {
       return { action: out.action === "no_answer" ? "no_answer" : "hand_over", intent, reply: "", reason: String(out.reason || "").slice(0, 400), cost };
     }
-    problem = answerProblem(out.reply, facts(), row.audience === "brand" ? creatorList(row) : []);
+    problem = answerProblem(out.reply, known(), row.audience === "brand" ? creatorList(row) : []);
     if (!problem) return { action: "answer", intent, reply: String(out.reply).trim(), reason: String(out.reason || "").slice(0, 400), cost };
   }
   return { action: "hand_over", intent: "other", reply: "", reason: `The answer written for this was refused twice: ${problem}.`, cost };

@@ -307,3 +307,11 @@ test("an Italian creator's first email and follow-up read as written", () => {
   // English is untouched.
   assert.equal(compose(creator, 0).subject, "your @glossier post");
 });
+
+test("the agent knows the website's own answers, and where an address came from", () => {
+  const text = answers.known();
+  assert.match(text, /A creator receives the whole commission and the whole fixed fee/);
+  assert.match(text, /from their public Instagram profile/);
+  assert.match(text, /Starter: \$99 per month/); // the blog's facts are still in it
+  assert.equal(answers.answerProblem("Hi Anna,\n\nNo, we don't take a cut. You keep the whole commission, and the brand pays our 2.5% on top.", text), "");
+});
