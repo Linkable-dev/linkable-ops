@@ -136,6 +136,107 @@ export const SEQUENCES = {
   },
 };
 
+// Italian and Spanish, for brands and creators in Italy and Spain. The worker
+// writes the evidence blocks, the subject and the greeting in the same
+// language (outreach/local_copy.py there) and says which with `language`.
+// Same steps and the same days apart as the English above.
+const SITE = "{{signature}}\nlinkable.link";
+const DEMO_URL = "https://calendly.com/federico-linkable/linkable-demo";
+
+function localSequences(t) {
+  const last = { afterDays: 7, body: ["{{greeting}}", t.lastOne, "{{closingOffer}}", t.noHardFeelings, SITE] };
+  const proof = { afterDays: 4, body: ["{{greeting}}", t.nineteen, "{{socialProof}}", `${t.demo}\n${DEMO_URL}`, SITE] };
+  const creatorFollowUps = [
+    { afterDays: 4, body: ["{{greeting}}", t.creatorQuick, t.creatorChoose, SITE] },
+    { afterDays: 6, body: ["{{greeting}}", t.creatorLast, t.creatorLuck, SITE] },
+  ];
+  return {
+    brand_a: {
+      audience: "brand",
+      steps: [
+        { afterDays: 0, subject: "{{subjectLine}}", body: ["{{greeting}}", "{{proofBlock}}", "{{listOffer}}", t.tracking, SITE] },
+        { afterDays: 3, body: ["{{greeting}}", "{{followUpHook}}", t.mostSayNo, t.listStands, SITE] },
+        proof,
+        last,
+      ],
+    },
+    brand_b: {
+      audience: "brand",
+      steps: [
+        { afterDays: 0, subject: "{{subjectLine}}", body: ["{{greeting}}", "{{proofBlock}}", "{{listOffer}}", SITE] },
+        { afterDays: 3, body: ["{{greeting}}", "{{followUpHook}}", t.noNumber, SITE] },
+        proof,
+        last,
+      ],
+    },
+    creator: {
+      audience: "creator",
+      steps: [
+        { afterDays: 0, subject: t.creatorSubject, body: ["{{greeting}}", `${t.sawPost}\n{{examplePost}}`, t.whatItIs, t.free, t.sendLink, SITE] },
+        ...creatorFollowUps,
+      ],
+    },
+    creator_cold: {
+      audience: "creator",
+      steps: [
+        { afterDays: 0, subject: t.coldSubject, body: ["{{greeting}}", t.coldOpen, t.whatItIs, t.free, t.sendLink, SITE] },
+        ...creatorFollowUps,
+      ],
+    },
+  };
+}
+
+export const LOCAL_SEQUENCES = {
+  it: localSequences({
+    tracking: "Il tracciamento è la parte che facciamo noi, se mai vi servisse. Ogni creator ha il suo link e le commissioni si calcolano da sole. È un'app Shopify, ci vogliono una decina di minuti.",
+    mostSayNo: "Per quel che vale, quasi tutti quelli a cui lo chiedo mi rispondono di no. Non è una mancanza insolita.",
+    listStands: "L'offerta della lista resta valida in ogni caso.",
+    noNumber: "Per quel che vale, quasi nessuno di quelli a cui lo chiedo ha un numero preciso.",
+    nineteen: "Uno dei negozi con cui lavoriamo ha ricevuto 19 candidature di creator nel primo mese. Tutte a commissione, niente di anticipato.",
+    demo: "È più facile da mostrare che da spiegare, se avete 15 minuti:",
+    lastOne: "Questa è l'ultima, non insisto oltre.",
+    noHardFeelings: "Altrimenti nessun problema, in bocca al lupo.",
+    creatorSubject: "il tuo post su {{exampleBrand}}",
+    sawPost: "Ho visto il tuo post su {{exampleBrand}}.",
+    coldSubject: "creator {{niche}} e collaborazioni con i brand",
+    coldOpen: "Cercavo creator {{niche}} e ho trovato il tuo profilo.",
+    whatItIs: "Lavoro a Linkable. Ti permette di proporti a qualsiasi brand con cui vorresti collaborare. Scegli il brand, noi ti aiutiamo a scrivere la proposta, la mandiamo alla persona giusta e ti seguiamo anche le risposte.",
+    free: "Dieci proposte al mese sono gratis.",
+    sendLink: "Ti mando il link?",
+    creatorQuick: "Una cosa veloce. La parte lenta, quando ti proponi a un brand, è capire a chi scrivere e poi rincorrere una risposta. Linkable fa entrambe le cose per te.",
+    creatorChoose: "Scegli tu il brand e cosa vuoi in cambio: un prodotto in regalo, un compenso, una commissione, oppure da concordare.",
+    creatorLast: "Questa è l'ultima. Se c'è un brand con cui vorresti lavorare, su Linkable puoi proporti in pochi minuti, ed è gratis per dieci proposte al mese.",
+    creatorLuck: "In ogni caso, in bocca al lupo.",
+  }),
+  es: localSequences({
+    tracking: "El seguimiento es la parte que hacemos nosotros, por si algún día os hace falta. Cada creador tiene su propio enlace y las comisiones se calculan solas. Es una app de Shopify, unos diez minutos.",
+    mostSayNo: "Por si sirve de algo, casi todos a los que pregunto me dicen que no. No es nada raro.",
+    listStands: "La lista sigue siendo vuestra de todos modos.",
+    noNumber: "Por si sirve de algo, casi nadie a quien pregunto tiene esa cifra.",
+    nineteen: "Una de las tiendas con las que trabajamos recibió 19 solicitudes de creadores en su primer mes. Todas a comisión, nada por adelantado.",
+    demo: "Es más fácil enseñarlo que explicarlo, si tenéis 15 minutos:",
+    lastOne: "Este es el último, no insisto más.",
+    noHardFeelings: "Si no, sin problema, mucha suerte.",
+    creatorSubject: "tu publicación sobre {{exampleBrand}}",
+    sawPost: "Vi tu publicación sobre {{exampleBrand}}.",
+    coldSubject: "creadores de {{niche}} y colaboraciones con marcas",
+    coldOpen: "Estaba buscando creadores de {{niche}} y encontré tu perfil.",
+    whatItIs: "Trabajo en Linkable. Te permite proponer una colaboración a cualquier marca con la que te gustaría trabajar. Tú eliges la marca, nosotros te ayudamos a escribir la propuesta, se la enviamos a la persona adecuada y hacemos el seguimiento por ti.",
+    free: "Diez propuestas al mes son gratis.",
+    sendLink: "¿Te envío el enlace?",
+    creatorQuick: "Una cosa rápida. Lo lento de proponerse a una marca es saber a quién escribir y luego perseguir una respuesta. Linkable hace las dos cosas por ti.",
+    creatorChoose: "Tú eliges la marca y qué quieres a cambio: un producto de regalo, un pago, una comisión, o a convenir.",
+    creatorLast: "Este es el último. Si hay una marca con la que te gustaría trabajar, en Linkable puedes proponérselo en unos minutos, y es gratis hasta diez propuestas al mes.",
+    creatorLuck: "En cualquier caso, mucha suerte.",
+  }),
+};
+
+/** The wording for one person: their language's when it has one, else English. */
+export function sequenceFor(row) {
+  const lang = String(row.variables?.language || "en").toLowerCase();
+  return LOCAL_SEQUENCES[lang]?.[row.sequence] || SEQUENCES[row.sequence];
+}
+
 // ------------------------------------------------------------------ wording --
 
 /** Fill {{names}} from `variables`. Returns the names that had no value: a
@@ -153,7 +254,7 @@ export function fill(template, variables) {
 
 /** The subject and text of one step for one person, or why it cannot be written. */
 export function compose(row, stepIndex) {
-  const sequence = SEQUENCES[row.sequence];
+  const sequence = sequenceFor(row);
   if (!sequence) return { problem: `no wording called "${row.sequence}"` };
   const step = sequence.steps[stepIndex];
   if (!step) return { problem: `"${row.sequence}" has no step ${stepIndex + 1}` };
