@@ -8,6 +8,7 @@ import { switchesRoutes } from "./routes/switches.js";
 import { authRoutes, requireOpsAdmin } from "./routes/auth.js";
 import { conversationsRoutes, conversationsWebhookRoutes } from "./routes/conversations.js";
 import { cronRoutes } from "./routes/cron.js";
+import { outreachMonitorRoutes } from "./routes/outreach-monitor.js";
 import { unsubscribe as unsubscribeDirect } from "./lib/direct-outreach.js";
 import { prospectingRoutes } from "./routes/prospecting.js";
 import { instagramWebhookRoutes } from "./routes/instagram-webhook.js";
@@ -121,6 +122,8 @@ app.use("/api/call-inbox", dbTargetMiddleware, requireOpsAdmin, callInboxRoutes(
 app.use("/api/outbound-agents", requireOpsAdmin, outboundAgentsRoutes());
 app.use("/api/conversations", requireOpsAdmin, conversationsRoutes());
 app.use("/api/prospecting", requireOpsAdmin, prospectingRoutes());
+// The Outreach page: what our own sender and the reply agent have done. Read only.
+app.use("/api/outreach-monitor", requireOpsAdmin, outreachMonitorRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundRoutes());
 app.use("/api/outbound", requireOpsAdmin, outboundCampaignsRoutes());
 app.use("/api/blog", requireOpsAdmin, blogRoutes());

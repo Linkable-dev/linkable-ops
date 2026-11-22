@@ -109,6 +109,11 @@ const brandsIcon = icon(<>
   <path d="M5 21V8l7-5 7 5v13" />
   <path d="M10 21v-6h4v6" />
 </>);
+// A paper plane: the emails that go out by themselves, and what comes back.
+const outreachIcon = icon(<>
+  <path d="M22 2 11 13" />
+  <path d="M22 2 15 22l-4-9-9-4 20-7z" />
+</>);
 const creatorsIcon = icon(<>
   <circle cx="12" cy="8" r="3.5" />
   <path d="M5 20a7 7 0 0 1 14 0" />
@@ -323,7 +328,7 @@ export default function Sidebar() {
                      path.startsWith("/gtm/brands") || path.startsWith("/ai/prospecting") ||
                      path.startsWith("/ai/agents") || path.startsWith("/ai/inbox"), brandsIcon)}
             {navItem("/gtm/creators", "Creators", path.startsWith("/gtm/creators"), creatorsIcon)}
-            {/* Outside the app: posts to answer, posts of ours, partners. */}
+            {navItem("/gtm/outreach", "Outreach", path.startsWith("/gtm/outreach"), outreachIcon)}
             {navItem("/blog", "Blog", path.startsWith("/blog"), blogIcon)}
           </div>
         )}
