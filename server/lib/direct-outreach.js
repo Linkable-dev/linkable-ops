@@ -6,8 +6,8 @@
 // pressing anything: each step goes out when it is due, and the sequence stops
 // at a reply, an unsubscribe, a bounce or a spam complaint.
 //
-// The wording below is the wording that was in the four Lemlist campaigns,
-// moved here as it stood. Change a sentence here and it changes for everyone
+// The brand wording below is the wording that was in the Lemlist campaigns,
+// moved here as it stood. The creator wording is about Pitch (22 Nov 2026). Change a sentence here and it changes for everyone
 // who has not had that step yet.
 
 import crypto from "node:crypto";
@@ -30,16 +30,18 @@ const MAX_ATTEMPTS = 3;
 const SIGN_OFF = "{{signature}}\nlinkable.link";
 const DEMO = "Easier to show than explain, if you've got 15 minutes:\nhttps://calendly.com/federico-linkable/linkable-demo";
 const NINETEEN = "One store we work with had 19 creators apply in their first month. All on commission, nothing up front.";
+// Creators hear about Pitch, and nothing else: it is what a creator can use
+// the day they join, whichever brands are on Linkable that week.
 const WHAT_IT_IS =
-  "I work on Linkable. Brands post campaigns there and creators apply. You see the reward before you apply: free product, a fixed fee, commission on what you sell, or a mix.";
-const FREE = "It's free for creators, and you can pitch any brand you like from it too.";
+  "I work on Linkable. It lets you pitch any brand you'd like to work with. You pick the brand, we help you write the proposal, send it to the right person there, and follow up for you.";
+const FREE = "Ten pitches a month are free.";
 const CREATOR_FOLLOW_UPS = [
   {
     afterDays: 4,
     body: [
       "{{greeting}}",
-      "Quick one. On Linkable you see what a campaign offers before you apply, so there's no back and forth about rates.",
-      "The product is shipped to you, and your payments are tracked in one place.",
+      "Quick one. The slow part of pitching a brand is finding who to write to and chasing an answer. Linkable does both for you.",
+      "You choose the brand and what you want in return: a gift, a fee, commission, or open to discuss.",
       SIGN_OFF,
     ],
   },
@@ -47,7 +49,7 @@ const CREATOR_FOLLOW_UPS = [
     afterDays: 6,
     body: [
       "{{greeting}}",
-      "Last one from me. If you'd rather apply to brands that are already looking for creators than message them one by one, that's what Linkable is for.",
+      "Last one from me. If there's a brand you've wanted to work with, you can pitch them on Linkable in a few minutes, and it's free for ten a month.",
       "Either way, good luck with it.",
       SIGN_OFF,
     ],
@@ -107,7 +109,7 @@ export const SEQUENCES = {
       {
         afterDays: 0,
         subject: "your {{exampleBrand}} post",
-        body: ["{{greeting}}", "Saw your post about {{exampleBrand}}.\n{{examplePost}}", WHAT_IT_IS, FREE, "Want me to send you the sign-up?", SIGN_OFF],
+        body: ["{{greeting}}", "Saw your post about {{exampleBrand}}.\n{{examplePost}}", WHAT_IT_IS, FREE, "Want me to send you the link?", SIGN_OFF],
       },
       ...CREATOR_FOLLOW_UPS,
     ],
@@ -117,13 +119,13 @@ export const SEQUENCES = {
     steps: [
       {
         afterDays: 0,
-        subject: "{{niche}} creators + paid brand work",
+        subject: "pitching {{niche}} brands",
         body: [
           "{{greeting}}",
-          "I was looking for {{niche}} creators for brands on Linkable and you came up.",
+          "I was looking for {{niche}} creators and you came up.",
           WHAT_IT_IS,
           FREE,
-          "Want me to send you the sign-up?",
+          "Want me to send you the link?",
           SIGN_OFF,
         ],
       },
