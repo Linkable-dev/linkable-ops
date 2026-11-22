@@ -15,6 +15,8 @@ import { supabase } from "./supabase.js";
 import { sandboxRecipient } from "./outbound-sandbox.js";
 
 const TABLE = "prospector_outbox";
+// One row per email, with what happened to it. Kept for analysis.
+const EMAILS = "prospector_outbox_emails";
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 export const MAILBOXES = {
@@ -478,6 +480,12 @@ export async function sendDue({ limit = 40, now = new Date(), dryRun = false, pa
       ...(row.step === 0 ? { first_sent_at: at.toISOString() } : {}),
       ...(due ? { next_at: due.toISOString() } : { status: "done" }),
     });
+    // The record of this one email. A failure here must not undo a send.
+    await supabase.from(EMAILS).insert({
+      outbox_id: row.id, audience: row.audience, sequence: row.sequence, step: row.step + 1,
+      to_email: row.to_email, from_email: MAILBOXES[row.audience], subject: composed.subject,
+      resend_id: result.id, scheduled_for: at.toISOString(),
+    }).then(({ error: e }) => e && console.error("recording an email failed:", e.message));
     out.sent += 1;
     if (gapMs) await new Promise((r) => setTimeout(r, gapMs));
   }
@@ -492,6 +500,7 @@ async function callBack(row) {
     await fetch(`${RESEND_API_URL}/${t.resend_id}/cancel`, {
       method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     }).catch((e) => console.error("calling back a timed email failed:", e.message));
+    await supabase.from(EMAILS).update({ cancelled_at: new Date().toISOString() }).eq("resend_id", t.resend_id);
   }
   return pending.length;
 }
@@ -507,7 +516,7 @@ export async function onReply({ fromEmail, subject, text, optOut = false, send =
   if (!fromEmail) return null;
   const { data } = await supabase
     .from(TABLE)
-    .select("id,audience,status,subject,to_email,thread")
+    .select("id,audience,status,subject,to_email,thread,step")
     .ilike("to_email", fromEmail)
     .limit(1);
   const row = data?.[0];
@@ -519,6 +528,8 @@ export async function onReply({ fromEmail, subject, text, optOut = false, send =
       stop_reason: optOut ? "opt_out" : "replied",
       reply_at: new Date().toISOString(),
       reply_text: String(text || "").slice(0, 8000),
+      // The last email that had left when they answered.
+      replied_step: (row.thread || []).filter((t) => t.at <= new Date().toISOString()).length || row.step || null,
     });
   }
   const mailbox = MAILBOXES[row.audience];
@@ -541,6 +552,105 @@ export async function onStop({ email, reason }) {
   await callBack(row);
   await update(row.id, { status: STOP_FOR[reason] || "unsubscribed", stop_reason: reason });
   return { id: row.id };
+}
+
+/**
+ * What the mail service says happened to one email (delivered, bounced,
+ * marked as spam), written onto that email's record. Returns null when the
+ * email is not one of ours. Opens and clicks are not tracked: the emails are
+ * plain text on purpose, and the tracking that would count them is the kind
+ * spam filters look for.
+ */
+export async function onEmailEvent({ resendId, type, data = {}, at = new Date() }) {
+  if (!resendId) return null;
+  const stamp = new Date(at).toISOString();
+  const patch = {
+    "email.delivered": { delivered_at: stamp },
+    "email.bounced": { bounced_at: stamp, bounce_reason: String(data?.bounce?.message || data?.reason || "bounced").slice(0, 500) },
+    "email.complained": { complained_at: stamp },
+  }[type];
+  if (!patch) return null;
+  const { data: rows, error } = await supabase.from(EMAILS).update(patch).eq("resend_id", resendId).select("id,outbox_id");
+  if (error) throw new Error(error.message);
+  return rows?.[0] || null;
+}
+
+// Addresses anybody can have. A sign-up from the same one of these is the same
+// person; a sign-up from the same *domain* is not the same business.
+const FREE_MAIL = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "hotmail.co.uk", "yahoo.com", "yahoo.co.uk", "icloud.com", "live.com", "me.com", "aol.com", "proton.me", "protonmail.com"]);
+const domainOf = (value) => String(value || "").toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/^www\./, "").split(/[/?#]/)[0].split("@").pop().trim();
+
+/** Which sign-up, if any, is this person. Pure. */
+export function matchSignup(row, users) {
+  const email = String(row.to_email || "").toLowerCase();
+  const handle = String(row.handle || "").toLowerCase().replace(/^@/, "");
+  const site = domainOf(row.variables?.companyDomain);
+  const mailDomain = domainOf(email);
+  const after = new Date(row.first_sent_at).getTime();
+  return users.find((u) => {
+    if (new Date(u.created).getTime() < after) return false;
+    if (u.email && u.email === email) return true;
+    if (row.audience === "creator") return !!handle && u.handle === handle;
+    const store = domainOf(u.store_website);
+    if (!store) return false;
+    return store === site || (!FREE_MAIL.has(mailDomain) && store === mailDomain);
+  }) || null;
+}
+
+/**
+ * Did the people we wrote to join Linkable, and did they then use it? Read
+ * from the product database (production, always) and written onto each
+ * person: signed_up_at, and activated_at for a creator's first pitch sent or
+ * a brand's first campaign live. Run daily.
+ */
+export async function trackOutcomes({ query } = {}) {
+  const run = query || (await import("./cloudsql.js")).cloudSqlQuery;
+  const { data: rows, error } = await supabase
+    .from(TABLE)
+    .select("id,audience,to_email,handle,variables,first_sent_at,signed_up_at,signed_up_user_id,activated_at")
+    .not("first_sent_at", "is", null)
+    .is("activated_at", null)
+    .limit(5000);
+  if (error) throw new Error(error.message);
+  const out = { checked: rows.length, signed_up: 0, activated: 0 };
+  if (!rows.length) return out;
+  const earliest = rows.map((r) => r.first_sent_at).sort()[0];
+  const { rows: users } = await run(
+    `SELECT u.id::text AS id, u.created, LOWER(u.email) AS email,
+            LOWER(COALESCE(NULLIF(i.instagram_username, ''), i.username)) AS handle,
+            b.store_website,
+            (SELECT MIN(p.sent_at) FROM pitches p WHERE p.creator_user_id = u.id AND p.sent_at IS NOT NULL) AS first_pitch_at,
+            (SELECT MIN(pr.activated_at) FROM products pr WHERE pr.user_id = u.id) AS first_campaign_at
+       FROM users u
+       LEFT JOIN influencers i ON i.user_id = u.id
+       LEFT JOIN brands b ON b.user_id = u.id
+      WHERE u.created >= $1`,
+    [earliest], "prod");
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    const user = row.signed_up_user_id ? users.find((u) => u.id === row.signed_up_user_id) : matchSignup(row, users);
+    if (!user) continue;
+    const used = row.audience === "creator" ? user.first_pitch_at : user.first_campaign_at;
+    const patch = { outcomes_checked_at: now };
+    if (!row.signed_up_at) {
+      patch.signed_up_at = new Date(user.created).toISOString();
+      patch.signed_up_user_id = user.id;
+      out.signed_up += 1;
+    }
+    if (used) {
+      patch.activated_at = new Date(used).toISOString();
+      out.activated += 1;
+    }
+    await update(row.id, patch);
+  }
+  return out;
+}
+
+/** The funnel by week and wording, for the ops card and for analysis. */
+export async function results() {
+  const { data, error } = await supabase.from("prospector_outbox_results").select("*").order("week", { ascending: false }).limit(200);
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 /** The link in the unsubscribe header. Always answers the same, found or not. */

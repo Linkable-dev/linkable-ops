@@ -18,6 +18,17 @@ import { useConfirm } from "../ui/ConfirmDialog";
 
 const CAPS = [5, 10, 20, 30, 50, 100];
 
+// The four wordings, as a person would name them.
+const WHO = {
+  brand_a: "Brands, no affiliate app",
+  brand_b: "Brands, with an affiliate app",
+  creator: "Creators, saw their post",
+  creator_cold: "Creators, found by search",
+};
+
+// "3 (12%)": a count and what part of the people reached it is.
+const share = (n, of) => (of > 0 ? `${n} (${Math.round((n / of) * 100)}%)` : `${n}`);
+
 // Why nothing can go out, in a sentence; "" when something can.
 function sendBlocker(status) {
   const notLive = Object.values(status?.not_live || {});
@@ -53,6 +64,7 @@ export function AutoContactCard() {
   const creatorCap = data.settings.creator_auto_send_daily_cap;
   const paused = data.settings.direct_send_paused;
   const sending = data.sending?.ready ? data.sending : null;
+  const results = data.results || [];
   // "12 in progress, 4 sent today, 1 reply" for one mailbox.
   const sendingLine = (s) =>
     `From ${s.mailbox}: ${s.started_today} of ${s.allowed_new} new people today, ${s.active} in progress, ${s.replied} ${s.replied === 1 ? "reply" : "replies"}. ` +
@@ -215,6 +227,34 @@ export function AutoContactCard() {
           </div>
         </div>
       </div>
+      {results.length > 0 && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${theme.border}`, overflowX: "auto" }}>
+          <div style={{ ...label, marginBottom: 8 }}>Results by week</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontVariantNumeric: "tabular-nums" }}>
+            <thead>
+              <tr>
+                {["Week of", "Who", "People", "Reached", "Replied", "Unsubscribed", "Bounced", "Signed up", "Used it"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "4px 8px", color: theme.textMuted, fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r) => (
+                <tr key={`${r.week}-${r.sequence}`} style={{ borderTop: `1px solid ${theme.border}` }}>
+                  <td style={{ padding: "6px 8px", color: theme.textMid, whiteSpace: "nowrap" }}>{friendlyDate(r.week)}</td>
+                  <td style={{ padding: "6px 8px", color: theme.text, whiteSpace: "nowrap" }}>{WHO[r.sequence] || r.sequence}</td>
+                  {[r.people, r.reached, share(r.replied, r.reached), r.unsubscribed + r.marked_spam, r.bounced, r.signed_up, r.activated].map((v, i) => (
+                    <td key={i} style={{ padding: "6px 8px", textAlign: "right", color: theme.text }}>{v}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 6 }}>
+            Used it: a creator sent a pitch, a brand put a campaign live. Opens are not counted, because the emails are plain text so they are not treated as spam.
+          </div>
+        </div>
+      )}
       {dialog}
     </Card>
   );

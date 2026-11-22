@@ -167,3 +167,26 @@ test("every creator email is about Pitch, and none promises campaigns", () => {
   }
   assert.equal(compose({ sequence: "creator_cold", variables }, 0).subject, "pitching beauty brands");
 });
+
+// ---- tracking: who joined after we wrote to them ----
+
+test("a sign-up is matched to the person we wrote to, never to a namesake", async () => {
+  const { matchSignup } = await import("../lib/direct-outreach.js");
+  const sent = "2026-11-23T09:30:00Z";
+  const user = (over) => ({ id: "u1", created: "2026-11-25T10:00:00Z", email: "x@y.com", handle: null, store_website: null, ...over });
+  const creatorRow = { audience: "creator", to_email: "Anna@Gmail.com", handle: "@anna.makes", first_sent_at: sent, variables: {} };
+  // Same address, or a different address with the same Instagram handle.
+  assert.equal(matchSignup(creatorRow, [user({ email: "anna@gmail.com" })])?.id, "u1");
+  assert.equal(matchSignup(creatorRow, [user({ email: "other@icloud.com", handle: "anna.makes" })])?.id, "u1");
+  // Joined before we wrote: not ours to count.
+  assert.equal(matchSignup(creatorRow, [user({ email: "anna@gmail.com", created: "2026-11-01T00:00:00Z" })]), null);
+  assert.equal(matchSignup(creatorRow, [user({ email: "someone@gmail.com" })]), null);
+
+  const brandRow = { audience: "brand", to_email: "hello@acme.co.uk", handle: "acme", first_sent_at: sent, variables: { companyDomain: "acme.co.uk" } };
+  // The founder signs up with their own address; the store is what matches.
+  assert.equal(matchSignup(brandRow, [user({ email: "jo@gmail.com", store_website: "https://www.acme.co.uk/" })])?.id, "u1");
+  assert.equal(matchSignup(brandRow, [user({ email: "jo@gmail.com", store_website: "https://other.com" })]), null);
+  // A brand we reached on a free address is never matched by that domain.
+  const gmailBrand = { ...brandRow, to_email: "acmeshop@gmail.com", variables: {} };
+  assert.equal(matchSignup(gmailBrand, [user({ email: "jo@x.com", store_website: "gmail.com" })]), null);
+});
