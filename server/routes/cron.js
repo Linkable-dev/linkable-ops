@@ -30,6 +30,7 @@ import { refreshBalance } from "../lib/gtm-balance.js";
 import { draftMissing as draftOutside, queueDailyPosts } from "../lib/outside-agents.js";
 import { readSettings as readTeamSettings } from "../lib/instagram-dm-queue.js";
 import { sendDue as sendDirectOutreach, trackOutcomes } from "../lib/direct-outreach.js";
+import { answerPending } from "../lib/outreach-answers.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
 // null if not due, or { cap } for the per-invocation cap when due.
@@ -214,6 +215,10 @@ export function cronRoutes() {
       // Who joined Linkable since we wrote to them. A read of the product
       // database; it never holds up or fails the send.
       result.outcomes = await trackOutcomes().catch((e) => ({ error: e.message }));
+      // Replies that were recorded but never dealt with.
+      if (settings.reply_auto === true && req.query.dry !== "1") {
+        result.answers = await answerPending({ limit: 3 }).catch((e) => ({ error: e.message }));
+      }
       res.json(result);
     } catch (err) {
       console.error("/cron/direct-outreach error:", err);

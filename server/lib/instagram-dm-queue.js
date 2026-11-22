@@ -64,6 +64,10 @@ export const SETTING_DEFAULTS = {
   // Stops our own sender (lib/direct-outreach.js) between one email and the
   // next: nothing more goes from brand@ or influencer@ until it is false again.
   direct_send_paused: false,
+  // Replies to those emails answered without a person
+  // (lib/outreach-answers.js): what the facts can answer is answered, the
+  // rest goes to the mailbox for a person. Off unless switched on.
+  reply_auto: false,
   email_campaign_tier_a: "",
   email_campaign_tier_b: "",
   creator_campaign: "",

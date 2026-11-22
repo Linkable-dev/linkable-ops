@@ -1054,6 +1054,7 @@ export function prospectingRoutes({ queueDmPitch = queueDmBrandForPitch } = {}) 
           creator_auto_send: settings.creator_auto_send === true,
           creator_auto_send_daily_cap: settings.creator_auto_send_daily_cap,
           direct_send_paused: settings.direct_send_paused === true,
+          reply_auto: settings.reply_auto === true,
         },
         // What our own sender has done, per mailbox (lib/direct-outreach.js).
         sending: await directSummary().catch(() => ({ ready: false })),
