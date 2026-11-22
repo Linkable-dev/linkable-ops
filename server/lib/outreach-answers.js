@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supabase } from "./supabase.js";
 import { claudeMessage, cachedSystem } from "./anthropic.js";
-import { facts } from "./outside-agents.js";
+import { facts } from "./facts.js";
 import { MAILBOXES, SEQUENCES, compose } from "./direct-outreach.js";
 import { sandboxRecipient } from "./outbound-sandbox.js";
 

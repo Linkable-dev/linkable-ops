@@ -22,7 +22,6 @@ const PAGES = [
   ["Trials", "/trials"], ["Impersonation", "/users"],
   ["Switches", "/ops/switches", "feature flag toggle turn off on kill disable enable"],
   ["Brands", "/gtm/brands"], ["Creators", "/gtm/creators"],
-  ["Outside agents", "/gtm/outside", "listening social posts linkedin reddit tiktok partners newsletter community reply drafts"],
   // "Replies" pointed at /ai/inbox — the retired system's inbox, holding one
   // conversation — while the live reply queue sat at /gtm/brands/replies under
   // the same word. Searching the palette for the obvious term took you to the
