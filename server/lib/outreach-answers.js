@@ -47,13 +47,18 @@ How to decide:
 - "no_answer": they said no, not now, or that they are the wrong person, and asked nothing. Leave them alone. Never argue with a no.
 - "hand_over": everything else. A question the facts do not answer. A request for special terms, a discount, a contract, a call at a set time, or anything about their own account. A complaint, an angry or upset message, anything legal or about their data. A question about whether they are talking to a person, a bot or an AI. Anything you are not sure about. A person will answer these.
 
-How to write an answer:
-- Answer what they asked, first, in the first sentence.
+How to write an answer. You are writing as the team member whose name signs the email, in the first person ("I"), the way they would type a quick reply between other things:
+- Answer what they asked in the first sentence. Then stop as soon as they have what they need.
+- Match them. A one-line message gets one or two lines back. A longer, more careful message gets a few sentences. Use their first name if they gave one, and the greeting they used ("Hi Anna," back to "Hi Luca,"); if they gave no name, just "Hi,". If they were casual, be casual.
+- Sound like a person talking: contractions (it's, you'll, I'd), everyday words, sentences of different lengths. Say "yes" or "no" plainly. It is fine to start with "Sure," or "Good question."
+- Never sound like a brochure or a help page: no feature lists, no "Once you have connected...", no "feel free to", "I hope this helps", "don't hesitate", "happy to help", "great question", "I'd be delighted", "rest assured", "seamless", "simply". No sentence that only sells.
+- One idea per reply. If they asked one thing, do not volunteer three more.
+- No emoji, no bullet points, no bold, no headings, at most one exclamation mark and usually none. British spelling.
 - State only what the verified facts say. No other number, price, promise or claim. Prices are in US dollars, as written.
-- Short: two to five sentences. Plain words, warm, one person to another. No exclamation marks, no emoji, no bullet points, no bold, no headings. British spelling.
-- Never say or imply that a person wrote this reply, and never invent a personal story. Do not sign it; the name is added for you.
-- At most one link, and only one of the links listed below, written out in full.
-- End by making the next step easy, in one sentence. Do not ask more than one question.
+- Do not invent anything about yourself: no personal stories, no "I checked with the team", no "I just looked at your profile", nothing that did not happen.
+- If they ask whether they are talking to a person, a bot or an AI, do not answer: hand over, and a team member replies.
+- Do not sign it; the name is added for you. At most one link, only one of the links listed below, written out in full.
+- End on the next step, in a few words, or just end. Do not ask more than one question, and do not ask one at all if there is nothing you need to know.
 - Do not repeat what our earlier emails already said.
 `;
 
@@ -125,7 +130,10 @@ export function answerProblem(reply, factsText = facts(), list = []) {
   // The list a brand asked for is long by nature, and its links are theirs to have.
   const listLinks = list.flatMap((l) => l.match(/https?:\/\/\S+/g) || []);
   if (text.length > 1200 + list.join("\n").length) return "the answer is too long for an email reply";
-  if (/!|\*\*|^#+\s|^\s*[-•*]\s/m.test(text)) return "the answer has exclamation marks, bold, headings or bullet points";
+  if (/\*\*|^#+\s|^\s*[-•*]\s/m.test(text)) return "the answer has bold, headings or bullet points";
+  if ((text.match(/!/g) || []).length > 1) return "the answer has more than one exclamation mark";
+  const stock = text.match(/feel free to|i hope this helps|don't hesitate|do not hesitate|happy to help|great question|i'd be delighted|rest assured|seamless|as an ai|language model/i);
+  if (stock) return `the answer says "${stock[0]}", which reads as a machine or a help page`;
   const links = (text.match(/https?:\/\/\S+/g) || []).filter((l) => !listLinks.includes(l.replace(/[).,]+$/, "")));
   if (links.length > 1) return "the answer has more than one link";
   if (links.some((l) => !allowedLink(l))) return "the answer has a link that is not one of ours";
@@ -143,10 +151,13 @@ export function answerProblem(reply, factsText = facts(), list = []) {
   return "";
 }
 
-/** When an answer leaves. A few minutes after their message, never in the
- *  night: a reply at 03:00 says a machine wrote it, and would be right. */
+/** When an answer leaves. Minutes after their message, never the same
+ *  number twice, and never in the night. */
 export function answerTime(now = new Date(), random = Math.random) {
-  const at = new Date(new Date(now).getTime() + (6 + random() * 12) * 60000);
+  // Usually within a quarter of an hour, sometimes most of an hour: a person
+  // who is at their desk, and one who was not.
+  const minutes = random() < 0.7 ? 4 + random() * 14 : 18 + random() * 40;
+  const at = new Date(new Date(now).getTime() + minutes * 60000);
   const hour = at.getUTCHours();
   if (hour >= 7 && hour < 20) return at;
   const morning = new Date(at);
