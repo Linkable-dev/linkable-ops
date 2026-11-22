@@ -36,7 +36,7 @@ import { supabase } from "../lib/supabase.js";
 import { cancelPendingTouches } from "./sequencer.js";
 
 import { sandboxRecipient } from "../lib/outbound-sandbox.js";
-import { onReply as directReply, onStop as directStop } from "../lib/direct-outreach.js";
+import { onReply as directReply, onStop as directStop, onEmailEvent as directEmailEvent } from "../lib/direct-outreach.js";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -686,6 +686,10 @@ export async function handleResendStatusEvent(payload) {
   const sendRow = await stampEmailSendForResendEvent({
     teamId, resendId, recipientEmail, eventType: payload.type, data,
   });
+
+  // Our own sender keeps a record of every email it sends.
+  await directEmailEvent({ resendId, type: payload.type, data })
+    .catch((e) => console.error("direct-outreach email event failed:", e.message));
 
   if (recipientEmail && (payload.type === "email.bounced" || payload.type === "email.complained")) {
     await directStop({ email: recipientEmail, reason: payload.type === "email.bounced" ? "bounce" : "complaint" })

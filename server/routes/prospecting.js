@@ -23,7 +23,7 @@ import { SEARCH_REQUESTED_KEY, searchState, startProspectorRun } from "../lib/pr
 import { refreshConversions } from "../lib/dm-conversions.js";
 import { dmResults } from "../lib/dm-results.js";
 import { BALANCE_KEY, refreshBalance } from "../lib/gtm-balance.js";
-import { summary as directSummary } from "../lib/direct-outreach.js";
+import { summary as directSummary, results as directResults } from "../lib/direct-outreach.js";
 import { sendInstagramMessage, instagramConfigured } from "../lib/instagram-graph.js";
 import { queueDmBrandForPitch } from "../lib/dm-pitch-brands.js";
 import {
@@ -1057,6 +1057,8 @@ export function prospectingRoutes({ queueDmPitch = queueDmBrandForPitch } = {}) 
         },
         // What our own sender has done, per mailbox (lib/direct-outreach.js).
         sending: await directSummary().catch(() => ({ ready: false })),
+        // The funnel by week and wording: reached, replied, signed up, used it.
+        results: await directResults().catch(() => []),
         status: stored.email_send_status || null,
         balance,
         waiting: count || 0,
