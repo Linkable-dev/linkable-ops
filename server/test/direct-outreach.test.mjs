@@ -275,3 +275,35 @@ test("answering replies is a team setting, off unless switched on", () => {
   assert.equal(settingProblem("reply_auto", true), null);
   assert.match(settingProblem("reply_auto", 1), /boolean/);
 });
+
+// ---- Italian and Spanish ----
+
+test("a person in Italy or Spain gets every step in their language, on the same days", async () => {
+  const { LOCAL_SEQUENCES, sequenceFor } = await import("../lib/direct-outreach.js");
+  for (const lang of ["it", "es"]) {
+    for (const [key, english] of Object.entries(SEQUENCES)) {
+      const local = LOCAL_SEQUENCES[lang][key];
+      assert.equal(local.audience, english.audience, `${lang} ${key}`);
+      assert.deepEqual(local.steps.map((x) => x.afterDays), english.steps.map((x) => x.afterDays), `${lang} ${key} days`);
+      // The same holes as the English, so the worker's values fill both.
+      const holes = (seq) => seq.steps.map((x) => [...(x.subject || "").matchAll(/\{\{(\w+)\}\}/g), ...x.body.join(" ").matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort());
+      assert.deepEqual(holes(local), holes(english), `${lang} ${key} holes`);
+      const fixed = local.steps.flatMap((x) => x.body).filter((b) => !/^\{\{\w+\}\}$/.test(b)).join(" ").replace(/\{\{\w+\}\}|linkable\.link|https?:\/\/\S+|Linkable|Shopify|creator/g, "");
+      assert.doesNotMatch(fixed, /\b(the|you|your|and|with|from)\b/i, `${lang} ${key} has English in it`);
+    }
+  }
+  assert.equal(sequenceFor({ sequence: "creator", variables: { language: "it" } }), LOCAL_SEQUENCES.it.creator);
+  assert.equal(sequenceFor({ sequence: "creator", variables: { language: "de" } }), SEQUENCES.creator);
+  assert.equal(sequenceFor({ sequence: "creator", variables: {} }), SEQUENCES.creator);
+});
+
+test("an Italian creator's first email and follow-up read as written", () => {
+  const row = { ...creator, variables: { ...creator.variables, language: "it", greeting: "Ciao Anna,", footer: "Non fa per te? Rispondi 'no grazie' e non ti scrivo più." } };
+  const first = compose(row, 0);
+  assert.equal(first.subject, "il tuo post su @glossier");
+  assert.match(first.text, /^Ciao Anna,\n\nHo visto il tuo post su @glossier\.\nhttps:\/\/www\.instagram\.com\/p\/abc\/\n\nLavoro a Linkable\./);
+  assert.match(first.text, /Dieci proposte al mese sono gratis\.\n\nTi mando il link\?\n\nLuca\nlinkable\.link\n\nNon fa per te\?/);
+  assert.equal(compose({ ...row, subject: first.subject }, 1).subject, "Re: il tuo post su @glossier");
+  // English is untouched.
+  assert.equal(compose(creator, 0).subject, "your @glossier post");
+});
