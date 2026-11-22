@@ -84,6 +84,10 @@ export const api = {
     request(`/prospecting/instagram/${encodeURIComponent(handle)}/reply`, {
       method: "POST", body: JSON.stringify({ text }),
     }),
+  // The Outreach page: our own sender and the reply agent, read only.
+  getOutreach: () => request("/outreach-monitor"),
+  getOutreachPeople: (params = {}) => request(`/outreach-monitor/people?${buildQs(params)}`),
+  getOutreachPerson: (id) => request(`/outreach-monitor/people/${id}`),
   getProspectingSettings: () => request("/prospecting/settings"),
   // Automatic first emails to brands: the switch, the daily number, what the
   // worker last did, and the creators-against-campaigns balance behind it.
