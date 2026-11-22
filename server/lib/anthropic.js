@@ -28,6 +28,10 @@ export async function claudeMessage({
   // e.g. { type: "disabled" }: the 5-series Haiku thinks by default and can
   // spend a small max_tokens on it before answering.
   thinking,
+  // e.g. { effort: "low", format: { type: "json_schema", schema } }: how hard
+  // to think, and an answer held to a JSON schema (the way to get structured
+  // output from models that refuse a forced tool).
+  outputConfig,
   apiKey = process.env.ANTHROPIC_API_KEY,
 }) {
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
@@ -42,6 +46,7 @@ export async function claudeMessage({
   if (tools && tools.length) body.tools = tools;
   if (toolChoice) body.tool_choice = toolChoice;
   if (thinking) body.thinking = thinking;
+  if (outputConfig) body.output_config = outputConfig;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",

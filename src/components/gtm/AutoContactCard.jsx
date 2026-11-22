@@ -70,6 +70,20 @@ export function AutoContactCard() {
     `From ${s.mailbox}: ${s.started_today} of ${s.allowed_new} new people today, ${s.active} in progress, ${s.replied} ${s.replied === 1 ? "reply" : "replies"}. ` +
     (s.allowed_new < 20 ? "Starting slowly: the daily number grows each week up to 20." : "");
 
+  const answering = data.settings.reply_auto;
+
+  async function flipAnswers(next) {
+    const ok = await ask({
+      title: next ? "Answer replies automatically?" : "Stop answering replies automatically?",
+      body: next
+        ? "When someone writes back, their reply is answered from the same mailbox a few minutes later, in the daytime. Only what the verified facts can answer is answered: interest, and plain questions about Linkable, its price and how to start. A no is left alone. Anything else (special terms, a complaint, a question it is unsure of) is sent to the mailbox for a person, with the reason. At most three answers per person."
+        : "From now on every reply goes to the mailbox for a person to answer. Answers already timed to leave still go.",
+      confirmLabel: next ? "Switch on" : "Switch off",
+      danger: !next,
+    });
+    if (ok) await save("reply_auto", next);
+  }
+
   async function flipPause(next) {
     const ok = await ask({
       title: next ? "Pause all sending?" : "Resume sending?",
@@ -105,6 +119,7 @@ export function AutoContactCard() {
         creator_auto_send: settings.creator_auto_send === true,
         creator_auto_send_daily_cap: settings.creator_auto_send_daily_cap,
         direct_send_paused: settings.direct_send_paused === true,
+        reply_auto: settings.reply_auto === true,
       } }));
     } catch (e) {
       setError(e.message);
@@ -216,6 +231,16 @@ export function AutoContactCard() {
           )}
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, flex: 1 }}>Answer replies automatically</div>
+            <Toggle checked={answering} disabled={saving} label={`Automatic answers: ${answering ? "on" : "off"}`} onChange={flipAnswers} />
+          </div>
+          <div style={{ fontSize: 13, color: theme.textMid, marginTop: 4, lineHeight: 1.5 }}>
+            {answering
+              ? "On. Interest and plain questions are answered a few minutes later; anything else goes to the mailbox for a person, with the reason."
+              : "Off. Every reply goes to brand@ or influencer@linkable.link for a person to answer."}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${theme.border}` }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, flex: 1 }}>Pause all sending</div>
             <Toggle checked={paused} disabled={saving} label={`All sending: ${paused ? "paused" : "running"}`} onChange={flipPause} />
           </div>
@@ -233,7 +258,7 @@ export function AutoContactCard() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontVariantNumeric: "tabular-nums" }}>
             <thead>
               <tr>
-                {["Week of", "Who", "People", "Reached", "Replied", "Unsubscribed", "Bounced", "Signed up", "Used it"].map((h, i) => (
+                {["Week of", "Who", "People", "Reached", "Replied", "Interested", "Answered by itself", "Passed to a person", "Unsubscribed", "Bounced", "Signed up", "Used it"].map((h, i) => (
                   <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "4px 8px", color: theme.textMuted, fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
@@ -243,7 +268,7 @@ export function AutoContactCard() {
                 <tr key={`${r.week}-${r.sequence}`} style={{ borderTop: `1px solid ${theme.border}` }}>
                   <td style={{ padding: "6px 8px", color: theme.textMid, whiteSpace: "nowrap" }}>{friendlyDate(r.week)}</td>
                   <td style={{ padding: "6px 8px", color: theme.text, whiteSpace: "nowrap" }}>{WHO[r.sequence] || r.sequence}</td>
-                  {[r.people, r.reached, share(r.replied, r.reached), r.unsubscribed + r.marked_spam, r.bounced, r.signed_up, r.activated].map((v, i) => (
+                  {[r.people, r.reached, share(r.replied, r.reached), r.interested ?? 0, r.answered_by_itself ?? 0, r.passed_to_a_person ?? 0, r.unsubscribed + r.marked_spam, r.bounced, r.signed_up, r.activated].map((v, i) => (
                     <td key={i} style={{ padding: "6px 8px", textAlign: "right", color: theme.text }}>{v}</td>
                   ))}
                 </tr>

@@ -512,25 +512,41 @@ async function callBack(row) {
  * message is passed on to the mailbox it was sent from so a person can answer
  * it there. Returns null when the sender is not one of ours.
  */
-export async function onReply({ fromEmail, subject, text, optOut = false, send = deliver }) {
+export async function onReply({ fromEmail, subject, text, messageId = null, optOut = false, send = deliver, answer = null }) {
   if (!fromEmail) return null;
-  const { data } = await supabase
-    .from(TABLE)
-    .select("id,audience,status,subject,to_email,thread,step")
-    .ilike("to_email", fromEmail)
-    .limit(1);
+  const { data } = await supabase.from(TABLE).select("*").ilike("to_email", fromEmail).limit(1);
   const row = data?.[0];
   if (!row) return null;
+  // The mail service delivers a webhook again when it is slow to be answered.
+  // The same message twice is one message.
+  if (messageId && (row.conversation || []).some((m) => m.from === "them" && m.message_id === messageId)) {
+    return { id: row.id, status: row.status, duplicate: true };
+  }
   await callBack(row);
-  if (!["unsubscribed", "bounced"].includes(row.status)) {
-    await update(row.id, {
+  const now = new Date().toISOString();
+  const stopped = ["unsubscribed", "bounced"].includes(row.status);
+  const conversation = [...(row.conversation || []), { from: "them", at: now, subject: subject || "", text: String(text || "").slice(0, 8000), message_id: messageId }];
+  const willAnswer = !!answer && !optOut && !stopped;
+  await update(row.id, {
+    conversation,
+    ...(stopped ? {} : {
       status: optOut ? "unsubscribed" : "replied",
       stop_reason: optOut ? "opt_out" : "replied",
-      reply_at: new Date().toISOString(),
+      reply_at: row.reply_at || now,
       reply_text: String(text || "").slice(0, 8000),
-      // The last email that had left when they answered.
-      replied_step: (row.thread || []).filter((t) => t.at <= new Date().toISOString()).length || row.step || null,
-    });
+      // The last email that had left when they first answered.
+      replied_step: row.replied_step || (row.thread || []).filter((t) => t.at <= now).length || row.step || null,
+    }),
+    // Recorded before anything slow happens, so a run that is cut short
+    // leaves the message waiting rather than lost.
+    answer_pending_since: willAnswer ? now : null,
+    needs_person: !willAnswer && !optOut,
+  });
+  if (willAnswer) {
+    // Answered, left alone or passed to a person, by lib/outreach-answers.js,
+    // which also tells the mailbox what it did.
+    const done = await answer({ ...row, conversation, status: "replied" });
+    return { id: row.id, status: "replied", answered: done.action, intent: done.intent, forwarded: !!done.noted };
   }
   const mailbox = MAILBOXES[row.audience];
   const forwarded = await send({

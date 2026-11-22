@@ -37,6 +37,8 @@ import { cancelPendingTouches } from "./sequencer.js";
 
 import { sandboxRecipient } from "../lib/outbound-sandbox.js";
 import { onReply as directReply, onStop as directStop, onEmailEvent as directEmailEvent } from "../lib/direct-outreach.js";
+import { answerPerson } from "../lib/outreach-answers.js";
+import { readSettings as readTeamSettings } from "../lib/instagram-dm-queue.js";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -189,11 +191,16 @@ export async function handleInbound(payload) {
   if (norm.from_email) {
     try {
       const cleaned = extractReplyBody(norm) || bodyText;
+      // With "answer replies automatically" on, the reply agent deals with
+      // it (lib/outreach-answers.js); otherwise it goes to the mailbox.
+      const teamSettings = await readTeamSettings().catch(() => ({}));
       const direct = await directReply({
         fromEmail: norm.from_email,
         subject: norm.subject,
         text: cleaned,
+        messageId: norm.message_id || null,
         optOut: looksLikeOptOut(cleaned || ""),
+        answer: teamSettings.reply_auto === true ? answerPerson : null,
       });
       if (direct) {
         if (direct.status === "unsubscribed") {
