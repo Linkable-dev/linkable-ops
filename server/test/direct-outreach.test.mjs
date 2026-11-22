@@ -301,7 +301,7 @@ test("an Italian creator's first email and follow-up read as written", () => {
   const row = { ...creator, variables: { ...creator.variables, language: "it", greeting: "Ciao Anna,", footer: "Non fa per te? Rispondi 'no grazie' e non ti scrivo più." } };
   const first = compose(row, 0);
   assert.equal(first.subject, "il tuo post su @glossier");
-  assert.match(first.text, /^Ciao Anna,\n\nHo visto il tuo post su @glossier\.\nhttps:\/\/www\.instagram\.com\/p\/abc\/\n\nLavoro a Linkable\./);
+  assert.match(first.text, /^Ciao Anna,\n\nHo visto il tuo post su @glossier\.\nhttps:\/\/www\.instagram\.com\/p\/abc\/\n\nLavoro per Linkable\./);
   assert.match(first.text, /Dieci proposte al mese sono gratis\.\n\nTi mando il link\?\n\nLuca\nlinkable\.link\n\nNon fa per te\?/);
   assert.equal(compose({ ...row, subject: first.subject }, 1).subject, "Re: il tuo post su @glossier");
   // English is untouched.
