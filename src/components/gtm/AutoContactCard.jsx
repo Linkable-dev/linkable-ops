@@ -55,13 +55,14 @@ export function AutoContactCard() {
   const sending = data.sending?.ready ? data.sending : null;
   // "12 in progress, 4 sent today, 1 reply" for one mailbox.
   const sendingLine = (s) =>
-    `From ${s.mailbox}: ${s.active} in progress, ${s.sent_today} sent today, ${s.replied} ${s.replied === 1 ? "reply" : "replies"}.`;
+    `From ${s.mailbox}: ${s.started_today} of ${s.allowed_new} new people today, ${s.active} in progress, ${s.replied} ${s.replied === 1 ? "reply" : "replies"}. ` +
+    (s.allowed_new < 20 ? "Starting slowly: the daily number grows each week up to 20." : "");
 
   async function flipPause(next) {
     const ok = await ask({
       title: next ? "Pause all sending?" : "Resume sending?",
       body: next
-        ? "Nothing more leaves brand@ or influencer@linkable.link, first emails and follow-ups alike, until this is switched off. Nobody loses their place."
+        ? "Nothing more is timed to leave brand@ or influencer@linkable.link, first emails and follow-ups alike, until this is switched off. Emails already timed for the next two hours still go. Nobody loses their place."
         : "Emails that are due go out at the next send time, on working days.",
       confirmLabel: next ? "Pause" : "Resume",
       danger: next,
@@ -208,8 +209,9 @@ export function AutoContactCard() {
           </div>
           <div style={{ fontSize: 13, color: paused ? theme.danger : theme.textMid, marginTop: 4, lineHeight: 1.5 }}>
             {paused
-              ? "Paused. Nothing leaves brand@ or influencer@linkable.link until this is switched off."
-              : "Running. Emails go out four times a working day, and stop for anyone who replies or unsubscribes."}
+              ? `Paused. Nothing new is timed to leave brand@ or influencer@linkable.link until this is switched off.${
+                  sending?.health?.reason ? ` It paused itself ${friendlyDate(sending.health.paused_at)}: ${sending.health.reason}` : ""}`
+              : "Running. Emails leave a few at a time through the working day, and stop for anyone who replies or unsubscribes. It pauses itself if emails bounce or are marked as spam."}
           </div>
         </div>
       </div>

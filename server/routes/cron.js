@@ -209,7 +209,7 @@ export function cronRoutes() {
       const result = await sendDirectOutreach({
         dryRun: req.query.dry === "1" || req.query.dry === "true",
         paused: settings.direct_send_paused === true,
-        limit: Math.min(parseInt(req.query.limit) || 25, 40),
+        limit: Math.min(parseInt(req.query.limit) || 40, 40),
       });
       res.json(result);
     } catch (err) {
