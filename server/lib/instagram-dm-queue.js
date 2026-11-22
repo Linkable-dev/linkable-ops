@@ -61,6 +61,9 @@ export const SETTING_DEFAULTS = {
   creator_auto_send_daily_cap: 20,
   // The Lemlist campaigns that take the leads ("" = the ones the worker was
   // deployed with). Brands by tier, creators with and without a post we saw.
+  // Stops our own sender (lib/direct-outreach.js) between one email and the
+  // next: nothing more goes from brand@ or influencer@ until it is false again.
+  direct_send_paused: false,
   email_campaign_tier_a: "",
   email_campaign_tier_b: "",
   creator_campaign: "",
