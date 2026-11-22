@@ -23,8 +23,7 @@ export const MAILBOXES = {
 };
 
 // The most one mailbox sends in a day, first emails and follow-ups together.
-// The worker's daily numbers decide how many people start; this is the ceiling
-// that holds if something upstream goes wrong.
+// How many NEW people start is RAMP, below; this is the ceiling over both.
 export const MAILBOX_DAILY_CEILING = 90;
 const MAX_ATTEMPTS = 3;
 
@@ -259,14 +258,59 @@ const startOfDay = (now) => {
   return d;
 };
 
-async function sentToday(audience, now) {
-  const { count, error } = await supabase
-    .from(TABLE)
-    .select("id", { count: "exact", head: true })
-    .eq("audience", audience)
-    .gte("last_sent_at", startOfDay(now).toISOString());
-  if (error) throw new Error(error.message);
-  return count || 0;
+// ------------------------------------------------- not getting blocked --
+//
+// Three habits keep a mailbox out of the spam folder, and all three are here
+// rather than left to whoever switches the sending on.
+//
+// 1. Start slowly. New people a day, per mailbox, by week since its first
+//    email: mail providers judge a sender on its history, and an address with
+//    none that writes to a hundred strangers looks like what it would be.
+export const RAMP = [5, 10, 15, 20];
+
+/** How many new people one mailbox may start today. */
+export function newPeopleAllowed(firstEverSentAt, now = new Date()) {
+  if (!firstEverSentAt) return RAMP[0];
+  const weeks = Math.floor((startOfDay(now) - startOfDay(firstEverSentAt)) / (7 * 86400000));
+  return RAMP[Math.max(0, Math.min(weeks, RAMP.length - 1))];
+}
+
+// 2. Never in a burst. The job runs at these hours (UTC, vercel.json); each
+//    run takes its share of what is left for the day and times every email
+//    to leave on its own somewhere in the next WINDOW_MINUTES.
+export const RUN_HOURS = [9, 11, 13, 15];
+export const WINDOW_MINUTES = 105;
+
+export function runsLeft(now = new Date()) {
+  const hour = new Date(now).getUTCHours();
+  return Math.max(1, RUN_HOURS.filter((h) => h >= hour).length);
+}
+
+export const share = (left, runs) => (left <= 0 ? 0 : Math.ceil(left / Math.max(1, runs)));
+
+/** `n` moments spread over the window after `start`: evenly, each nudged by
+ *  chance so no two days look alike. The first is at least two minutes out. */
+export function spread(n, start = new Date(), random = Math.random) {
+  const slot = (WINDOW_MINUTES * 60000) / Math.max(1, n);
+  const from = new Date(start).getTime() + 2 * 60000;
+  return Array.from({ length: n }, (_, i) => new Date(from + i * slot + random() * slot * 0.8));
+}
+
+// 3. Stop at the first sign of trouble. Over the last seven days, per mailbox:
+//    more than 4 in 100 bounced, or two people pressed "spam". Either is how
+//    a mail service decides to close an account, and this one also carries
+//    the app's own log-in codes, so the sending pauses itself well before.
+export const HEALTH = { days: 7, minPeople: 25, maxBounceRate: 0.04, maxComplaints: 2 };
+
+/** Why sending must pause, in a sentence; null when it need not. */
+export function trouble({ mailbox, people = 0, bounced = 0, complaints = 0 }) {
+  if (complaints >= HEALTH.maxComplaints) {
+    return `${complaints} people marked emails from ${mailbox} as spam in the last ${HEALTH.days} days.`;
+  }
+  if (people >= HEALTH.minPeople && bounced / people > HEALTH.maxBounceRate) {
+    return `${bounced} of the last ${people} emails from ${mailbox} bounced, more than 4 in 100.`;
+  }
+  return null;
 }
 
 async function suppressed(email) {
@@ -281,18 +325,93 @@ async function update(id, fields) {
   if (error) throw new Error(error.message);
 }
 
+/** Where each mailbox stands: today's numbers, the week's, and its first email ever. */
+export async function standing(now = new Date()) {
+  const since = new Date(startOfDay(now).getTime() - HEALTH.days * 86400000).toISOString();
+  const today = startOfDay(now).toISOString();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("audience,status,stop_reason,first_sent_at,last_sent_at,updated_at")
+    .or(`last_sent_at.gte.${since},updated_at.gte.${since}`)
+    .limit(20000);
+  if (error) throw new Error(error.message);
+  const out = {};
+  for (const audience of Object.keys(MAILBOXES)) {
+    const { data: first } = await supabase.from(TABLE).select("first_sent_at").eq("audience", audience)
+      .not("first_sent_at", "is", null).order("first_sent_at", { ascending: true }).limit(1);
+    out[audience] = {
+      mailbox: MAILBOXES[audience], first_ever: first?.[0]?.first_sent_at || null,
+      sent_today: 0, started_today: 0, people: 0, bounced: 0, complaints: 0,
+    };
+  }
+  for (const row of data || []) {
+    const a = out[row.audience];
+    if (!a) continue;
+    if (row.last_sent_at >= today) a.sent_today += 1;
+    if (row.first_sent_at >= today) a.started_today += 1;
+    if (row.last_sent_at >= since) a.people += 1;
+    if (row.status === "bounced" && row.updated_at >= since) a.bounced += 1;
+    if (row.stop_reason === "complaint" && row.updated_at >= since) a.complaints += 1;
+  }
+  for (const a of Object.values(out)) {
+    a.allowed_new = newPeopleAllowed(a.first_ever, now);
+    a.trouble = trouble(a);
+  }
+  return out;
+}
+
+async function pauseItself(reason) {
+  const at = new Date().toISOString();
+  await supabase.from("prospector_settings").upsert(
+    [{ key: "direct_send_paused", value: true, updated_at: at },
+     { key: "direct_send_health", value: { paused_at: at, reason }, updated_at: at }],
+    { onConflict: "key" },
+  );
+}
+
 /**
- * Send what is due. Follow-ups first, so a day that hits the ceiling has
- * finished conversations it started rather than opened new ones.
- *
- * `send` and `pause` are injectable for tests; `paused` comes from the team
- * setting (direct_send_paused).
+ * Who goes in this run, from everyone who is due. Per mailbox: follow-ups
+ * first, so a day that runs out of room has finished conversations rather
+ * than opened new ones; then new people, up to this run's share of today's
+ * allowance. Pure, so the arithmetic can be read in a test.
  */
-export async function sendDue({ limit = 25, now = new Date(), dryRun = false, paused = false, send = deliver, gapMs = 700 } = {}) {
+export function choose(rows, state, now = new Date(), limit = 40) {
+  const runs = runsLeft(now);
+  const chosen = [];
+  let held = 0;
+  for (const audience of Object.keys(MAILBOXES)) {
+    const s = state[audience] || {};
+    const mine = rows.filter((r) => r.audience === audience);
+    const room = share(MAILBOX_DAILY_CEILING - (s.sent_today || 0), runs);
+    const fresh = share((s.allowed_new ?? RAMP[0]) - (s.started_today || 0), runs);
+    const followUps = mine.filter((r) => r.step > 0).slice(0, room);
+    const starts = mine.filter((r) => r.step === 0).slice(0, Math.max(0, Math.min(fresh, room - followUps.length)));
+    chosen.push(...followUps, ...starts);
+    held += mine.length - followUps.length - starts.length;
+  }
+  return { chosen: chosen.slice(0, limit), held: held + Math.max(0, chosen.length - limit) };
+}
+
+/**
+ * Send what is due, a run's share of it, each email timed to leave by itself
+ * over the next hour and three quarters.
+ *
+ * `send` is injectable for tests; `paused` comes from the team setting
+ * (direct_send_paused), which this also switches on when a mailbox is in
+ * trouble.
+ */
+export async function sendDue({ limit = 40, now = new Date(), dryRun = false, paused = false, send = deliver, gapMs = 600, random = Math.random, anyDay = false } = {}) {
   const out = { due: 0, sent: 0, stopped: 0, failed: 0, held: 0, dry_run: dryRun, log: [] };
   if (paused) return { ...out, paused: true };
   const day = new Date(now).getUTCDay();
-  if (day === 0 || day === 6) return { ...out, weekend: true };
+  if (!anyDay && (day === 0 || day === 6)) return { ...out, weekend: true };
+
+  const state = await standing(now);
+  const reason = Object.values(state).map((s) => s.trouble).find(Boolean);
+  if (reason) {
+    if (!dryRun) await pauseItself(reason);
+    return { ...out, paused: true, reason };
+  }
 
   const { data: rows, error } = await supabase
     .from(TABLE)
@@ -301,20 +420,22 @@ export async function sendDue({ limit = 25, now = new Date(), dryRun = false, pa
     .lte("next_at", new Date(now).toISOString())
     .order("step", { ascending: false })
     .order("next_at", { ascending: true })
-    .limit(limit);
+    .limit(400);
   if (error) throw new Error(error.message);
   out.due = rows.length;
 
-  const room = {};
+  const picked = choose(rows, state, now, limit);
+  out.held = picked.held;
+
+  // Times per mailbox, so each one's emails are evenly apart whatever the
+  // other is doing.
+  const when = new Map();
   for (const audience of Object.keys(MAILBOXES)) {
-    room[audience] = MAILBOX_DAILY_CEILING - (await sentToday(audience, now));
+    const mine = picked.chosen.filter((r) => r.audience === audience);
+    spread(mine.length, now, random).forEach((at, i) => when.set(mine[i].id, at));
   }
 
-  for (const row of rows) {
-    if (room[row.audience] <= 0) {
-      out.held += 1;
-      continue;
-    }
+  for (const row of picked.chosen) {
     const why = await suppressed(row.to_email);
     if (why) {
       if (!dryRun) await update(row.id, { status: STOP_FOR[why] || "unsubscribed", stop_reason: why });
@@ -329,12 +450,13 @@ export async function sendDue({ limit = 25, now = new Date(), dryRun = false, pa
       continue;
     }
     const { messageId, payload } = buildMessage(row, row.step, composed);
+    const at = when.get(row.id);
     if (dryRun) {
-      out.log.push(`${row.to_email}: step ${row.step + 1} "${composed.subject}" from ${payload.from}`);
+      out.log.push(`${row.to_email}: step ${row.step + 1} "${composed.subject}" from ${payload.from} at ${at.toISOString().slice(11, 16)}`);
       out.sent += 1;
       continue;
     }
-    const result = await send(payload);
+    const result = await send({ ...payload, scheduled_at: at.toISOString() });
     if (!result.ok) {
       const attempts = (row.attempts || 0) + 1;
       await update(row.id, attempts >= MAX_ATTEMPTS
@@ -344,21 +466,32 @@ export async function sendDue({ limit = 25, now = new Date(), dryRun = false, pa
       out.log.push(`${row.to_email}: ${result.error}`);
       continue;
     }
-    const sentAt = new Date();
-    const due = nextDue(row.sequence, row.step, sentAt);
+    const due = nextDue(row.sequence, row.step, at);
     await update(row.id, {
       step: row.step + 1,
       attempts: 0,
       subject: row.step === 0 ? composed.subject : row.subject,
-      thread: [...(row.thread || []), { step: row.step + 1, at: sentAt.toISOString(), resend_id: result.id, message_id: messageId }],
-      last_sent_at: sentAt.toISOString(),
+      thread: [...(row.thread || []), { step: row.step + 1, at: at.toISOString(), resend_id: result.id, message_id: messageId }],
+      last_sent_at: at.toISOString(),
+      ...(row.step === 0 ? { first_sent_at: at.toISOString() } : {}),
       ...(due ? { next_at: due.toISOString() } : { status: "done" }),
     });
-    room[row.audience] -= 1;
     out.sent += 1;
     if (gapMs) await new Promise((r) => setTimeout(r, gapMs));
   }
   return out;
+}
+
+/** An email that is timed but has not left yet is called back: nobody who
+ *  has just answered or unsubscribed should get the next one anyway. */
+async function callBack(row) {
+  const pending = (row.thread || []).filter((t) => t.resend_id && t.at > new Date().toISOString());
+  for (const t of pending) {
+    await fetch(`${RESEND_API_URL}/${t.resend_id}/cancel`, {
+      method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    }).catch((e) => console.error("calling back a timed email failed:", e.message));
+  }
+  return pending.length;
 }
 
 // ------------------------------------------------------------ what comes back --
@@ -372,11 +505,12 @@ export async function onReply({ fromEmail, subject, text, optOut = false, send =
   if (!fromEmail) return null;
   const { data } = await supabase
     .from(TABLE)
-    .select("id,audience,status,subject,to_email")
+    .select("id,audience,status,subject,to_email,thread")
     .ilike("to_email", fromEmail)
     .limit(1);
   const row = data?.[0];
   if (!row) return null;
+  await callBack(row);
   if (!["unsubscribed", "bounced"].includes(row.status)) {
     await update(row.id, {
       status: optOut ? "unsubscribed" : "replied",
@@ -399,9 +533,10 @@ export async function onReply({ fromEmail, subject, text, optOut = false, send =
 /** A bounce or a spam complaint for one of ours: no more to that address. */
 export async function onStop({ email, reason }) {
   if (!email) return null;
-  const { data } = await supabase.from(TABLE).select("id").ilike("to_email", email).limit(1);
+  const { data } = await supabase.from(TABLE).select("id,thread").ilike("to_email", email).limit(1);
   const row = data?.[0];
   if (!row) return null;
+  await callBack(row);
   await update(row.id, { status: STOP_FOR[reason] || "unsubscribed", stop_reason: reason });
   return { id: row.id };
 }
@@ -409,9 +544,10 @@ export async function onStop({ email, reason }) {
 /** The link in the unsubscribe header. Always answers the same, found or not. */
 export async function unsubscribe(token) {
   if (!/^[a-f0-9]{32}$/.test(String(token || ""))) return { found: false };
-  const { data } = await supabase.from(TABLE).select("id,to_email").eq("unsub_token", token).limit(1);
+  const { data } = await supabase.from(TABLE).select("id,to_email,thread").eq("unsub_token", token).limit(1);
   const row = data?.[0];
   if (!row) return { found: false };
+  await callBack(row);
   await update(row.id, { status: "unsubscribed", stop_reason: "opt_out" });
   const { data: team } = await supabase.from("teams").select("id").limit(1);
   if (team?.[0]?.id) {
@@ -423,14 +559,20 @@ export async function unsubscribe(token) {
   return { found: true };
 }
 
-/** Numbers for the ops card: per audience, how many are where. */
+/** Numbers for the ops card: per mailbox, how many are where, how many new
+ *  people it may start today, and why it paused itself if it did. */
 export async function summary(now = new Date()) {
-  const { data, error } = await supabase.from(TABLE).select("audience,status,last_sent_at").limit(20000);
+  const { data, error } = await supabase.from(TABLE).select("audience,status").limit(20000);
   if (error) return { ready: false };
-  const today = startOfDay(now).toISOString();
-  const out = { ready: true };
+  const state = await standing(now);
+  const { data: health } = await supabase.from("prospector_settings").select("value").eq("key", "direct_send_health").limit(1);
+  const out = { ready: true, health: health?.[0]?.value || null };
   for (const audience of Object.keys(MAILBOXES)) {
-    out[audience] = { mailbox: MAILBOXES[audience], total: 0, active: 0, replied: 0, stopped: 0, sent_today: 0 };
+    const s = state[audience];
+    out[audience] = {
+      mailbox: s.mailbox, total: 0, active: 0, replied: 0, stopped: 0,
+      sent_today: s.sent_today, started_today: s.started_today, allowed_new: s.allowed_new, trouble: s.trouble,
+    };
   }
   for (const row of data || []) {
     const a = out[row.audience];
@@ -439,7 +581,6 @@ export async function summary(now = new Date()) {
     if (row.status === "active") a.active += 1;
     if (row.status === "replied") a.replied += 1;
     if (["unsubscribed", "bounced", "failed"].includes(row.status)) a.stopped += 1;
-    if (row.last_sent_at && row.last_sent_at >= today) a.sent_today += 1;
   }
   return out;
 }

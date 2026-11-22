@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SEQUENCES, MAILBOXES, fill, compose, nextDue, onWorkingDay, buildMessage, sendDue } from "../lib/direct-outreach.js";
+import {
+  SEQUENCES, MAILBOXES, MAILBOX_DAILY_CEILING, RAMP, WINDOW_MINUTES, fill, compose, nextDue, onWorkingDay, buildMessage, sendDue,
+  newPeopleAllowed, runsLeft, share, spread, trouble, choose,
+} from "../lib/direct-outreach.js";
 import { settingProblem } from "../lib/instagram-dm-queue.js";
 
 // Our own sender: brands from brand@, creators from influencer@, with the
@@ -81,4 +84,71 @@ test("paused or a weekend: nothing is read and nothing goes", async () => {
 test("the pause is a team setting", () => {
   assert.equal(settingProblem("direct_send_paused", true), null);
   assert.match(settingProblem("direct_send_paused", "yes"), /boolean/);
+});
+
+// ---- not getting blocked: start slowly, never in a burst, stop at trouble ----
+
+test("a mailbox starts with five new people a day and grows by the week", () => {
+  const monday = new Date("2026-11-23T09:10:00Z");
+  assert.deepEqual(RAMP, [5, 10, 15, 20]);
+  assert.equal(newPeopleAllowed(null, monday), 5);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-11-27T15:00:00Z")), 5);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-11-30T09:00:00Z")), 10);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-12-07T09:00:00Z")), 15);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2027-03-01T09:00:00Z")), 20);
+});
+
+test("each run takes its share of what is left today", () => {
+  assert.equal(runsLeft(new Date("2026-11-23T09:10:00Z")), 4);
+  assert.equal(runsLeft(new Date("2026-11-23T10:05:00Z")), 3); // the 09:10 run, started late
+  assert.equal(runsLeft(new Date("2026-11-23T15:40:00Z")), 1);
+  assert.equal(runsLeft(new Date("2026-11-23T19:00:00Z")), 1);
+  assert.equal(share(5, 4), 2);
+  assert.equal(share(3, 3), 1);
+  assert.equal(share(0, 4), 0);
+  assert.equal(share(-2, 4), 0);
+});
+
+test("emails in one run leave apart from each other, inside the window", () => {
+  const start = new Date("2026-11-23T09:10:00Z");
+  const times = spread(6, start, () => 0.5);
+  assert.equal(times.length, 6);
+  for (let i = 1; i < times.length; i++) {
+    assert.ok(times[i] - times[i - 1] >= 3 * 60000, "at least three minutes apart");
+  }
+  assert.ok(times[0] - start >= 2 * 60000);
+  assert.ok(times[5] - start <= (WINDOW_MINUTES + 2) * 60000);
+  // Chance moves each one, never past the next one's slot.
+  const jittered = spread(6, start, Math.random);
+  for (let i = 1; i < jittered.length; i++) assert.ok(jittered[i] > jittered[i - 1]);
+  assert.deepEqual(spread(0, start), []);
+});
+
+test("who goes in a run: follow-ups first, then this run's share of new people", () => {
+  const row = (audience, step, n) => ({ id: `${audience}-${step}-${n}`, audience, step });
+  const rows = [
+    row("brand", 2, 1), row("brand", 1, 1),
+    ...Array.from({ length: 20 }, (_, i) => row("brand", 0, i)),
+    ...Array.from({ length: 20 }, (_, i) => row("creator", 0, i)),
+  ];
+  const state = { brand: { sent_today: 0, started_today: 0, allowed_new: 5 }, creator: { sent_today: 0, started_today: 4, allowed_new: 5 } };
+  const first = choose(rows, state, new Date("2026-11-23T09:10:00Z"));
+  // Brand: both follow-ups, and 2 of the day's 5 new (5 over 4 runs). Creator: 1 left of 5.
+  assert.deepEqual(first.chosen.map((r) => r.id), ["brand-2-1", "brand-1-1", "brand-0-0", "brand-0-1", "creator-0-0"]);
+  assert.equal(first.held, 37);
+  // The day's allowance used up: nobody new, whatever is waiting.
+  const done = choose(rows, { brand: { started_today: 5, allowed_new: 5 }, creator: { started_today: 9, allowed_new: 5 } }, new Date("2026-11-23T15:10:00Z"));
+  assert.deepEqual(done.chosen.map((r) => r.id), ["brand-2-1", "brand-1-1"]);
+  // The ceiling holds even for follow-ups.
+  const full = choose(rows, { brand: { sent_today: MAILBOX_DAILY_CEILING }, creator: { sent_today: MAILBOX_DAILY_CEILING } }, new Date("2026-11-23T09:10:00Z"));
+  assert.equal(full.chosen.length, 0);
+});
+
+test("sending pauses itself on bounces or spam reports, and not on a small sample", () => {
+  const mailbox = "brand@linkable.link";
+  assert.equal(trouble({ mailbox, people: 100, bounced: 4, complaints: 0 }), null);
+  assert.match(trouble({ mailbox, people: 100, bounced: 5 }), /5 of the last 100 emails from brand@linkable.link bounced/);
+  assert.equal(trouble({ mailbox, people: 10, bounced: 3 }), null);
+  assert.equal(trouble({ mailbox, people: 10, complaints: 1 }), null);
+  assert.match(trouble({ mailbox, people: 10, complaints: 2 }), /2 people marked emails .* as spam/);
 });
