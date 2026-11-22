@@ -221,7 +221,9 @@ test("an answer is sent only when it stays inside the facts", () => {
   assert.match(answers.answerProblem("Hi,\n\nWe take 10% of what you make from brands.", facts), /percentage/);
   assert.match(answers.answerProblem("Hi,\n\nHave a look at https://bit.ly/abc for the details.", facts), /not one of ours/);
   assert.match(answers.answerProblem("Hi,\n\nI'm a real person, promise. Here is the link.", facts), /a person wrote it/);
-  assert.match(answers.answerProblem("Hi,\n\nGreat to hear from you! Here is the link.", facts), /exclamation/);
+  assert.equal(answers.answerProblem("Hi,\n\nGreat to hear from you! Here is the link.", facts), "");
+  assert.match(answers.answerProblem("Hi!\n\nGreat to hear from you! Here is the link.", facts), /exclamation/);
+  assert.match(answers.answerProblem("Hi,\n\nYes it is free. Feel free to ask me anything else.", facts), /reads as a machine/);
   assert.match(answers.answerProblem("ok", facts), /empty/);
   // A brand's own list: its lines and links are allowed, and nothing else is.
   const list = ["@jo https://www.instagram.com/p/x1/", "@sam https://www.instagram.com/p/x2/"];
@@ -255,7 +257,9 @@ test("the model's decision is taken, checked, and anything doubtful goes to a pe
 
 test("an answer leaves minutes later, in the daytime, under their message", () => {
   const day = answers.answerTime(new Date("2026-11-23T10:00:00Z"), () => 0.5);
-  assert.equal(day.toISOString(), "2026-11-23T10:12:00.000Z");
+  assert.equal(day.toISOString(), "2026-11-23T10:11:00.000Z");
+  // Sometimes most of an hour, like someone who was away from their desk.
+  assert.equal(answers.answerTime(new Date("2026-11-23T10:00:00Z"), () => 0.9).toISOString(), "2026-11-23T10:54:00.000Z");
   assert.equal(answers.answerTime(new Date("2026-11-23T23:30:00Z"), () => 0.5).toISOString(), "2026-11-24T08:20:00.000Z");
   assert.equal(answers.answerTime(new Date("2026-11-23T03:00:00Z"), () => 0).toISOString(), "2026-11-23T08:00:00.000Z");
   const msg = answers.answerMessage(replied("Yes"), "Hi Anna,\n\nHere it is.", day);
@@ -264,7 +268,7 @@ test("an answer leaves minutes later, in the daytime, under their message", () =
   assert.equal(msg.payload.headers["In-Reply-To"], "<theirs@mail>");
   assert.equal(msg.payload.headers.References, "<a@linkable.link> <theirs@mail>");
   assert.equal(msg.payload.text, "Hi Anna,\n\nHere it is.\n\nLuca");
-  assert.equal(msg.payload.scheduled_at, "2026-11-23T10:12:00.000Z");
+  assert.equal(msg.payload.scheduled_at, "2026-11-23T10:11:00.000Z");
 });
 
 test("answering replies is a team setting, off unless switched on", () => {
