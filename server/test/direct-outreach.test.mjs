@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SEQUENCES, MAILBOXES, MAILBOX_DAILY_CEILING, RAMP, WINDOW_MINUTES, fill, compose, nextDue, onWorkingDay, buildMessage, sendDue, asHtml,
+  SEQUENCES, MAILBOXES, MAILBOX_DAILY_CEILING, RAMP, WINDOW_MINUTES, fill, compose, nextDue, onWorkingDay, buildMessage, sendDue, asHtml, roundOf,
   newPeopleAllowed, runsLeft, share, spread, trouble, choose,
 } from "../lib/direct-outreach.js";
 import { settingProblem } from "../lib/instagram-dm-queue.js";
@@ -342,4 +342,14 @@ test("links are sent as words, never as a bare address", () => {
     asHtml("Saw @a post about you (https://www.instagram.com/p/De6/). Tom & co <3\nLuca"),
     '<p style="margin:0 0 1em">Saw @a post about you (<a href="https://www.instagram.com/p/De6/">instagram.com/p/De6</a>). Tom &amp; co &lt;3<br>Luca</p>',
   );
+});
+
+test("two timers, one round: a late start belongs to the round it was meant for", () => {
+  assert.equal(roundOf("2026-11-23T08:59:00Z"), null);
+  assert.equal(roundOf("2026-11-23T09:09:59Z"), null);
+  assert.equal(roundOf("2026-11-23T09:10:00Z"), "2026-11-23T09");
+  assert.equal(roundOf("2026-11-23T10:09:00Z"), "2026-11-23T09", "Vercel, 59 minutes late");
+  assert.equal(roundOf("2026-11-23T11:10:02Z"), "2026-11-23T11");
+  assert.equal(roundOf("2026-11-23T16:09:00Z"), "2026-11-23T15");
+  assert.notEqual(roundOf("2026-11-24T09:10:00Z"), roundOf("2026-11-23T09:10:00Z"));
 });

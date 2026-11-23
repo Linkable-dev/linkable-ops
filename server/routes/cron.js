@@ -28,7 +28,7 @@ import { refreshInstagramToken } from "../lib/instagram-graph.js";
 import { classifyMissing } from "../lib/lead-classifier.js";
 import { refreshBalance } from "../lib/gtm-balance.js";
 import { readSettings as readTeamSettings } from "../lib/instagram-dm-queue.js";
-import { sendDue as sendDirectOutreach, trackOutcomes } from "../lib/direct-outreach.js";
+import { sendDue as sendDirectOutreach, trackOutcomes, claimRound } from "../lib/direct-outreach.js";
 import { answerPending } from "../lib/outreach-answers.js";
 
 // Decides whether a campaign's per-campaign schedule says "fire now". Returns
@@ -190,11 +190,15 @@ export function cronRoutes() {
     if (!checkCronAuth(req)) return res.status(401).json({ error: "unauthorized" });
     try {
       const settings = await readTeamSettings();
-      const result = await sendDirectOutreach({
-        dryRun: req.query.dry === "1" || req.query.dry === "true",
-        paused: settings.direct_send_paused === true,
-        limit: Math.min(parseInt(req.query.limit) || 40, 40),
-      });
+      const dryRun = req.query.dry === "1" || req.query.dry === "true";
+      const paused = settings.direct_send_paused === true;
+      // Each round is started by the database's timer on the minute and, as
+      // a backup, by Vercel's, which can be an hour late. Whichever comes
+      // second sends nothing. ?force=1 runs it regardless.
+      const mine = dryRun || paused || req.query.force === "1" || await claimRound();
+      const result = mine
+        ? await sendDirectOutreach({ dryRun, paused, limit: Math.min(parseInt(req.query.limit) || 40, 40) })
+        : { due: 0, sent: 0, already_ran: true };
       // Who joined Linkable since we wrote to them. A read of the product
       // database; it never holds up or fails the send.
       result.outcomes = await trackOutcomes().catch((e) => ({ error: e.message }));
