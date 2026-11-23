@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SEQUENCES, MAILBOXES, MAILBOX_DAILY_CEILING, RAMP, WINDOW_MINUTES, fill, compose, nextDue, onWorkingDay, buildMessage, sendDue,
+  SEQUENCES, MAILBOXES, MAILBOX_DAILY_CEILING, RAMP, WINDOW_MINUTES, fill, compose, nextDue, onWorkingDay, buildMessage, sendDue, asHtml,
   newPeopleAllowed, runsLeft, share, spread, trouble, choose,
 } from "../lib/direct-outreach.js";
 import { settingProblem } from "../lib/instagram-dm-queue.js";
@@ -55,7 +55,8 @@ test("a follow-up answers the first email", () => {
   assert.equal(msg.payload.from, "Luca from Linkable <influencer@linkable.link>");
   assert.equal(msg.payload.reply_to, "replies@reply.linkable.link");
   assert.match(msg.payload.headers["List-Unsubscribe"], /\/api\/out\/unsubscribe\?t=a{32}>/);
-  assert.equal(msg.payload.html, undefined);
+  // Unstyled: paragraphs and links only, so it still reads as typed.
+  assert.doesNotMatch(msg.payload.html, /<(img|table|div|span|font)|color|font-/);
 });
 
 test("brands: four steps, tier A keeps its tracking paragraph and tier B does not", () => {
@@ -314,4 +315,31 @@ test("the agent knows the website's own answers, and where an address came from"
   assert.match(text, /from their public Instagram profile/);
   assert.match(text, /Starter: \$99 per month/); // the blog's facts are still in it
   assert.equal(answers.answerProblem("Hi Anna,\n\nNo, we don't take a cut. You keep the whole commission, and the brand pays our 2.5% on top.", text), "");
+});
+
+test("an email goes to the person, whatever the older senders' test switch says", () => {
+  const before = process.env.OUTBOUND_TEST_RECIPIENT;
+  process.env.OUTBOUND_TEST_RECIPIENT = "tester@example.com";
+  try {
+    const out = compose(creator, 0);
+    const msg = buildMessage(creator, 0, out);
+    assert.deepEqual(msg.payload.to, ["anna@example.com"]);
+    assert.equal(msg.payload.subject, "your @glossier post");
+  } finally {
+    if (before === undefined) delete process.env.OUTBOUND_TEST_RECIPIENT;
+    else process.env.OUTBOUND_TEST_RECIPIENT = before;
+  }
+});
+
+test("links are sent as words, never as a bare address", () => {
+  const msg = buildMessage(creator, 0, compose(creator, 0));
+  assert.match(msg.payload.html, /<a href="https:\/\/www\.instagram\.com\/p\/abc\/">Saw your post about @glossier<\/a>\./);
+  assert.doesNotMatch(msg.payload.html.replace(/href="[^"]*"/g, ""), /https?:\/\//);
+  // The plain text is still there for mail programs that want it.
+  assert.match(msg.payload.text, /https:\/\/www\.instagram\.com\/p\/abc\//);
+
+  assert.equal(
+    asHtml("Saw @a post about you (https://www.instagram.com/p/De6/). Tom & co <3\nLuca"),
+    '<p style="margin:0 0 1em">Saw @a post about you (<a href="https://www.instagram.com/p/De6/">instagram.com/p/De6</a>). Tom &amp; co &lt;3<br>Luca</p>',
+  );
 });
