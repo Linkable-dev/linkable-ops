@@ -446,6 +446,34 @@ export function runsLeft(now = new Date()) {
   return Math.max(1, RUN_HOURS.filter((h) => h >= hour).length);
 }
 
+/**
+ * Which of the day's rounds a moment belongs to: "2026-11-23T09" from 09:10
+ * until the next round starts. Two timers start each round (the database's,
+ * on the minute, and Vercel's, which may be an hour late); the second to
+ * arrive finds the round taken and sends nothing. Null before the first
+ * round of the day.
+ */
+export function roundOf(now = new Date()) {
+  const d = new Date(now);
+  const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const started = RUN_HOURS.filter((h) => minutes >= h * 60 + 10);
+  if (!started.length) return null;
+  return `${d.toISOString().slice(0, 10)}T${String(started[started.length - 1]).padStart(2, "0")}`;
+}
+
+/** Take this round, or learn that it has been taken. True when it is ours. */
+export async function claimRound(now = new Date()) {
+  const round = roundOf(now);
+  if (!round) return false;
+  const { data } = await supabase.from("prospector_settings").select("value").eq("key", "direct_send_last_round").maybeSingle();
+  if (data?.value?.round === round) return false;
+  const at = new Date(now).toISOString();
+  const { error } = await supabase.from("prospector_settings")
+    .upsert([{ key: "direct_send_last_round", value: { round, at }, updated_at: at }], { onConflict: "key" });
+  if (error) throw new Error(error.message);
+  return true;
+}
+
 export const share = (left, runs) => (left <= 0 ? 0 : Math.ceil(left / Math.max(1, runs)));
 
 /** `n` moments spread over the window after `start`: evenly, each nudged by
