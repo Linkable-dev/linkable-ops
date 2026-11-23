@@ -43,6 +43,7 @@ export function stage(row) {
 const emptyBox = (mailbox) => ({
   mailbox, total: 0, waiting: 0, in_progress: 0, finished: 0, replied: 0, needs_person: 0, interested: 0,
   answered_by_itself: 0, unsubscribed: 0, marked_spam: 0, bounced: 0, failed: 0, signed_up: 0, activated: 0,
+  opened: 0, clicked: 0,
   emails_sent: 0, emails_timed: 0, emails_delivered: 0, emails_bounced: 0, answers_sent: 0, people_emailed: 0,
 });
 
@@ -66,6 +67,8 @@ export function tally(people, emails, now = new Date()) {
     b[stage(p)] += 1;
     if (p.status === "replied") b.replied += p.needs_person ? 1 : 0; // needs_person is also a reply
     if (p.first_sent_at && p.first_sent_at <= stamp) b.people_emailed += 1;
+    if (p.opened_at) b.opened += 1;
+    if (p.clicked_at) b.clicked += 1;
     if (p.intent === "interested") b.interested += 1;
     if ((p.auto_answers || 0) > 0) b.answered_by_itself += 1;
     if (p.signed_up_at) b.signed_up += 1;
@@ -91,7 +94,7 @@ export function tally(people, emails, now = new Date()) {
 }
 
 const PEOPLE_COLUMNS =
-  "id,audience,sequence,to_email,handle,auto,status,stop_reason,step,next_at,first_sent_at,last_sent_at,reply_at,replied_step,intent,auto_answers,needs_person,needs_person_reason,signed_up_at,activated_at,answer_cost_usd,created_at,updated_at";
+  "id,audience,sequence,to_email,handle,auto,status,stop_reason,step,next_at,first_sent_at,last_sent_at,reply_at,replied_step,intent,auto_answers,needs_person,needs_person_reason,opened_at,clicked_at,signed_up_at,activated_at,answer_cost_usd,created_at,updated_at";
 
 async function all(table, columns, tweak = (q) => q) {
   const out = [];
@@ -153,6 +156,7 @@ const STAGE_FILTERS = {
   finished: (q) => q.eq("status", "done"),
   replied: (q) => q.eq("status", "replied"),
   needs_person: (q) => q.eq("status", "replied").eq("needs_person", true),
+  opened: (q) => q.not("opened_at", "is", null),
   interested: (q) => q.eq("intent", "interested"),
   unsubscribed: (q) => q.eq("status", "unsubscribed"),
   bounced: (q) => q.eq("status", "bounced"),
@@ -182,7 +186,7 @@ export async function person(id, now = new Date()) {
   if (error) throw new Error(error.message);
   const row = data?.[0];
   if (!row) return null;
-  const { data: emails } = await supabase.from(EMAILS).select("kind,step,subject,scheduled_for,delivered_at,bounced_at,bounce_reason,complained_at,cancelled_at")
+  const { data: emails } = await supabase.from(EMAILS).select("kind,step,subject,scheduled_for,delivered_at,opened_at,opens,clicked_at,clicks,bounced_at,bounce_reason,complained_at,cancelled_at")
     .eq("outbox_id", id).order("scheduled_for", { ascending: true });
   const { variables, conversation, thread, unsub_token, ...rest } = row;
   void conversation; void thread; void unsub_token;
