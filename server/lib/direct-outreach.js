@@ -12,7 +12,6 @@
 
 import crypto from "node:crypto";
 import { supabase } from "./supabase.js";
-import { sandboxRecipient } from "./outbound-sandbox.js";
 
 const TABLE = "prospector_outbox";
 // One row per email, with what happened to it. Kept for analysis.
@@ -310,13 +309,62 @@ function replyTo() {
   return process.env.LINKABLE_REPLY_ADDRESS || "replies@reply.linkable.link";
 }
 
+const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const URL_ONLY = /^https?:\/\/\S+$/;
+const URL_IN_TEXT = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]]/g;
+
+/** How a link reads when it has to be shown: instagram.com/p/abc, no more. */
+function linkLabel(url) {
+  try {
+    const u = new URL(url);
+    return (u.hostname.replace(/^www\./, "") + u.pathname).replace(/\/+$/, "");
+  } catch {
+    return url;
+  }
+}
+
+function lineHtml(line) {
+  let out = "";
+  let last = 0;
+  for (const m of line.matchAll(URL_IN_TEXT)) {
+    out += escapeHtml(line.slice(last, m.index));
+    out += `<a href="${escapeHtml(m[0])}">${escapeHtml(linkLabel(m[0]))}</a>`;
+    last = m.index + m[0].length;
+  }
+  return out + escapeHtml(line.slice(last));
+}
+
+/**
+ * The plain text as the simplest HTML there is: paragraphs, line breaks and
+ * links, nothing styled. A line that is only a link, under a sentence, makes
+ * that sentence the link ("Saw your post about @brand." opens the post). Any
+ * other link shows as its short address. Pure.
+ */
+export function asHtml(text) {
+  const paragraphs = String(text || "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  return paragraphs.map((paragraph) => {
+    const lines = paragraph.split("\n").map((l) => l.trim());
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      const next = lines[i + 1];
+      if (next && URL_ONLY.test(next) && lines[i].search(URL_IN_TEXT) === -1) {
+        const [, words, end] = lines[i].match(/^(.*?)([.!?:]*)$/);
+        out.push(`<a href="${escapeHtml(next)}">${escapeHtml(words)}</a>${escapeHtml(end)}`);
+        i += 1;
+      } else {
+        out.push(lineHtml(lines[i]));
+      }
+    }
+    return `<p style="margin:0 0 1em">${out.join("<br>")}</p>`;
+  }).join("\n");
+}
+
 /** What is handed to the mail provider for one step. Pure, so it can be read in a test. */
 export function buildMessage(row, stepIndex, composed) {
   const from = MAILBOXES[row.audience];
   const name = String(row.variables?.senderName || "").trim();
   const messageId = `<${crypto.randomUUID()}@linkable.link>`;
   const earlier = (row.thread || []).map((t) => t.message_id).filter(Boolean);
-  const target = sandboxRecipient({ to: row.to_email, subject: composed.subject });
   const unsubscribe = `${publicBase()}/api/out/unsubscribe?t=${row.unsub_token}`;
   const headers = {
     "Message-ID": messageId,
@@ -331,11 +379,18 @@ export function buildMessage(row, stepIndex, composed) {
     messageId,
     payload: {
       from: name ? `${name} <${from}>` : from,
-      to: [target.to],
+      // Always the person themselves. OUTBOUND_TEST_RECIPIENT, which turns the
+      // older senders into test email, is deliberately not read here: on
+      // 23 Nov 2026 it sent the first day's emails to the tester instead of
+      // to anyone. This sender is switched on, off and paused from the team
+      // settings, and by nothing else.
+      to: [row.to_email],
       reply_to: replyTo(),
-      subject: target.subject,
-      // Text only: one person writing to another, in the reader's own font.
+      subject: composed.subject,
       text: composed.text,
+      // The same words, with links as words: a bare address is rewritten by
+      // some mail programs into several lines of tracking link.
+      html: asHtml(composed.text),
       headers,
     },
   };

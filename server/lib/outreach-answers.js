@@ -16,8 +16,7 @@ import { fileURLToPath } from "node:url";
 import { supabase } from "./supabase.js";
 import { claudeMessage, cachedSystem } from "./anthropic.js";
 import { facts } from "./facts.js";
-import { MAILBOXES, SEQUENCES, compose } from "./direct-outreach.js";
-import { sandboxRecipient } from "./outbound-sandbox.js";
+import { MAILBOXES, SEQUENCES, asHtml, compose } from "./direct-outreach.js";
 
 const TABLE = "prospector_outbox";
 const EMAILS = "prospector_outbox_emails";
@@ -256,7 +255,6 @@ export function answerMessage(row, reply, at) {
   const name = String(row.variables?.signature || "").trim();
   const sender = String(row.variables?.senderName || "").trim();
   const messageId = `<${crypto.randomUUID()}@linkable.link>`;
-  const target = sandboxRecipient({ to: row.to_email, subject });
   const refs = [...(row.thread || []).map((t) => t.message_id), ...(row.conversation || []).map((m) => m.message_id)].filter(Boolean);
   const headers = { "Message-ID": messageId };
   if (theirs.message_id) headers["In-Reply-To"] = theirs.message_id;
@@ -267,10 +265,12 @@ export function answerMessage(row, reply, at) {
     subject,
     payload: {
       from: sender ? `${sender} <${from}>` : from,
-      to: [target.to],
+      // Always the person themselves; see buildMessage in direct-outreach.js.
+      to: [row.to_email],
       reply_to: replyTo(),
-      subject: target.subject,
+      subject,
       text: name ? `${reply}\n\n${name}` : reply,
+      html: asHtml(name ? `${reply}\n\n${name}` : reply),
       headers,
       scheduled_at: new Date(at).toISOString(),
     },
