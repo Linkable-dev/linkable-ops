@@ -59,43 +59,104 @@ function Figure({ label, value, note, color }) {
   );
 }
 
-function Mailbox({ audience, box }) {
+// The numbers that say whether outreach is working, both mailboxes together,
+// each with how brands and creators split.
+function KeyNumbers({ boxes, cost }) {
   const { theme } = useTheme();
-  const reached = box.people_emailed;
-  const healthy = !box.trouble;
+  const sum = (key) => boxes.brand[key] + boxes.creator[key];
+  const emailed = sum("people_emailed");
+  const tiles = [
+    { key: "people_emailed", label: "People emailed", note: "got at least one email" },
+    { key: "opened", label: "Opened", rate: true },
+    { key: "replied", label: "Replied", rate: true, color: theme.success },
+    { key: "interested", label: "Interested", rate: true, color: theme.success },
+    { key: "signed_up", label: "Signed up", rate: true, color: theme.success },
+    { key: "activated", label: "Used it", note: "pitch sent or campaign live", color: theme.success },
+  ];
+  return (
+    <Card style={{ padding: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        {tiles.map((t) => {
+          const value = sum(t.key);
+          return (
+            <div key={t.key} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: "14px 16px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textMuted }}>{t.label}</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
+                <span style={{ fontSize: 32, lineHeight: 1, fontWeight: 700, color: value && t.color ? t.color : theme.text, fontVariantNumeric: "tabular-nums" }}>{value}</span>
+                {t.rate && emailed > 0 ? <span style={{ fontSize: 15, fontWeight: 600, color: theme.textMid, fontVariantNumeric: "tabular-nums" }}>{pct(value, emailed)}</span> : null}
+              </div>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 8, lineHeight: 1.5 }}>
+                Brands {boxes.brand[t.key]} · Creators {boxes.creator[t.key]}
+                {t.note ? <div>{t.note}</div> : t.rate ? <div>of people emailed</div> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12.5, color: theme.textMuted, marginTop: 14, lineHeight: 1.5 }}>
+        Since the first email. An open can be a mail filter, so read replies and sign-ups first.
+        {" "}Replies answered automatically: {sum("answered_by_itself")}{cost > 0 ? ` ($${cost.toFixed(2)} so far)` : ""}. Passed to you: {sum("needs_person")}.
+      </div>
+    </Card>
+  );
+}
+
+// How far through today's allowance each mailbox is, and what is queued behind it.
+function Today({ boxes }) {
+  const { theme } = useTheme();
   return (
     <Card style={{ flex: "1 1 420px", minWidth: 0, marginBottom: 0, padding: 20 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>{WHO[audience]}</div>
-        <div style={{ fontSize: 13, color: theme.textMuted }}>from {box.mailbox}</div>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "18px 22px", marginTop: 16 }}>
-        <Figure label="Waiting to start" value={box.waiting} />
-        <Figure label="In progress" value={box.in_progress} />
-        <Figure label="New today" value={`${box.started_today} of ${box.allowed_new}`}
-                note={box.allowed_new < 20 ? "grows each week to 20" : null} />
-        <Figure label="Emails sent" value={box.emails_sent + box.answers_sent}
-                note={box.emails_timed ? `${box.emails_timed} timed to leave` : `${box.sent_today} today`} />
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "18px 22px", marginTop: 18, paddingTop: 16, borderTop: `1px solid ${theme.border}` }}>
-        <Figure label="People emailed" value={reached} />
-        <Figure label="Opened" value={box.opened} note={pct(box.opened, reached)} />
-        <Figure label="Replied" value={box.replied} note={pct(box.replied, reached)} color={box.replied ? theme.success : null} />
-        <Figure label="Interested" value={box.interested} note={pct(box.interested, reached)} />
-        <Figure label="Signed up" value={box.signed_up} note={pct(box.signed_up, reached)} />
-        <Figure label="Used it" value={box.activated} note={audience === "creator" ? "sent a pitch" : "campaign live"} />
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "18px 22px", marginTop: 18, paddingTop: 16, borderTop: `1px solid ${theme.border}` }}>
-        <Figure label="Answered by itself" value={box.answered_by_itself} />
-        <Figure label="Needs you" value={box.needs_person} color={box.needs_person ? theme.warning : null} />
-        <Figure label="Unsubscribed" value={box.unsubscribed + box.marked_spam} />
-        <Figure label="Bounced" value={box.bounced} color={box.bounced ? theme.danger : null} />
-      </div>
-      <div style={{ fontSize: 12.5, marginTop: 16, color: healthy ? theme.textMid : theme.danger, lineHeight: 1.5 }}>
-        {healthy
-          ? `Last 7 days: ${box.week_bounced} of ${box.week_people} bounced, ${box.week_complaints} marked as spam. Sending pauses itself above 4 in 100 bounced or at 2 spam reports.`
-          : box.trouble}
-      </div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Today</div>
+      {Object.entries(boxes).map(([audience, box]) => {
+        const part = box.allowed_new > 0 ? Math.min(1, box.started_today / box.allowed_new) : 0;
+        return (
+          <div key={audience} style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: theme.text }}>{WHO[audience]}</span>
+              <span style={{ fontSize: 12.5, color: theme.textMuted, overflowWrap: "anywhere" }}>{box.mailbox}</span>
+              <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 700, color: theme.text, fontVariantNumeric: "tabular-nums" }}>
+                {box.started_today} of {box.allowed_new} new people
+              </span>
+            </div>
+            <div style={{ height: 8, borderRadius: 4, background: theme.border, marginTop: 8, overflow: "hidden" }}>
+              <div style={{ width: `${part * 100}%`, height: "100%", borderRadius: 4, background: audience === "brand" ? theme.accent : theme.success }} />
+            </div>
+            <div style={{ fontSize: 12.5, color: theme.textMid, marginTop: 8, lineHeight: 1.5 }}>
+              {box.emails_timed} timed to leave · {box.waiting} waiting to start · {box.in_progress} in follow-up
+              {box.allowed_new < 20 ? " · the daily limit grows each week to 20" : ""}
+            </div>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
+// What would get a mailbox blocked, against the limits that pause sending.
+function Health({ boxes }) {
+  const { theme } = useTheme();
+  return (
+    <Card style={{ flex: "1 1 420px", minWidth: 0, marginBottom: 0, padding: 20 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Mailbox health, last 7 days</div>
+      {Object.entries(boxes).map(([audience, box]) => {
+        const ok = !box.trouble;
+        return (
+          <div key={audience} style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: ok ? theme.success : theme.danger, flexShrink: 0 }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: theme.text }}>{WHO[audience]}</span>
+              <span style={{ fontSize: 13, color: ok ? theme.textMid : theme.danger }}>{ok ? "Healthy" : "In trouble"}</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 26px", marginTop: 10 }}>
+              <Figure label="Bounced" value={`${box.week_bounced} of ${box.week_people}`} note="pauses above 4 in 100" color={box.week_bounced ? theme.danger : null} />
+              <Figure label="Spam reports" value={box.week_complaints} note="pauses at 2" color={box.week_complaints ? theme.danger : null} />
+              <Figure label="Unsubscribed" value={box.unsubscribed + box.marked_spam} note="all time" />
+              {box.failed > 0 && <Figure label="Could not send" value={box.failed} color={theme.danger} />}
+            </div>
+            {!ok && <div style={{ fontSize: 12.5, color: theme.danger, marginTop: 8, lineHeight: 1.5 }}>{box.trouble}</div>}
+          </div>
+        );
+      })}
     </Card>
   );
 }
@@ -372,9 +433,11 @@ export default function OutreachPage() {
         </div>
       </Card>
 
+      <KeyNumbers boxes={data.boxes} cost={data.answer_cost_usd} />
+
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-        <Mailbox audience="brand" box={data.boxes.brand} />
-        <Mailbox audience="creator" box={data.boxes.creator} />
+        <Today boxes={data.boxes} />
+        <Health boxes={data.boxes} />
       </div>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
@@ -421,9 +484,6 @@ export default function OutreachPage() {
       <Card style={{ padding: 20 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Emails a day, last two weeks</div>
-          {data.answer_cost_usd > 0 && (
-            <div style={{ fontSize: 12.5, color: theme.textMuted }}>Automatic answers have cost ${data.answer_cost_usd.toFixed(2)} so far.</div>
-          )}
         </div>
         <Days days={data.days} />
       </Card>
@@ -447,7 +507,7 @@ export default function OutreachPage() {
                     <td style={{ padding: "8px", color: theme.text, whiteSpace: "nowrap" }}>{WHO[r.audience]}, {(WORDING[r.sequence] || r.sequence).toLowerCase()}</td>
                     {[r.people, r.reached, `${r.opened ?? 0}${r.reached ? ` (${pct(r.opened ?? 0, r.reached)})` : ""}`, `${r.replied}${r.reached ? ` (${pct(r.replied, r.reached)})` : ""}`, r.interested ?? 0, r.answered_by_itself ?? 0,
                       r.passed_to_a_person ?? 0, r.unsubscribed + r.marked_spam, r.bounced, r.signed_up, r.activated].map((v, i) => (
-                      <td key={i} style={{ padding: "8px", textAlign: "right", color: theme.text }}>{v}</td>
+                      <td key={i} style={{ padding: "8px", textAlign: "right", color: theme.text, whiteSpace: "nowrap" }}>{v}</td>
                     ))}
                   </tr>
                 ))}
