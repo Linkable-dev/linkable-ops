@@ -27,7 +27,7 @@ test("the numbers add up, and an email not yet gone is counted as timed, not sen
   const people = [
     { audience: "brand", status: "active", step: 0 },
     { audience: "brand", status: "active", step: 1, first_sent_at: "2026-11-23T09:20:00Z" },
-    { audience: "brand", status: "replied", step: 1, first_sent_at: "2026-11-23T09:40:00Z", reply_at: "2026-11-23T15:00:00Z", intent: "interested", auto_answers: 1, answer_cost_usd: 0.012 },
+    { audience: "brand", status: "replied", step: 1, first_sent_at: "2026-11-23T09:40:00Z", reply_at: "2026-11-23T15:00:00Z", intent: "interested", auto_answers: 1, answer_cost_usd: 0.012, opened_at: "2026-11-23T09:44:00Z", clicked_at: "2026-11-23T09:45:00Z" },
     { audience: "brand", status: "replied", step: 1, first_sent_at: "2026-11-23T10:00:00Z", reply_at: "2026-11-24T08:00:00Z", needs_person: true, answer_cost_usd: 0.004 },
     { audience: "creator", status: "bounced", step: 1, first_sent_at: "2026-11-23T09:30:00Z" },
     { audience: "creator", status: "replied", step: 2, first_sent_at: "2026-11-23T09:30:00Z", reply_at: "2026-11-24T09:00:00Z", signed_up_at: "2026-11-24T10:00:00Z", activated_at: "2026-11-24T11:00:00Z" },
@@ -46,6 +46,7 @@ test("the numbers add up, and an email not yet gone is counted as timed, not sen
   assert.deepEqual([b.total, b.waiting, b.in_progress, b.replied, b.needs_person], [4, 1, 1, 2, 1]);
   assert.deepEqual([b.emails_sent, b.answers_sent, b.emails_timed, b.emails_delivered], [2, 1, 1, 3]);
   assert.deepEqual([b.interested, b.answered_by_itself, b.people_emailed], [1, 1, 3]);
+  assert.deepEqual([b.opened, b.clicked], [1, 1], "people who opened, not how many times");
   const c = boxes.creator;
   assert.deepEqual([c.total, c.bounced, c.replied, c.signed_up, c.activated, c.emails_bounced], [2, 1, 1, 1, 1, 1]);
   assert.equal(answer_cost_usd, 0.02);

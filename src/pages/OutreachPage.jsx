@@ -33,8 +33,8 @@ const INTENT = {
 };
 const STAGE_OPTIONS = [
   { value: "", label: "Everyone" },
-  ...["waiting", "in_progress", "replied", "needs_person", "interested", "signed_up", "finished", "unsubscribed", "bounced"]
-    .map((v) => ({ value: v, label: { interested: "Interested", signed_up: "Signed up" }[v] || STAGE[v] })),
+  ...["waiting", "in_progress", "opened", "replied", "needs_person", "interested", "signed_up", "finished", "unsubscribed", "bounced"]
+    .map((v) => ({ value: v, label: { opened: "Opened", interested: "Interested", signed_up: "Signed up" }[v] || STAGE[v] })),
 ];
 
 const clock = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -79,6 +79,7 @@ function Mailbox({ audience, box }) {
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "18px 22px", marginTop: 18, paddingTop: 16, borderTop: `1px solid ${theme.border}` }}>
         <Figure label="People emailed" value={reached} />
+        <Figure label="Opened" value={box.opened} note={pct(box.opened, reached)} />
         <Figure label="Replied" value={box.replied} note={pct(box.replied, reached)} color={box.replied ? theme.success : null} />
         <Figure label="Interested" value={box.interested} note={pct(box.interested, reached)} />
         <Figure label="Signed up" value={box.signed_up} note={pct(box.signed_up, reached)} />
@@ -207,7 +208,8 @@ function Conversation({ id, onClose }) {
                   {e.cancelled_at ? "called back before it left"
                     : e.bounced_at ? `bounced${e.bounce_reason ? `: ${e.bounce_reason}` : ""}`
                     : e.complained_at ? "marked as spam"
-                    : e.delivered_at ? "delivered"
+                    : e.opened_at ? `delivered, opened${e.opens > 1 ? ` ${e.opens} times` : ""}${e.clicked_at ? ", link clicked" : ""}`
+                    : e.delivered_at ? "delivered, not opened"
                     : new Date(e.scheduled_for) > new Date() ? "timed to leave" : "sent, delivery not confirmed yet"}
                 </div>
               ))}
@@ -287,6 +289,7 @@ function People({ onOpen, refreshKey }) {
                     </td>
                     <td style={td}>
                       <Tag color={stageColor(theme, r.stage)}>{STAGE[r.stage]}</Tag>
+                      {r.opened_at && r.stage === "in_progress" ? <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>Opened{r.clicked_at ? ", clicked the link" : ""}</div> : null}
                       {r.intent ? <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>{INTENT[r.intent] || r.intent}</div> : null}
                       {r.signed_up_at ? <div style={{ fontSize: 12, color: theme.success, marginTop: 4 }}>Signed up{r.activated_at ? " and used it" : ""}</div> : null}
                     </td>
@@ -432,7 +435,7 @@ export default function OutreachPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
               <thead>
                 <tr>
-                  {["Week of", "Who", "People", "Reached", "Replied", "Interested", "Answered by itself", "Needed a person", "Unsubscribed", "Bounced", "Signed up", "Used it"].map((h, i) => (
+                  {["Week of", "Who", "People", "Reached", "Opened", "Replied", "Interested", "Answered by itself", "Needed a person", "Unsubscribed", "Bounced", "Signed up", "Used it"].map((h, i) => (
                     <th key={h} style={{ ...label, textAlign: i < 2 ? "left" : "right", padding: "6px 8px", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -442,7 +445,7 @@ export default function OutreachPage() {
                   <tr key={`${r.week}-${r.sequence}`} style={{ borderTop: `1px solid ${theme.border}` }}>
                     <td style={{ padding: "8px", color: theme.textMid, whiteSpace: "nowrap" }}>{new Date(`${r.week}T12:00:00Z`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</td>
                     <td style={{ padding: "8px", color: theme.text, whiteSpace: "nowrap" }}>{WHO[r.audience]}, {(WORDING[r.sequence] || r.sequence).toLowerCase()}</td>
-                    {[r.people, r.reached, `${r.replied}${r.reached ? ` (${pct(r.replied, r.reached)})` : ""}`, r.interested ?? 0, r.answered_by_itself ?? 0,
+                    {[r.people, r.reached, `${r.opened ?? 0}${r.reached ? ` (${pct(r.opened ?? 0, r.reached)})` : ""}`, `${r.replied}${r.reached ? ` (${pct(r.replied, r.reached)})` : ""}`, r.interested ?? 0, r.answered_by_itself ?? 0,
                       r.passed_to_a_person ?? 0, r.unsubscribed + r.marked_spam, r.bounced, r.signed_up, r.activated].map((v, i) => (
                       <td key={i} style={{ padding: "8px", textAlign: "right", color: theme.text }}>{v}</td>
                     ))}

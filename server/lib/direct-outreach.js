@@ -764,6 +764,20 @@ export async function onStop({ email, reason }) {
 export async function onEmailEvent({ resendId, type, data = {}, at = new Date() }) {
   if (!resendId) return null;
   const stamp = new Date(at).toISOString();
+  // Opens and clicks come more than once: the first time is kept, the rest counted.
+  const seen = { "email.opened": ["opened_at", "opens"], "email.clicked": ["clicked_at", "clicks"] }[type];
+  if (seen) {
+    const [first, count] = seen;
+    const { data: found, error: readError } = await supabase.from(EMAILS).select(`id,outbox_id,${first},${count}`).eq("resend_id", resendId).limit(1);
+    if (readError) throw new Error(readError.message);
+    const email = found?.[0];
+    if (!email) return null;
+    const { error } = await supabase.from(EMAILS).update({ [first]: email[first] || stamp, [count]: (email[count] || 0) + 1 }).eq("id", email.id);
+    if (error) throw new Error(error.message);
+    // On the person too, so the list can be filtered by it. First time only.
+    await supabase.from(TABLE).update({ [first]: stamp }).eq("id", email.outbox_id).is(first, null);
+    return { id: email.id, outbox_id: email.outbox_id };
+  }
   const patch = {
     "email.delivered": { delivered_at: stamp },
     "email.bounced": { bounced_at: stamp, bounce_reason: String(data?.bounce?.message || data?.reason || "bounced").slice(0, 500) },
