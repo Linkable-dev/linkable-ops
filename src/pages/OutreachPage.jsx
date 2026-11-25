@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
+import { useVisibleInterval } from "../lib/useVisibleInterval";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Tag } from "../components/ui/Tag";
@@ -390,11 +391,8 @@ export default function OutreachPage() {
   const load = useCallback(() => {
     api.getOutreach().then((d) => { setData(d); setError(""); }).catch((e) => setError(e.message));
   }, []);
-  useEffect(() => {
-    load();
-    const t = setInterval(() => { load(); setTick((n) => n + 1); }, 60000);
-    return () => clearInterval(t);
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+  useVisibleInterval(() => { load(); setTick((n) => n + 1); }, 60000);
 
   if (error && !data) return <Card><div style={{ color: theme.danger, fontSize: 14 }}>{error}</div></Card>;
   if (!data) return <Card><SkeletonListRows rows={6} /></Card>;

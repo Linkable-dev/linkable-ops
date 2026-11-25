@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
+import { useVisibleInterval } from "../lib/useVisibleInterval";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
@@ -156,11 +157,7 @@ export default function InstagramDmPage() {
   // While a search runs, look again every 30 seconds so its brands arrive
   // without a reload, and the button comes back when it is done.
   const searching = Boolean(meta?.search?.running);
-  useEffect(() => {
-    if (!searching) return undefined;
-    const timer = setInterval(() => load(true), 30_000);
-    return () => clearInterval(timer);
-  }, [searching, load]);
+  useVisibleInterval(() => load(true), 30_000, searching);
 
   const [finding, setFinding] = useState(false);
   const [findProblem, setFindProblem] = useState(null);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api } from "../lib/api";
+import { useVisibleInterval } from "../lib/useVisibleInterval";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
@@ -243,11 +244,7 @@ export default function EmailPage() {
   }, []);
   useEffect(() => { loadSearch(); }, [loadSearch]);
   const searching = Boolean(search?.running);
-  useEffect(() => {
-    if (!searching) return undefined;
-    const timer = setInterval(() => { loadSearch(); load(true); }, 30_000);
-    return () => clearInterval(timer);
-  }, [searching, loadSearch, load]);
+  useVisibleInterval(() => { loadSearch(); load(true); }, 30_000, searching);
   async function findBrands() {
     setFinding(true);
     setFindProblem(null);

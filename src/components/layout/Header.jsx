@@ -77,7 +77,7 @@ export default function Header() {
       setAlertCount({ total: live.length, danger: live.filter((a) => a.severity === "danger").length });
     }).catch(() => {});
     refresh();
-    const t = setInterval(refresh, 5 * 60_000);
+    const t = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 5 * 60_000);
     window.addEventListener(ALERTS_CHANGED, refresh);
     return () => { alive = false; clearInterval(t); window.removeEventListener(ALERTS_CHANGED, refresh); };
   }, [target, onAlertsPage]);

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { api, friendlyDate } from "../../lib/api";
+import { useVisibleInterval } from "../../lib/useVisibleInterval";
 import { Card } from "../../components/ui/Card";
 import { Btn } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
@@ -211,10 +212,7 @@ export default function PitchBrandsPage() {
     finally { setRequestsLoaded(true); }
   }, [loadBrands]);
   useEffect(() => { loadRequests(); }, [loadRequests]);
-  useEffect(() => {
-    const id = setInterval(() => { if (waitingRef.current) loadRequests(); }, POLL_MS);
-    return () => clearInterval(id);
-  }, [loadRequests]);
+  useVisibleInterval(() => { if (waitingRef.current) loadRequests(); }, POLL_MS);
 
   const submit = async (e) => {
     e?.preventDefault();
