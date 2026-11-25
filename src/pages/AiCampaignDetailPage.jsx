@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyDate } from "../lib/api";
+import { useVisibleInterval } from "../lib/useVisibleInterval";
 import { Card } from "../components/ui/Card";
 import { Btn } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
@@ -1515,11 +1516,7 @@ function DiscoveryRunsPanel({ campaign, theme }) {
 
   // Poll every 5s while any run is still 'running' so progress counts feel live.
   const anyRunning = runs.some((r) => r.status === "running" || r.status === "pending");
-  useEffect(() => {
-    if (!anyRunning) return;
-    const t = setInterval(reload, 5000);
-    return () => clearInterval(t);
-  }, [anyRunning, reload]);
+  useVisibleInterval(reload, 5000, anyRunning);
 
   async function stop(runId) {
     try { await api.stopOutboundDiscoveryRun(runId); reload(); }
