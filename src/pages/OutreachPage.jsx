@@ -26,7 +26,7 @@ const WORDING = {
 const STAGE = {
   waiting: "Waiting to start", in_progress: "In progress", finished: "Finished, no reply",
   replied: "Replied", needs_person: "Needs you", unsubscribed: "Unsubscribed",
-  marked_spam: "Marked as spam", bounced: "Bounced", failed: "Could not send",
+  marked_spam: "Marked as spam", bounced: "Bounced", failed: "Could not send", skipped: "Not sent (wrong address or stale)",
 };
 const INTENT = {
   interested: "Interested", question: "Asked a question", not_interested: "Not interested",
@@ -34,7 +34,7 @@ const INTENT = {
 };
 const STAGE_OPTIONS = [
   { value: "", label: "Everyone" },
-  ...["waiting", "in_progress", "opened", "replied", "needs_person", "interested", "signed_up", "finished", "unsubscribed", "bounced"]
+  ...["waiting", "in_progress", "opened", "replied", "needs_person", "interested", "signed_up", "finished", "unsubscribed", "bounced", "skipped"]
     .map((v) => ({ value: v, label: { opened: "Opened", interested: "Interested", signed_up: "Signed up" }[v] || STAGE[v] })),
 ];
 
@@ -153,6 +153,7 @@ function Health({ boxes }) {
               <Figure label="Spam reports" value={box.week_complaints} note="pauses at 2" color={box.week_complaints ? theme.danger : null} />
               <Figure label="Unsubscribed" value={box.unsubscribed + box.marked_spam} note="all time" />
               {box.failed > 0 && <Figure label="Could not send" value={box.failed} color={theme.danger} />}
+              {box.skipped > 0 && <Figure label="Not sent (wrong address or stale)" value={box.skipped} />}
             </div>
             {!ok && <div style={{ fontSize: 12.5, color: theme.danger, marginTop: 8, lineHeight: 1.5 }}>{box.trouble}</div>}
           </div>

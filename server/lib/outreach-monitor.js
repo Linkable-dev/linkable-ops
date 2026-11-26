@@ -35,6 +35,7 @@ export function stage(row) {
   if (row.status === "bounced") return "bounced";
   if (row.status === "unsubscribed") return row.stop_reason === "complaint" ? "marked_spam" : "unsubscribed";
   if (row.status === "failed") return "failed";
+  if (row.status === "skipped") return "skipped";
   if (row.status === "replied") return row.needs_person ? "needs_person" : "replied";
   if (row.status === "done") return "finished";
   return row.step > 0 ? "in_progress" : "waiting";
@@ -42,7 +43,7 @@ export function stage(row) {
 
 const emptyBox = (mailbox) => ({
   mailbox, total: 0, waiting: 0, in_progress: 0, finished: 0, replied: 0, needs_person: 0, interested: 0,
-  answered_by_itself: 0, unsubscribed: 0, marked_spam: 0, bounced: 0, failed: 0, signed_up: 0, activated: 0,
+  answered_by_itself: 0, unsubscribed: 0, marked_spam: 0, bounced: 0, failed: 0, skipped: 0, signed_up: 0, activated: 0,
   opened: 0, clicked: 0,
   emails_sent: 0, emails_timed: 0, emails_delivered: 0, emails_bounced: 0, answers_sent: 0, people_emailed: 0,
 });
@@ -160,6 +161,7 @@ const STAGE_FILTERS = {
   interested: (q) => q.eq("intent", "interested"),
   unsubscribed: (q) => q.eq("status", "unsubscribed"),
   bounced: (q) => q.eq("status", "bounced"),
+  skipped: (q) => q.eq("status", "skipped"),
   signed_up: (q) => q.not("signed_up_at", "is", null),
 };
 export const STAGES = Object.keys(STAGE_FILTERS);
