@@ -12,6 +12,7 @@
 
 import crypto from "node:crypto";
 import { supabase } from "./supabase.js";
+import { mendVariables, refusal } from "./outreach-quality.js";
 
 const TABLE = "prospector_outbox";
 // One row per email, with what happened to it. Kept for analysis.
@@ -258,7 +259,8 @@ export function compose(row, stepIndex) {
   const step = sequence.steps[stepIndex];
   if (!step) return { problem: `"${row.sequence}" has no step ${stepIndex + 1}` };
 
-  const variables = row.variables || {};
+  // Greeting checked and known broken sentences mended (outreach-quality.js).
+  const variables = mendVariables(row);
   const body = fill(step.body.join("\n\n"), variables);
   let subject;
   let missing = body.missing;
@@ -610,9 +612,21 @@ export async function sendDue({ limit = 40, now = new Date(), dryRun = false, pa
     .order("next_at", { ascending: true })
     .limit(400);
   if (error) throw new Error(error.message);
-  out.due = rows.length;
 
-  const picked = choose(rows, state, now, limit);
+  // People who must not get another email (outreach-quality.js): taken out
+  // before the run's share is worked out, so they do not use up its places.
+  out.skipped = 0;
+  const sendable = [];
+  for (const row of rows) {
+    const why = refusal(row, now);
+    if (!why) { sendable.push(row); continue; }
+    out.skipped += 1;
+    out.log.push(`${row.to_email}: not sent, ${why}`);
+    if (!dryRun) await update(row.id, { status: "skipped", stop_reason: why });
+  }
+  out.due = sendable.length;
+
+  const picked = choose(sendable, state, now, limit);
   out.held = picked.held;
 
   // Times per mailbox, so each one's emails are evenly apart whatever the
