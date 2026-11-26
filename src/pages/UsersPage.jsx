@@ -139,7 +139,10 @@ const CREATOR_FILTER_BAR = [
     ["last:7", "Signed in this week"], ["last:30", "Signed in this month"], ["before:30", "Not signed in for 30 days"], ["empty", "Never signed in"],
   ] },
   { key: "photo", label: "Photo", any: "Photo or not", width: 140, options: [["yes", "Has a photo"], ["no", "No photo"]] },
-  { key: "status", label: "Status", any: "Any status", width: 140, options: [["active", "Active"], ["ruled_out", "Ruled out"]] },
+  { key: "status", label: "Status", any: "Any status", width: 190, options: [
+    ["active", "Active"], ["ruled_out", "Ruled out"],
+    ["signed_up", "Signed up"], ["invited", "Invited, never signed up"],
+  ] },
   { key: "gate", label: "Checks", any: "Any checks", width: 170, options: [["held", "On the list (checks failed)"], ["approved", "Approved by us"]] },
 ];
 
@@ -894,6 +897,7 @@ function renderUserCell(key, row, ctx) {
                 || row.instagram_name
                 || <span style={{ color: theme.textMuted, fontStyle: "italic" }}>(unnamed)</span>}
             </span>
+            {row.never_signed_up && <InvitedPill />}
             {row.ops_hidden && <HiddenPill title="Hidden from this page and from Discover. Unhide puts them back in both." />}
             {row.gate_held && <GatePill row={row} />}
           </span>
@@ -1098,8 +1102,13 @@ function CreatorCard({ row, theme, busy, disqualifyBusy, hideBusy, approveBusy, 
         {showImg
           ? <img src={avatar} alt="" draggable="false" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setImgFailed(true)} />
           : initialsFor(row, "creator")}
-        {(row.disqualified_at || row.ops_hidden || row.gate_held || row.gate_approved_at) && (
+        {(row.never_signed_up || row.disqualified_at || row.ops_hidden || row.gate_held || row.gate_approved_at) && (
           <div style={{ position: "absolute", left: 8, top: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {row.never_signed_up && (
+              <span title={INVITED_TITLE} style={{ ...cardBadge, background: "#475569" }}>
+                Invited, never signed up
+              </span>
+            )}
             {row.gate_held && (
               <span title={gateTitle(row)} style={{ ...cardBadge, background: "#6D28D9" }}>
                 On the list
@@ -1436,6 +1445,30 @@ function hexToRgba(hex, a) {
 }
 
 // Held back by the main app's sign up checks (on "You're on the list").
+// A creator account the main app made from a brand's invite or our outreach,
+// never taken up (never_signed_up). Slate: not a problem to fix, just not a
+// real sign up. Opening it lands on the sign up's last step ("Almost done"),
+// which is not where she stopped: she never started.
+const INVITED_TITLE = "Made for her by a brand's invite or our outreach. She has never signed up, so opening the account shows the sign up's last step: she didn't stop there.";
+
+function InvitedPill() {
+  const color = "#475569";
+  return (
+    <span
+      title={INVITED_TITLE}
+      style={{
+        display: "inline-flex", alignItems: "center", flexShrink: 0,
+        padding: "1px 6px", borderRadius: 999,
+        fontSize: 9, fontWeight: 700, lineHeight: 1.5, letterSpacing: 0.3,
+        color, background: hexToRgba(color, 0.12),
+        border: `1px solid ${hexToRgba(color, 0.28)}`,
+      }}
+    >
+      INVITED, NEVER SIGNED UP
+    </span>
+  );
+}
+
 function GatePill({ row }) {
   const color = "#6D28D9";
   return (
