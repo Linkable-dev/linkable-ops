@@ -910,6 +910,14 @@ const CREATOR_NICHES_SQL =
   `string_to_array(UPPER(REPLACE(COALESCE(i.niche, ''), ' ', '')), '|')`;
 // Read through to_jsonb: the column is not on every database (see listCreators).
 const CREATOR_RULED_OUT_SQL = `(to_jsonb(i) ->> 'disqualified_at') IS NOT NULL`;
+// Never signed up: an account the main app made for her, from a brand's invite
+// or our outreach, that she never took up: users.status 1 (the main app's
+// SignedUpUserSQL rule) and no sign in of her own (sig, the lateral in
+// listCreators). A real sign up that stopped at its first step is status 1 too,
+// but she signed in. The made-for-her account has a name and a handle, so
+// opening it lands on the sign up's last step and reads like a sign up
+// abandoned there.
+const CREATOR_NEVER_SIGNED_UP_SQL = `(COALESCE(u.status, 0) = 1 AND sig.last_sign_in IS NULL)`;
 // Taken off this page by an operator (sql/ops_hidden_users.sql).
 const CREATOR_OPS_HIDDEN_SQL = `EXISTS (SELECT 1 FROM ops_hidden_users oh WHERE oh.user_id = u.id)`;
 // Held back by the main app's sign up checks (postgres.CreatorGateHiddenSQL):
@@ -950,7 +958,12 @@ const CREATOR_FILTERS = {
   },
   engagement_rate: numberFilter(CREATOR_ER_SQL),
   photo:  enumFilter({ yes: CREATOR_HAS_PHOTO_SQL, no: `NOT ${CREATOR_HAS_PHOTO_SQL}` }),
-  status: enumFilter({ ruled_out: CREATOR_RULED_OUT_SQL, active: `NOT ${CREATOR_RULED_OUT_SQL}` }),
+  status: enumFilter({
+    ruled_out: CREATOR_RULED_OUT_SQL,
+    active: `NOT ${CREATOR_RULED_OUT_SQL}`,
+    invited: CREATOR_NEVER_SIGNED_UP_SQL,
+    signed_up: `NOT ${CREATOR_NEVER_SIGNED_UP_SQL}`,
+  }),
   gate:   enumFilter({ held: CREATOR_GATE_HELD_SQL, approved: CREATOR_GATE_APPROVED_SQL }),
   // Sent by the page unless Show Hidden is on, like brands.visibility.
   visibility: enumFilter({ visible: `NOT ${CREATOR_OPS_HIDDEN_SQL}`, hidden: CREATOR_OPS_HIDDEN_SQL }),
@@ -1035,6 +1048,7 @@ async function listCreators(query) {
             to_jsonb(i) ->> 'disqualified_at'     AS disqualified_at,
             COALESCE(to_jsonb(i) ->> 'disqualified_reason', '') AS disqualified_reason,
             ${CREATOR_OPS_HIDDEN_SQL} AS ops_hidden,
+            ${CREATOR_NEVER_SIGNED_UP_SQL} AS never_signed_up,
             -- The sign up checks: held back or not, which checks failed, and
             -- whether the team let her in anyway.
             COALESCE(cg.verdict = 'failed' OR (cg.gated AND cg.verdict <> 'passed'), false) AS gate_held,
