@@ -97,6 +97,12 @@ test("a mailbox starts with five new people a day and grows by the week", () => 
   assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-11-30T09:00:00Z")), 10);
   assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-12-07T09:00:00Z")), 15);
   assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2027-03-01T09:00:00Z")), 20);
+  // One week ahead (direct_send_ramp_ahead_weeks = 1, 26 Nov 2026).
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-11-27T15:00:00Z"), 1), 10);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-11-30T09:00:00Z"), 1), 15);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-12-07T09:00:00Z"), 1), 20);
+  assert.equal(newPeopleAllowed(null, monday, 1), 10);
+  assert.equal(newPeopleAllowed("2026-11-23T09:30:00Z", new Date("2026-11-27T15:00:00Z"), "junk"), 5);
 });
 
 test("each run takes its share of what is left today", () => {
