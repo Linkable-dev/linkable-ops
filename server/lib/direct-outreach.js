@@ -430,11 +430,24 @@ const startOfDay = (now) => {
 //    none that writes to a hundred strangers looks like what it would be.
 export const RAMP = [5, 10, 15, 20];
 
-/** How many new people one mailbox may start today. */
-export function newPeopleAllowed(firstEverSentAt, now = new Date()) {
-  if (!firstEverSentAt) return RAMP[0];
-  const weeks = Math.floor((startOfDay(now) - startOfDay(firstEverSentAt)) / (7 * 86400000));
-  return RAMP[Math.max(0, Math.min(weeks, RAMP.length - 1))];
+/** How many new people one mailbox may start today. `aheadWeeks` moves the
+ *  ramp forward by whole weeks (team setting direct_send_ramp_ahead_weeks):
+ *  1 on 26 Nov 2026 took week one from 5 to 10, and every later week moves up
+ *  with it. */
+export function newPeopleAllowed(firstEverSentAt, now = new Date(), aheadWeeks = 0) {
+  const ahead = Math.max(0, Math.floor(Number(aheadWeeks) || 0));
+  const weeks = firstEverSentAt
+    ? Math.floor((startOfDay(now) - startOfDay(firstEverSentAt)) / (7 * 86400000))
+    : 0;
+  return RAMP[Math.max(0, Math.min(weeks + ahead, RAMP.length - 1))];
+}
+
+/** The team setting that moves the ramp forward; 0 when unset or unreadable. */
+async function rampAheadWeeks() {
+  const { data, error } = await supabase.from("prospector_settings").select("value")
+    .eq("key", "direct_send_ramp_ahead_weeks").maybeSingle();
+  if (error || !data) return 0;
+  return Number(data.value) || 0;
 }
 
 // 2. Never in a burst. The job runs at these hours (UTC, vercel.json); each
@@ -543,8 +556,9 @@ export async function standing(now = new Date()) {
     if (row.status === "bounced" && row.updated_at >= since) a.bounced += 1;
     if (row.stop_reason === "complaint" && row.updated_at >= since) a.complaints += 1;
   }
+  const ahead = await rampAheadWeeks();
   for (const a of Object.values(out)) {
-    a.allowed_new = newPeopleAllowed(a.first_ever, now);
+    a.allowed_new = newPeopleAllowed(a.first_ever, now, ahead);
     a.trouble = trouble(a);
   }
   return out;
