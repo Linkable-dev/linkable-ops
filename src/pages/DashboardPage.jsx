@@ -4,6 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { api, friendlyNumber } from "../lib/api";
 import { Card } from "../components/ui/Card";
 import { Skeleton, SkeletonStatGrid, SkeletonChartCard, SkeletonBars } from "../components/ui/Skeleton";
+import { SignupFunnel } from "../components/dashboard/SignupFunnel";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -132,6 +133,9 @@ export default function DashboardPage() {
         </Card>
 
       </div>
+
+      {/* Creator sign up, step by step: loads on its own, by period. */}
+      <SignupFunnel />
 
       {/* Activity Trends */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>

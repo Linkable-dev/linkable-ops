@@ -5,6 +5,7 @@ import {
   cardPlanAmountSql, cardPlanTierSql, subscriptionLateral,
 } from "../lib/mainAppSql.js";
 import { mainAppSchema } from "../lib/mainAppSchema.js";
+import { signupFunnel, signupFunnelStopped, funnelDays } from "../lib/signup-funnel.js";
 
 export function analyticsRoutes() {
   const router = express.Router();
@@ -289,6 +290,30 @@ export function analyticsRoutes() {
   // marketplace. The metrics did not, so a hidden test store on a $199 plan was
   // counted as a quarter of MRR.
   const BRAND_ACTIVE = `u.role = 2 AND u.deleted = 'infinity'::timestamptz AND b.deleted = '-infinity'::timestamptz AND COALESCE(b.hidden, false) = false`;
+  // Creator sign up, step by step (lib/signup-funnel.js). Registered before
+  // /:table, which would take the path otherwise.
+  router.get("/signup-funnel", async (req, res) => {
+    try {
+      res.json(await signupFunnel(funnelDays(req.query.days)));
+    } catch (err) {
+      console.error("[ops] signup funnel", err);
+      res.status(500).json({ error: "We couldn't load the sign up funnel. Try again in a moment." });
+    }
+  });
+
+  router.get("/signup-funnel/stopped", async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const out = await signupFunnelStopped(funnelDays(req.query.days), String(req.query.step || ""), limit, offset);
+      if (!out) return res.status(400).json({ error: "That step doesn't exist." });
+      res.json(out);
+    } catch (err) {
+      console.error("[ops] signup funnel stopped", err);
+      res.status(500).json({ error: "We couldn't load who stopped here. Try again in a moment." });
+    }
+  });
+
   router.get("/home", async (req, res) => {
     try {
       // app_subscriptions is the main app's Shopify source-of-truth, but it does

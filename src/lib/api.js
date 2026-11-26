@@ -155,6 +155,10 @@ export const api = {
 
   getOverview: () => request("/analytics/overview"),
   getHome: () => request("/analytics/home"),
+  // Creator sign up funnel (Dashboard): counts per step, and who stopped where.
+  getSignupFunnel: (days) => request(`/analytics/signup-funnel?${buildQs({ days })}`),
+  getSignupFunnelStopped: ({ days, step, limit, offset }) =>
+    request(`/analytics/signup-funnel/stopped?${buildQs({ days, step, limit, offset })}`),
   // Insights: alerts, Brand 360, Home time series, Ask the data, global search
   getAlerts: ({ all } = {}) => request(`/insights/alerts${all ? "?all=1" : ""}`),
   dismissAlerts: (keys, mode = "done", days) => request("/insights/alerts/dismiss", { method: "POST", body: JSON.stringify({ keys, mode, days }) }),
